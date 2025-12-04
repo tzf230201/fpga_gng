@@ -4,50 +4,46 @@ BENCH=no
 MULDIV=no
 COMPRESSED=no
 
-SRCS =  $(wildcard *.c) \
-        $(wildcard *.S)
+SRCS = 	$(wildcard *.c)       		\
+		$(wildcard *.S)
 
 LDSCRIPT = ./linker_flash.ld
 
-# ===========================================================
-# FIXED FOR WSL - USE BUILT-IN RISCV GCC
-# ===========================================================
-RISCV_PREFIX = riscv64-unknown-elf-
+RISCV_NAME ?= riscv-none-elf
+RISCV_PATH ?= C:/xpack-riscv-none-elf-gcc-15.2.0-1
 
-RISCV_CC      = $(RISCV_PREFIX)gcc
-RISCV_OBJCOPY = $(RISCV_PREFIX)objcopy
-RISCV_OBJDUMP = $(RISCV_PREFIX)objdump
-
-# Config
 MABI=ilp32
 MARCH := rv32i
-
 ifeq ($(MULDIV),yes)
-    MARCH := $(MARCH)m
+	MARCH := $(MARCH)m
 endif
-
 ifeq ($(COMPRESSED),yes)
-    MARCH := $(MARCH)ac
+	MARCH := $(MARCH)ac
 endif
 
-CFLAGS += -march=$(MARCH) -mabi=$(MABI) -ffunction-sections -fdata-sections
-LDFLAGS += -march=$(MARCH) -mabi=$(MABI) -Wl,--gc-sections
+CFLAGS += -march=$(MARCH)  -mabi=$(MABI)  -ffunction-sections -fdata-sections
+LDFLAGS += -march=$(MARCH)  -mabi=$(MABI)  -Wl,--gc-sections
 
 ifeq ($(DEBUG),yes)
-    CFLAGS += -g3 -O0
+	CFLAGS += -g3 -O0 
 endif
 
 ifeq ($(DEBUG),no)
-    CFLAGS += -g -O3
+	CFLAGS += -g -O3 
 endif
 
 ifeq ($(BENCH),yes)
-    CFLAGS += -fno-inline
+	CFLAGS += -fno-inline  
 endif
 
-CFLAGS += -MD -fstrict-volatile-bitfields
-LDFLAGS += -nostdlib -lgcc -mcmodel=medany -nostartfiles -ffreestanding \
-           -Wl,-Bstatic,-T,$(LDSCRIPT),-Map,$(OBJDIR)/$(PROJ_NAME).map,--print-memory-usage
+RISCV_CLIB=$(RISCV_PATH)/$(RISCV_NAME)/lib/$(MARCH)/$(MABI)/
+
+RISCV_OBJCOPY = $(RISCV_PATH)/bin/$(RISCV_NAME)-objcopy
+RISCV_OBJDUMP = $(RISCV_PATH)/bin/$(RISCV_NAME)-objdump
+RISCV_CC = $(RISCV_PATH)/bin/$(RISCV_NAME)-gcc
+
+CFLAGS +=  -MD -fstrict-volatile-bitfields 
+LDFLAGS +=  -nostdlib -lgcc -mcmodel=medany -nostartfiles -ffreestanding -Wl,-Bstatic,-T,$(LDSCRIPT),-Map,$(OBJDIR)/$(PROJ_NAME).map,--print-memory-usage
 
 OBJDIR = build
 OBJS := $(SRCS)
@@ -56,49 +52,59 @@ OBJS := $(OBJS:.cpp=.o)
 OBJS := $(OBJS:.S=.o)
 OBJS := $(addprefix $(OBJDIR)/,$(OBJS))
 
-# ===========================================================
-# Build all: ELF + BIN + HEX
-# ===========================================================
-all: $(OBJDIR)/$(PROJ_NAME).elf \
-     $(OBJDIR)/$(PROJ_NAME).bin \
-     $(OBJDIR)/$(PROJ_NAME).hex
+SUBOBJ := $(addprefix $(OBJDIR)/,$(SUBDIRS))
+SUBOBJ := $(addsuffix /*.o,$(SUBOBJ))
 
-# ===========================================================
-# LINK → ELF
-# ===========================================================
+export RISCV_CC CFLAGS LDFLAGS OBJDIR
+
+all: $(SUBDIRS) $(OBJDIR)/$(PROJ_NAME).elf $(OBJDIR)/$(PROJ_NAME).hex $(OBJDIR)/$(PROJ_NAME).asm $(OBJDIR)/$(PROJ_NAME).v
+
+$(SUBDIRS): ECHO
+	make -C $@
+
+ECHO:
+	@echo $(SUBDIRS)
+
 $(OBJDIR)/%.elf: $(OBJS) | $(OBJDIR)
-	$(RISCV_CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	$(RISCV_CC) $(CFLAGS) -o $@ $^ $(SUBOBJ) $(LDFLAGS) $(LIBS)
 
-# ===========================================================
-# ELF → BIN
-# ===========================================================
-$(OBJDIR)/%.bin: $(OBJDIR)/%.elf
-	$(RISCV_OBJCOPY) -O binary $< $@
+%.hex: %.elf
+	$(RISCV_OBJCOPY) -O ihex $^ $@
 
-# ===========================================================
-# ELF → HEX (VERILOG 8-BIT FORMAT)
-# ===========================================================
-$(OBJDIR)/%.hex: $(OBJDIR)/%.elf
-	$(RISCV_OBJCOPY) -O verilog $< $@
+%.bin: %.elf
+	$(RISCV_OBJCOPY) -O binary $^ $@
+	
+%.v: %.elf
+	$(RISCV_OBJCOPY) -O verilog $^ $@
 
-# ===========================================================
-# COMPILE C / ASM
-# ===========================================================
+%.asm: %.elf
+	$(RISCV_OBJDUMP) -S -d $^ > $@
+
 $(OBJDIR)/%.o: %.c
 	mkdir -p $(dir $@)
-	$(RISCV_CC) -c $(CFLAGS) $(INC) -o $@ $<
+	$(RISCV_CC) -c $(CFLAGS)  $(INC) -o $@ $^
+	
+$(OBJDIR)/%.o: %.cpp
+	mkdir -p $(dir $@)
+	$(RISCV_CC) -c $(CFLAGS)  $(INC) -o $@ $^	
 
 $(OBJDIR)/%.o: %.S
 	mkdir -p $(dir $@)
-	$(RISCV_CC) -c $(CFLAGS) -o $@ $< -D__ASSEMBLY__=1
+	$(RISCV_CC) -c $(CFLAGS) -o $@ $^ -D__ASSEMBLY__=1
 
 $(OBJDIR):
 	mkdir -p $@
 
-# ===========================================================
-# CLEAN
-# ===========================================================
 clean:
-	rm -rf $(OBJDIR)
+	rm -f $(OBJDIR)/$(PROJ_NAME).elf
+	rm -f $(OBJDIR)/$(PROJ_NAME).hex
+	rm -f $(OBJDIR)/$(PROJ_NAME).map
+	rm -f $(OBJDIR)/$(PROJ_NAME).v
+	rm -f $(OBJDIR)/$(PROJ_NAME).asm
+	find $(OBJDIR) -type f -name '*.d' -print0 | xargs -0 -r rm
+	find $(OBJDIR) -type f -name '*.o' -print0 | xargs -0 -r rm
 
-.SECONDARY:
+.SECONDARY: $(OBJS)
+
+
+			

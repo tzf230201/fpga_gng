@@ -325,10 +325,10 @@ void main()
         print("\n");
         print("Select an action:\n");
         print("\n");
-        print("   [2] Toggle led 1\n");
-        print("   [1] Toggle led 2\n");
-        print("   [3] Toggle led 3\n");
-        print("   [4] Toggle led 4\n");
+        print("   [1] Toggle led 1\n");
+        print("   [2] Toggle led 2\n");
+        print("   [4] Toggle led 3\n");
+        print("   [3] Toggle led 4\n");
         print("   [5] Toggle led 5\n");
         print("   [6] Toggle led 6\n");
         print("   [F] Get flash mode\n");

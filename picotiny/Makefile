@@ -1,13 +1,14 @@
 
-PYTHON_NAME ?= python
-RISCV_NAME 	?= riscv-none-embed
-RISCV_PATH 	?= D:/gnu-mcu-eclipse-riscv-none-gcc-8.2.0
+PYTHON_NAME ?= /mingw64/bin/python
+
+RISCV_NAME 	?= riscv-none-elf
+RISCV_PATH 	?= C:/xpack-riscv-none-elf-gcc-15.2.0-1
 MAKE		?= make
 
 FW_FILE 	 = fw/fw-flash/build/fw-flash.v
 
 PROG_FILE	?= $(FW_FILE)
-COMx	 	?= COM14
+COMx	 	?= COM1
 
 export PYTHON_NAME
 export RISCV_NAME

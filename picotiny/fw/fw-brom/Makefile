@@ -10,9 +10,9 @@ SRCS = 	$(wildcard *.c)       		\
 
 LDSCRIPT = ./linker_brom.ld
 
-RISCV_NAME ?= riscv-none-embed
-RISCV_PATH ?= D:/gnu-mcu-eclipse-riscv-none-gcc-8.2.0
-
+RISCV_NAME ?= riscv-none-elf
+RISCV_PATH ?= C:/xpack-riscv-none-elf-gcc-15.2.0-1
+	
 PYTHON_NAME ?= python
 VDUMPC_PATH ?= ../../sw/vdump8to32.py
 MEM_BASEADDR ?= 0x80000000
