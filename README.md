@@ -217,4 +217,8 @@ Or directly:
 /mingw64/bin/python sw/pico-programmer.py fw/fw-flash/build/fw-flash.v COM14
 ```
 
-Change `COM14` to your actual port.
+Change `COM1` to your actual port.
+
+# GNG Result in FPGA (PicoRV32)
+
+![alt text](images/Figure_1.png)

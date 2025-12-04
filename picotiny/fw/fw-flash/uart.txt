@@ -1,0 +1,146 @@
+#include <stdint.h>
+
+// --------------------------------------
+// Hardware layout (sesuai contoh menu-mu)
+// --------------------------------------
+typedef struct {
+    volatile uint32_t DATA;
+    volatile uint32_t CLKDIV;
+} PICOUART;
+
+typedef struct {
+    volatile uint32_t OUT;
+    volatile uint32_t IN;
+    volatile uint32_t OE;
+} PICOGPIO;
+
+#define GPIO0 ((PICOGPIO*)0x82000000)
+#define UART0 ((PICOUART*)0x83000000)
+
+#define CLK_FREQ  25175000u
+#define UART_BAUD 115200u
+
+// ----------------------
+// UART print utilities
+// ----------------------
+int putchar(int c)
+{
+    if (c == '\n')
+        UART0->DATA = '\r';
+    UART0->DATA = (uint32_t)c;
+    return c;
+}
+
+void print(const char *p)
+{
+    while (*p)
+        putchar(*(p++));
+}
+
+static void print_uint(uint32_t v)
+{
+    char buf[10];
+    int idx = 0;
+
+    if (v == 0) {
+        putchar('0');
+        return;
+    }
+
+    while (v > 0 && idx < (int)sizeof(buf)) {
+        buf[idx++] = (char)('0' + (v % 10));
+        v /= 10;
+    }
+    while (idx > 0) {
+        putchar(buf[--idx]);
+    }
+}
+
+// ----------------------
+// Line parser
+// Format:
+//   DATA:x,y;
+//   DONE;
+// ----------------------
+#define RX_BUF_LEN 64
+
+static char     rxbuf[RX_BUF_LEN];
+static int      rx_pos       = 0;
+static uint32_t sample_count = 0;
+
+static int starts_with(const char *s, const char *prefix)
+{
+    int i = 0;
+    while (prefix[i] != 0) {
+        if (s[i] != prefix[i])
+            return 0;
+        i++;
+    }
+    return 1;
+}
+
+static void handle_line(const char *line)
+{
+    if (starts_with(line, "DATA:")) {
+        // untuk sekarang: hanya hitung sample dan kirim ACK
+        sample_count++;
+
+        print("ACK ");
+        print_uint(sample_count);
+        print("\n");
+    }
+    else if (starts_with(line, "DONE")) {
+        // nanti diganti dengan hasil GNG beneran
+        print("GNG:N:0,0.20,0.20;N:1,0.80,0.80;E:0,1;\n");
+    }
+    else {
+        print("ERR\n");
+    }
+}
+
+// Dummy IRQ callback supaya crt_flash.S tidak error
+void irqCallback(void)
+{
+    // kosong
+}
+
+// ----------------------
+// main()
+// ----------------------
+void main(void)
+{
+    // set baudrate
+    UART0->CLKDIV = CLK_FREQ / UART_BAUD - 2;
+
+    // optional: LED sebagai output
+    GPIO0->OE  = 0x3F;
+    GPIO0->OUT = 0x00;
+
+    print("\nPicoRV GNG UART test\n");
+    print("FPGA READY\n");
+
+    while (1) {
+        // sama seperti contoh: DATA = -1 jika belum ada char baru
+        int32_t c = (int32_t)UART0->DATA;
+        if (c == -1) {
+            continue;
+        }
+
+        char ch = (char)c;
+
+        if (ch == '\r') {
+            // ignore CR
+        } else if (ch == '\n') {
+            // end of line
+            rxbuf[rx_pos] = 0;
+            if (rx_pos > 0) {
+                handle_line(rxbuf);
+            }
+            rx_pos = 0;
+        } else {
+            if (rx_pos < RX_BUF_LEN - 1) {
+                rxbuf[rx_pos++] = ch;
+            }
+        }
+    }
+}

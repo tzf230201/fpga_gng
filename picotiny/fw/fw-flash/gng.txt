@@ -1,7 +1,7 @@
 #include <stdint.h>
 
 // =======================
-//  UART hardware
+//  UART hardware (sesuai contoh yang sudah jalan)
 // =======================
 typedef struct {
     volatile uint32_t DATA;
@@ -36,7 +36,7 @@ static void uart_puts(const char *s)
 
 static int32_t uart_getc_nonblock(void)
 {
-    // Di SoC ini: DATA = -1 jika tidak ada data (seperti di contoh resmi)
+    // di core ini: DATA = -1 kalau tidak ada data
     return (int32_t)UART0->DATA;
 }
 
@@ -128,7 +128,7 @@ static float parse_float(const char *p, const char **endp)
 //  Buffer & dataset
 // =======================
 #define RXBUF_LEN    64
-#define MAX_SAMPLES  200
+#define MAX_SAMPLES  512
 
 static char rxbuf[RXBUF_LEN];
 static uint32_t rxpos = 0;
@@ -141,30 +141,23 @@ static uint32_t sample_count = 0;
 // =======================
 //  GNG data structure
 // =======================
-#define GNG_MAX_NODES     20
+
+#define GNG_MAX_NODES     64
 #define GNG_MAX_NEIGHBORS 6
 #define GNG_MAX_AGE       50
 
-#define GNG_LAMBDA        50      // setiap 50 iterasi tambah node
+#define GNG_LAMBDA        50      // tiap 50 iter tambah node
 #define GNG_EPS_B         0.05f   // learning rate winner
-#define GNG_EPS_N         0.006f  // learning rate neighbor
-#define GNG_ALPHA         0.5f
-#define GNG_D_ERR         0.995f
+#define GNG_EPS_N         0.006f  // learning rate neighbor (lebih kecil)
+#define GNG_ALPHA         0.5f    // pengurangan error saat insert node
+#define GNG_D_ERR         0.995f  // decay error global
 
-// seberapa sering kirim snapshot GNG
-#define GNG_STREAM_EVERY  20
-
-static float   gng_wx[GNG_MAX_NODES];
-static float   gng_wy[GNG_MAX_NODES];
-static float   gng_err[GNG_MAX_NODES];
-static int8_t  gng_nbr[GNG_MAX_NODES][GNG_MAX_NEIGHBORS];
+static float gng_wx[GNG_MAX_NODES];
+static float gng_wy[GNG_MAX_NODES];
+static float gng_err[GNG_MAX_NODES];
+static int8_t gng_nbr[GNG_MAX_NODES][GNG_MAX_NEIGHBORS];
 static uint8_t gng_age[GNG_MAX_NODES][GNG_MAX_NEIGHBORS];
 static uint32_t gng_nodes = 0;
-
-// === state continuous training ===
-static uint8_t  gng_running      = 0;
-static uint32_t gng_iter         = 0;
-static uint32_t gng_sample_index = 0;
 
 // =======================
 //  GNG helpers
@@ -292,15 +285,126 @@ static void gng_remove_old_edges_from(int a)
 }
 
 // =======================
-//  Kirim snapshot GNG
+//  GNG main algorithm
 // =======================
-static void gng_send_snapshot(uint32_t iter)
+static void run_gng_and_send(void)
 {
-    uart_puts("GNG:");
-    uart_puts("T:");
-    uart_putu(iter);
-    uart_putc(';');
+    if (nsamples < 2) {
+        uart_puts("GNG:\n");
+        return;
+    }
 
+    gng_init();
+    if (gng_nodes < 2) {
+        uart_puts("GNG:\n");
+        return;
+    }
+
+    // opsional: hubungkan node awal
+    gng_add_edge(0, 1);
+
+    int total_iter = (int)nsamples * 10;
+    if (total_iter < (int)nsamples)
+        total_iter = (int)nsamples;
+
+    for (int t = 0; t < total_iter; t++) {
+        float x = xs[t % nsamples];
+        float y = ys[t % nsamples];
+
+        // cari s1 & s2
+        int s1 = -1, s2 = -1;
+        float d1 = 1e30f, d2 = 1e30f;
+
+        for (uint32_t i = 0; i < gng_nodes; i++) {
+            float d = dist2(x, y, gng_wx[i], gng_wy[i]);
+            if (d < d1) {
+                d2 = d1;
+                s2 = s1;
+                d1 = d;
+                s1 = (int)i;
+            } else if (d < d2) {
+                d2 = d;
+                s2 = (int)i;
+            }
+        }
+
+        if (s1 < 0 || s2 < 0)
+            continue;
+
+        // umurkan edges yang keluar dari s1
+        gng_increment_ages_from(s1);
+
+        // buat edge s1-s2 (dan reset umurnya)
+        gng_add_edge(s1, s2);
+
+        // update winner
+        gng_wx[s1] += GNG_EPS_B * (x - gng_wx[s1]);
+        gng_wy[s1] += GNG_EPS_B * (y - gng_wy[s1]);
+        gng_err[s1] += d1;
+
+        // update neighbors dari s1
+        for (int k = 0; k < GNG_MAX_NEIGHBORS; k++) {
+            int nb = gng_nbr[s1][k];
+            if (nb < 0) continue;
+            gng_wx[nb] += GNG_EPS_N * (x - gng_wx[nb]);
+            gng_wy[nb] += GNG_EPS_N * (y - gng_wy[nb]);
+        }
+
+        // buang edge yang terlalu tua dari s1
+        gng_remove_old_edges_from(s1);
+
+        // tiap LAMBDA iter, tambahkan node baru
+        if (((t + 1) % GNG_LAMBDA) == 0 && gng_nodes < GNG_MAX_NODES) {
+            int q = 0;
+            float max_err = gng_err[0];
+            for (uint32_t i = 1; i < gng_nodes; i++) {
+                if (gng_err[i] > max_err) {
+                    max_err = gng_err[i];
+                    q = (int)i;
+                }
+            }
+
+            int f = -1;
+            float max_err_n = -1.0f;
+            for (int k = 0; k < GNG_MAX_NEIGHBORS; k++) {
+                int nb = gng_nbr[q][k];
+                if (nb < 0) continue;
+                if (gng_err[nb] > max_err_n) {
+                    max_err_n = gng_err[nb];
+                    f = nb;
+                }
+            }
+
+            if (f >= 0) {
+                int r = (int)gng_nodes;
+                gng_nodes++;
+
+                gng_wx[r] = 0.5f * (gng_wx[q] + gng_wx[f]);
+                gng_wy[r] = 0.5f * (gng_wy[q] + gng_wy[f]);
+                gng_err[r] = gng_err[q];
+
+                for (int k = 0; k < GNG_MAX_NEIGHBORS; k++) {
+                    gng_nbr[r][k] = -1;
+                    gng_age[r][k] = 0;
+                }
+
+                gng_err[q] *= GNG_ALPHA;
+                gng_err[f] *= GNG_ALPHA;
+
+                gng_remove_edge_pair(q, f);
+                gng_add_edge(q, r);
+                gng_add_edge(r, f);
+            }
+        }
+
+        // decay error
+        for (uint32_t i = 0; i < gng_nodes; i++) {
+            gng_err[i] *= GNG_D_ERR;
+        }
+    }
+
+    // kirim hasil ke Python
+    uart_puts("GNG:");
     // nodes
     for (uint32_t i = 0; i < gng_nodes; i++) {
         uart_puts("N:");
@@ -311,7 +415,6 @@ static void gng_send_snapshot(uint32_t iter)
         uart_putf5(gng_wy[i]);
         uart_putc(';');
     }
-
     // edges (i < j supaya tidak double)
     for (uint32_t i = 0; i < gng_nodes; i++) {
         for (int k = 0; k < GNG_MAX_NEIGHBORS; k++) {
@@ -325,126 +428,7 @@ static void gng_send_snapshot(uint32_t iter)
             uart_putc(';');
         }
     }
-
     uart_putc('\n');
-}
-
-// =======================
-//  Satu langkah GNG (continuous)
-// =======================
-static void gng_train_step(void)
-{
-    if (!gng_running)       return;
-    if (nsamples < 2)       return;
-    if (gng_nodes < 2)      return;
-
-    // ambil sample dan maju
-    float x = xs[gng_sample_index];
-    float y = ys[gng_sample_index];
-
-    gng_sample_index++;
-    if (gng_sample_index >= nsamples)
-        gng_sample_index = 0;
-
-    // cari s1, s2
-    int s1 = -1, s2 = -1;
-    float d1 = 1e30f, d2 = 1e30f;
-
-    for (uint32_t i = 0; i < gng_nodes; i++) {
-        float d = dist2(x, y, gng_wx[i], gng_wy[i]);
-        if (d < d1) {
-            d2 = d1;
-            s2 = s1;
-            d1 = d;
-            s1 = (int)i;
-        } else if (d < d2) {
-            d2 = d;
-            s2 = (int)i;
-        }
-    }
-
-    if (s1 < 0 || s2 < 0)
-        return;
-
-    // umurkan edge dari s1
-    gng_increment_ages_from(s1);
-
-    // connect s1-s2
-    gng_add_edge(s1, s2);
-
-    // update winner
-    gng_wx[s1] += GNG_EPS_B * (x - gng_wx[s1]);
-    gng_wy[s1] += GNG_EPS_B * (y - gng_wy[s1]);
-    gng_err[s1] += d1;
-
-    // update neighbors
-    for (int k = 0; k < GNG_MAX_NEIGHBORS; k++) {
-        int nb = gng_nbr[s1][k];
-        if (nb < 0) continue;
-        gng_wx[nb] += GNG_EPS_N * (x - gng_wx[nb]);
-        gng_wy[nb] += GNG_EPS_N * (y - gng_wy[nb]);
-    }
-
-    // buang edge tua dari s1
-    gng_remove_old_edges_from(s1);
-
-    // naikkan iter counter
-    gng_iter++;
-
-    // tiap LAMBDA iterasi, insert node baru
-    if ((gng_iter % GNG_LAMBDA) == 0 && gng_nodes < GNG_MAX_NODES) {
-        int q = 0;
-        float max_err = gng_err[0];
-        for (uint32_t i = 1; i < gng_nodes; i++) {
-            if (gng_err[i] > max_err) {
-                max_err = gng_err[i];
-                q = (int)i;
-            }
-        }
-
-        int f = -1;
-        float max_err_n = -1.0f;
-        for (int k = 0; k < GNG_MAX_NEIGHBORS; k++) {
-            int nb = gng_nbr[q][k];
-            if (nb < 0) continue;
-            if (gng_err[nb] > max_err_n) {
-                max_err_n = gng_err[nb];
-                f = nb;
-            }
-        }
-
-        if (f >= 0) {
-            int r = (int)gng_nodes;
-            gng_nodes++;
-
-            // posisi node baru = tengah q dan f
-            gng_wx[r] = 0.5f * (gng_wx[q] + gng_wx[f]);
-            gng_wy[r] = 0.5f * (gng_wy[q] + gng_wy[f]);
-            gng_err[r] = gng_err[q];
-
-            for (int k = 0; k < GNG_MAX_NEIGHBORS; k++) {
-                gng_nbr[r][k] = -1;
-                gng_age[r][k] = 0;
-            }
-
-            gng_err[q] *= GNG_ALPHA;
-            gng_err[f] *= GNG_ALPHA;
-
-            gng_remove_edge_pair(q, f);
-            gng_add_edge(q, r);
-            gng_add_edge(r, f);
-        }
-    }
-
-    // decay error
-    for (uint32_t i = 0; i < gng_nodes; i++) {
-        gng_err[i] *= GNG_D_ERR;
-    }
-
-    // KIRIM SNAPSHOT SETIAP GNG_STREAM_EVERY ITERASI
-    if ((gng_iter % GNG_STREAM_EVERY) == 0) {
-        gng_send_snapshot(gng_iter);
-    }
 }
 
 // =======================
@@ -472,28 +456,9 @@ static void handle_line(const char *line)
         uart_putc('\n');
     }
     else if (starts_with(line, "DONE")) {
-        // mulai continuous GNG
-        if (nsamples < 2) {
-            uart_puts("GNG:ERR:INSUFFICIENT_DATA;\n");
-            return;
-        }
-
-        gng_init();
-        if (gng_nodes < 2) {
-            uart_puts("GNG:ERR:INIT_FAIL;\n");
-            return;
-        }
-
-        gng_add_edge(0, 1);
-
-        gng_running      = 1;
-        gng_iter         = 0;
-        gng_sample_index = 0;
-
-        uart_puts("GNG:START;\n");
-
-        // opsional: kirim snapshot awal
-        gng_send_snapshot(0);
+        run_gng_and_send();
+        nsamples = 0;
+        sample_count = 0;
     }
     else {
         uart_puts("UNKNOWN:");
@@ -509,46 +474,40 @@ void main(void)
 {
     uart_init_hw();
 
-    uart_puts("\nPicoRV GNG UART firmware with continuous streaming\n");
+    uart_puts("\nPicoRV GNG UART firmware with full GNG\n");
     uart_puts("Format: DATA:x,y; + \\n, lalu DONE;\\n\n");
 
     rxpos        = 0;
     nsamples     = 0;
     sample_count = 0;
-    gng_running  = 0;
-    gng_iter     = 0;
-    gng_sample_index = 0;
 
     for (;;) {
-        // 1) UART non-blocking
         int32_t v = uart_getc_nonblock();
-        if (v >= 0) {
-            char c = (char)v;
-
-            if (c == '\r') {
-                // ignore
-            } else if (c == '\n') {
-                rxbuf[rxpos] = '\0';
-                if (rxpos > 0) {
-                    handle_line(rxbuf);
-                }
-                rxpos = 0;
-            } else {
-                if (rxpos < (RXBUF_LEN - 1)) {
-                    rxbuf[rxpos++] = c;
-                } else {
-                    // overflow: reset
-                    rxpos = 0;
-                }
-            }
+        if (v < 0) {
+            continue;
         }
 
-        // 2) Satu langkah training GNG setiap loop
-        gng_train_step();
+        char c = (char)v;
+
+        if (c == '\r') {
+            continue;
+        } else if (c == '\n') {
+            rxbuf[rxpos] = '\0';
+            if (rxpos > 0) {
+                handle_line(rxbuf);
+            }
+            rxpos = 0;
+        } else {
+            if (rxpos < (RXBUF_LEN - 1)) {
+                rxbuf[rxpos++] = c;
+            } else {
+                rxpos = 0;
+            }
+        }
     }
 }
 
-// diperlukan oleh crt_flash.S
+// dibutuhkan oleh crt_flash.S
 void irqCallback(void)
 {
     // kosong
