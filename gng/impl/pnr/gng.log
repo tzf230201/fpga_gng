@@ -1,0 +1,30 @@
+Reading netlist file: "C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\Documents\gng\impl\gwsynthesis\gng.vg"
+Parsing netlist file "C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\Documents\gng\impl\gwsynthesis\gng.vg" completed
+Processing netlist completed
+Reading constraint file: "C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\Documents\gng\src\gng.cst"
+Physical Constraint parsed completed
+Running placement......
+[10%] Placement Phase 0 completed
+[20%] Placement Phase 1 completed
+[30%] Placement Phase 2 completed
+WARN  (TA1132) :  'sys_clk' was determined to be a clock but was not created.
+[50%] Placement Phase 3 completed
+Running routing......
+[60%] Routing Phase 0 completed
+[70%] Routing Phase 1 completed
+[80%] Routing Phase 2 completed
+[90%] Routing Phase 3 completed
+Running timing analysis......
+[95%] Timing analysis completed
+Placement and routing completed
+Bitstream generation in progress......
+Bitstream generation completed
+Running power analysis......
+[100%] Power analysis completed
+Generate file "C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\Documents\gng\impl\pnr\gng.power.html" completed
+Generate file "C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\Documents\gng\impl\pnr\gng.pin.html" completed
+Generate file "C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\Documents\gng\impl\pnr\gng.rpt.html" completed
+Generate file "C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\Documents\gng\impl\pnr\gng.rpt.txt" completed
+Generate file "C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\Documents\gng\impl\pnr\gng.tr.html" completed
+Thu Nov 20 19:26:58 2025
+

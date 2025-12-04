@@ -1,0 +1,10 @@
+[
+ {
+  "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/top.v",
+  "InstLine" : 1,
+  "InstName" : "led",
+  "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/top.v",
+  "ModuleLine" : 1,
+  "ModuleName" : "led"
+ }
+]
