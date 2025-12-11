@@ -1,8 +1,9 @@
--d C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\Documents\gng\impl\gwsynthesis\gng.vg
+-d C:\Users\HP\Documents\Github\fpga_gng\gng\impl\gwsynthesis\gng.vg
 -p GW1NR-9C-QFN88P-6
 -pn GW1NR-LV9QN88PC6/I5
--cst C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\Documents\gng\src\gng.cst
--cfg C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\Documents\gng\impl\pnr\device.cfg
+-cst C:\Users\HP\Documents\Github\fpga_gng\gng\src\gng.cst
+-cfg C:\Users\HP\Documents\Github\fpga_gng\gng\impl\pnr\device.cfg
+-sdc C:\Users\HP\Documents\Github\fpga_gng\gng\src\tang_nano_9k.sdc
 -bit
 -tr
 -ph

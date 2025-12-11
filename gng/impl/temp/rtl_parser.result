@@ -1,10 +1,364 @@
 [
  {
-  "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/top.v",
-  "InstLine" : 1,
-  "InstName" : "led",
-  "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/top.v",
-  "ModuleLine" : 1,
-  "ModuleName" : "led"
+  "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_ProcessorTop_MinimalBoot.vhd",
+  "InstLine" : 17,
+  "InstName" : "neorv32_ProcessorTop_MinimalBoot",
+  "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_ProcessorTop_MinimalBoot.vhd",
+  "ModuleLine" : 17,
+  "ModuleName" : "neorv32_ProcessorTop_MinimalBoot",
+  "SubInsts" : [
+   {
+    "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_ProcessorTop_MinimalBoot.vhd",
+    "InstLine" : 98,
+    "InstName" : "uflash_inst",
+    "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/uflash.vhd",
+    "ModuleLine" : 39,
+    "ModuleName" : "uflash",
+    "SubInsts" : [
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/uflash.vhd",
+      "InstLine" : 290,
+      "InstName" : "flash_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/gowin_user_flash.vhd",
+      "ModuleLine" : 13,
+      "ModuleName" : "Gowin_User_Flash"
+     }
+    ]
+   },
+   {
+    "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_ProcessorTop_MinimalBoot.vhd",
+    "InstLine" : 118,
+    "InstName" : "neorv32_inst",
+    "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+    "ModuleLine" : 21,
+    "ModuleName" : "neorv32_top",
+    "SubInsts" : [
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+      "InstLine" : 433,
+      "InstName" : "soc_generators.neorv32_sys_reset_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_sys.vhd",
+      "ModuleLine" : 17,
+      "ModuleName" : "neorv32_sys_reset"
+     },
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+      "InstLine" : 446,
+      "InstName" : "soc_generators.neorv32_sys_clock_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_sys.vhd",
+      "ModuleLine" : 97,
+      "ModuleName" : "neorv32_sys_clock"
+     },
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+      "InstLine" : 485,
+      "InstName" : "core_complex_gen[0].neorv32_cpu_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu.vhd",
+      "ModuleLine" : 22,
+      "ModuleName" : "neorv32_cpu",
+      "SubInsts" : [
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu.vhd",
+        "InstLine" : 199,
+        "InstName" : "neorv32_cpu_frontend_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_frontend.vhd",
+        "ModuleLine" : 22,
+        "ModuleName" : "neorv32_cpu_frontend",
+        "SubInsts" : [
+         {
+          "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_frontend.vhd",
+          "InstLine" : 179,
+          "InstName" : "prefetch_buffer[0].ipb_inst",
+          "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_frontend.vhd",
+          "ModuleLine" : 323,
+          "ModuleName" : "neorv32_cpu_frontend_ipb"
+         },
+         {
+          "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_frontend.vhd",
+          "InstLine" : 179,
+          "InstName" : "prefetch_buffer[1].ipb_inst",
+          "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_frontend.vhd",
+          "ModuleLine" : 323,
+          "ModuleName" : "neorv32_cpu_frontend_ipb"
+         }
+        ]
+       },
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu.vhd",
+        "InstLine" : 224,
+        "InstName" : "neorv32_cpu_control_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_control.vhd",
+        "ModuleLine" : 24,
+        "ModuleName" : "neorv32_cpu_control"
+       },
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu.vhd",
+        "InstLine" : 341,
+        "InstName" : "cnts_enabled.neorv32_cpu_counters_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_counters.vhd",
+        "ModuleLine" : 22,
+        "ModuleName" : "neorv32_cpu_counters",
+        "SubInsts" : [
+         {
+          "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_counters.vhd",
+          "InstLine" : 141,
+          "InstName" : "base_enabled.cycle_inst",
+          "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_prim.vhd",
+          "ModuleLine" : 407,
+          "ModuleName" : "neorv32_prim_cnt"
+         },
+         {
+          "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_counters.vhd",
+          "InstLine" : 159,
+          "InstName" : "base_enabled.instret_inst",
+          "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_prim.vhd",
+          "ModuleLine" : 407,
+          "ModuleName" : "neorv32_prim_cnt"
+         }
+        ]
+       },
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu.vhd",
+        "InstLine" : 366,
+        "InstName" : "neorv32_cpu_regfile_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_regfile.vhd",
+        "ModuleLine" : 30,
+        "ModuleName" : "neorv32_cpu_regfile",
+        "SubInsts" : [
+         {
+          "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_regfile.vhd",
+          "InstLine" : 81,
+          "InstName" : "register_file_fpga.reg_file_inst",
+          "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_prim.vhd",
+          "ModuleLine" : 247,
+          "ModuleName" : "neorv32_prim_sdpram"
+         }
+        ]
+       },
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu.vhd",
+        "InstLine" : 388,
+        "InstName" : "neorv32_cpu_alu_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_alu.vhd",
+        "ModuleLine" : 18,
+        "ModuleName" : "neorv32_cpu_alu",
+        "SubInsts" : [
+         {
+          "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_alu.vhd",
+          "InstLine" : 171,
+          "InstName" : "neorv32_cpu_cp_shifter_inst",
+          "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_cp_shifter.vhd",
+          "ModuleLine" : 21,
+          "ModuleName" : "neorv32_cpu_cp_shifter"
+         }
+        ]
+       },
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu.vhd",
+        "InstLine" : 432,
+        "InstName" : "neorv32_cpu_lsu_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_lsu.vhd",
+        "ModuleLine" : 18,
+        "ModuleName" : "neorv32_cpu_lsu"
+       },
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu.vhd",
+        "InstLine" : 498,
+        "InstName" : "trace_enabled.neorv32_cpu_trace_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_cpu_trace.vhd",
+        "ModuleLine" : 18,
+        "ModuleName" : "neorv32_cpu_trace"
+       }
+      ]
+     },
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+      "InstLine" : 621,
+      "InstName" : "core_complex_gen[0].neorv32_core_bus_switch_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_bus.vhd",
+      "ModuleLine" : 17,
+      "ModuleName" : "neorv32_bus_switch"
+     },
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+      "InstLine" : 787,
+      "InstName" : "neorv32_bus_gateway_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_bus.vhd",
+      "ModuleLine" : 280,
+      "ModuleName" : "neorv32_bus_gateway"
+     },
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+      "InstLine" : 861,
+      "InstName" : "memory_system.neorv32_dmem_enabled.neorv32_dmem_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_dmem.vhd",
+      "ModuleLine" : 18,
+      "ModuleName" : "neorv32_dmem",
+      "SubInsts" : [
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_dmem.vhd",
+        "InstLine" : 49,
+        "InstName" : "dmem_ram_gen[0].ram_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_prim.vhd",
+        "ModuleLine" : 168,
+        "ModuleName" : "neorv32_prim_spram"
+       },
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_dmem.vhd",
+        "InstLine" : 49,
+        "InstName" : "dmem_ram_gen[1].ram_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_prim.vhd",
+        "ModuleLine" : 168,
+        "ModuleName" : "neorv32_prim_spram"
+       },
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_dmem.vhd",
+        "InstLine" : 49,
+        "InstName" : "dmem_ram_gen[2].ram_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_prim.vhd",
+        "ModuleLine" : 168,
+        "ModuleName" : "neorv32_prim_spram"
+       },
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_dmem.vhd",
+        "InstLine" : 49,
+        "InstName" : "dmem_ram_gen[3].ram_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_prim.vhd",
+        "ModuleLine" : 168,
+        "ModuleName" : "neorv32_prim_spram"
+       }
+      ]
+     },
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+      "InstLine" : 884,
+      "InstName" : "memory_system.neorv32_xbus_enabled.neorv32_xbus_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_xbus.vhd",
+      "ModuleLine" : 21,
+      "ModuleName" : "neorv32_xbus",
+      "SubInsts" : [
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_xbus.vhd",
+        "InstLine" : 56,
+        "InstName" : "reg_stage_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_bus.vhd",
+        "ModuleLine" : 185,
+        "ModuleName" : "neorv32_bus_reg"
+       }
+      ]
+     },
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+      "InstLine" : 933,
+      "InstName" : "io_system.neorv32_bus_io_switch_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_bus.vhd",
+      "ModuleLine" : 489,
+      "ModuleName" : "neorv32_bus_io_switch",
+      "SubInsts" : [
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_bus.vhd",
+        "InstLine" : 610,
+        "InstName" : "neorv32_bus_reg_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_bus.vhd",
+        "ModuleLine" : 185,
+        "ModuleName" : "neorv32_bus_reg"
+       }
+      ]
+     },
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+      "InstLine" : 1013,
+      "InstName" : "io_system.neorv32_boot_rom_enabled.neorv32_boot_rom_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_boot_rom.vhd",
+      "ModuleLine" : 19,
+      "ModuleName" : "neorv32_boot_rom"
+     },
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+      "InstLine" : 1085,
+      "InstName" : "io_system.neorv32_gpio_enabled.neorv32_gpio_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_gpio.vhd",
+      "ModuleLine" : 17,
+      "ModuleName" : "neorv32_gpio"
+     },
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+      "InstLine" : 1136,
+      "InstName" : "io_system.neorv32_clint_enabled.neorv32_clint_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_clint.vhd",
+      "ModuleLine" : 21,
+      "ModuleName" : "neorv32_clint",
+      "SubInsts" : [
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_clint.vhd",
+        "InstLine" : 82,
+        "InstName" : "neorv32_clint_mtime_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_prim.vhd",
+        "ModuleLine" : 407,
+        "ModuleName" : "neorv32_prim_cnt"
+       },
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_clint.vhd",
+        "InstLine" : 123,
+        "InstName" : "neorv32_clint_mtimecmp_gen[0].neorv32_clint_mtimecmp_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_clint.vhd",
+        "ModuleLine" : 218,
+        "ModuleName" : "neorv32_clint_mtimecmp"
+       }
+      ]
+     },
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+      "InstLine" : 1164,
+      "InstName" : "io_system.neorv32_uart0_enabled.neorv32_uart0_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_uart.vhd",
+      "ModuleLine" : 24,
+      "ModuleName" : "neorv32_uart",
+      "SubInsts" : [
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_uart.vhd",
+        "InstLine" : 185,
+        "InstName" : "tx_engine_fifo_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_prim.vhd",
+        "ModuleLine" : 24,
+        "ModuleName" : "neorv32_prim_fifo"
+       },
+       {
+        "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_uart.vhd",
+        "InstLine" : 214,
+        "InstName" : "rx_engine_fifo_inst",
+        "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_prim.vhd",
+        "ModuleLine" : 24,
+        "ModuleName" : "neorv32_prim_fifo"
+       }
+      ]
+     },
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+      "InstLine" : 1526,
+      "InstName" : "io_system.neorv32_sysinfo_enabled.neorv32_sysinfo_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_sysinfo.vhd",
+      "ModuleLine" : 18,
+      "ModuleName" : "neorv32_sysinfo"
+     },
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+      "InstLine" : 1593,
+      "InstName" : "neorv32_ocd_enabled.neorv32_debug_dtm_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_debug_dtm.vhd",
+      "ModuleLine" : 19,
+      "ModuleName" : "neorv32_debug_dtm"
+     },
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_top.vhd",
+      "InstLine" : 1612,
+      "InstName" : "neorv32_ocd_enabled.neorv32_debug_dm_inst",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng/src/neorv32_debug_dm.vhd",
+      "ModuleLine" : 21,
+      "ModuleName" : "neorv32_debug_dm"
+     }
+    ]
+   }
+  ]
  }
 ]

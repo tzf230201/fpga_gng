@@ -222,3 +222,37 @@ Change `COM1` to your actual port.
 # GNG Result in FPGA (PicoRV32)
 
 ![alt text](images/Figure_1.png)
+
+
+# neorv32 explanation
+
+so neorv32 is an FPGA based CPU,
+so it's super customable, you can maket only have 1 uart or 2 uart, how many pwm output, how many spi and so on.
+
+but the main problem is, all the code is in VHDL.
+so there is no non-volatile memory inside the design of CPU.
+
+so, the only way to program this CPU is to embed it into HDL code. 
+
+or, boot from external memory, such as, spi flash, uSD card, and so on.
+
+there is an option to boot via UART, but, right after the power loss,  the instructions gone. 
+
+
+if we embed to hdl it's okay, the boot will still there even though power loss, but the problem is when we change the code, we need to sinthesize again and over again, this take so much time compare to compile via UART.
+
+so for UART boot:
+adventage: faster, only compile and send via uart time consuming
+disadvantage: the code gone when power loss.
+
+for HDL embed boot:
+advantange: the code still there when power loss
+disadventage: slower, time consuming to convert .bin to hdl + re-synthesis and re-"place and root" the hdl files.
+
+so what is the best way for now?
+
+we need an external memory for store the instruction.
+
+fortunately, gowin FPGA came with user flash memory, we can use that to store code from UART. 
+
+but another problem is, how to make it boot from user flash if uart not exist.

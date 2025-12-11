@@ -1,8 +1,250 @@
 GowinSynthesis start
 Running parser ...
-Analyzing Verilog file 'C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\Documents\gng\src\top.v'
-Compiling module 'led'("C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\Documents\gng\src\top.v":1)
-NOTE  (EX0101) : Current top module is "led"
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\gowin_user_flash.vhd'
+Analyzing entity 'gowin_user_flash'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\gowin_user_flash.vhd":13)
+Analyzing architecture 'behavioral'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\gowin_user_flash.vhd":28)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\uflash.vhd'
+Analyzing entity 'uflash'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\uflash.vhd":39)
+Analyzing architecture 'uflash_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\uflash.vhd":58)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_package.vhd'
+Analyzing package 'neorv32_package'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_package.vhd":15)
+Analyzing package body 'neorv32_package'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_package.vhd":1031)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_sys.vhd'
+Analyzing entity 'neorv32_sys_reset'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_sys.vhd":17)
+Analyzing architecture 'neorv32_sys_reset_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_sys.vhd":34)
+Analyzing entity 'neorv32_sys_clock'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_sys.vhd":97)
+Analyzing architecture 'neorv32_sys_clock_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_sys.vhd":106)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_decompressor.vhd'
+Analyzing entity 'neorv32_cpu_decompressor'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_decompressor.vhd":21)
+Analyzing architecture 'neorv32_cpu_decompressor_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_decompressor.vhd":31)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_frontend.vhd'
+Analyzing entity 'neorv32_cpu_frontend'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_frontend.vhd":22)
+Analyzing architecture 'neorv32_cpu_frontend_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_frontend.vhd":45)
+Analyzing entity 'neorv32_cpu_frontend_ipb'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_frontend.vhd":323)
+Analyzing architecture 'neorv32_cpu_frontend_ipb_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_frontend.vhd":344)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_control.vhd'
+Analyzing entity 'neorv32_cpu_control'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_control.vhd":24)
+Analyzing architecture 'neorv32_cpu_control_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_control.vhd":99)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_hwtrig.vhd'
+Analyzing entity 'neorv32_cpu_hwtrig'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_hwtrig.vhd":21)
+Analyzing architecture 'neorv32_cpu_hwtrig_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_hwtrig.vhd":39)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd'
+Analyzing entity 'neorv32_prim_fifo'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":24)
+Analyzing architecture 'neorv32_prim_fifo_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":46)
+Analyzing entity 'neorv32_prim_spram'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":168)
+Analyzing architecture 'neorv32_prim_spram_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":186)
+Analyzing entity 'neorv32_prim_sdpram'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":247)
+Analyzing architecture 'neorv32_prim_sdpram_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":269)
+Analyzing entity 'neorv32_prim_mul'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":334)
+Analyzing architecture 'neorv32_prim_mul_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":352)
+Analyzing entity 'neorv32_prim_cnt'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":407)
+Analyzing architecture 'neorv32_prim_cnt_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":424)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_counters.vhd'
+Analyzing entity 'neorv32_cpu_counters'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_counters.vhd":22)
+Analyzing architecture 'neorv32_cpu_counters_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_counters.vhd":39)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_regfile.vhd'
+Analyzing entity 'neorv32_cpu_regfile'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_regfile.vhd":30)
+Analyzing architecture 'neorv32_cpu_regfile_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_regfile.vhd":47)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_shifter.vhd'
+Analyzing entity 'neorv32_cpu_cp_shifter'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_shifter.vhd":21)
+Analyzing architecture 'neorv32_cpu_cp_shifter_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_shifter.vhd":39)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_muldiv.vhd'
+Analyzing entity 'neorv32_cpu_cp_muldiv'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_muldiv.vhd":23)
+Analyzing architecture 'neorv32_cpu_cp_muldiv_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_muldiv.vhd":42)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_bitmanip.vhd'
+Analyzing entity 'neorv32_cpu_cp_bitmanip'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_bitmanip.vhd":26)
+Analyzing architecture 'neorv32_cpu_cp_bitmanip_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_bitmanip.vhd":51)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_fpu.vhd'
+Analyzing entity 'neorv32_cpu_cp_fpu'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_fpu.vhd":33)
+Analyzing architecture 'neorv32_cpu_cp_fpu_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_fpu.vhd":59)
+Analyzing entity 'neorv32_cpu_cp_fpu_normalizer'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_fpu.vhd":1521)
+Analyzing architecture 'neorv32_cpu_cp_fpu_normalizer_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_fpu.vhd":1547)
+Analyzing entity 'neorv32_cpu_cp_fpu_f2i'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_fpu.vhd":1956)
+Analyzing architecture 'neorv32_cpu_cp_fpu_f2i_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_fpu.vhd":1980)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_cfu.vhd'
+Analyzing entity 'neorv32_cpu_cp_cfu'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_cfu.vhd":18)
+Analyzing architecture 'neorv32_cpu_cp_cfu_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_cfu.vhd":49)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_cond.vhd'
+Analyzing entity 'neorv32_cpu_cp_cond'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_cond.vhd":17)
+Analyzing architecture 'neorv32_cpu_cp_cond_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_cond.vhd":32)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_crypto.vhd'
+Analyzing entity 'neorv32_cpu_cp_crypto'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_crypto.vhd":26)
+Analyzing architecture 'neorv32_cpu_cp_crypto_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_crypto.vhd":49)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_alu.vhd'
+Analyzing entity 'neorv32_cpu_alu'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_alu.vhd":18)
+Analyzing architecture 'neorv32_cpu_alu_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_alu.vhd":60)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_lsu.vhd'
+Analyzing entity 'neorv32_cpu_lsu'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_lsu.vhd":18)
+Analyzing architecture 'neorv32_cpu_lsu_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_lsu.vhd":41)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_pmp.vhd'
+Analyzing entity 'neorv32_cpu_pmp'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_pmp.vhd":22)
+Analyzing architecture 'neorv32_cpu_pmp_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_pmp.vhd":46)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_trace.vhd'
+Analyzing entity 'neorv32_cpu_trace'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_trace.vhd":18)
+Analyzing architecture 'neorv32_cpu_trace_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_trace.vhd":36)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu.vhd'
+Analyzing entity 'neorv32_cpu'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu.vhd":22)
+Analyzing architecture 'neorv32_cpu_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu.vhd":98)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cache.vhd'
+Analyzing entity 'neorv32_cache'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cache.vhd":27)
+Analyzing architecture 'neorv32_cache_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cache.vhd":45)
+Analyzing entity 'neorv32_cache_memory'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cache.vhd":360)
+Analyzing architecture 'neorv32_cache_memory_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cache.vhd":384)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd'
+Analyzing entity 'neorv32_bus_switch'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":17)
+Analyzing architecture 'neorv32_bus_switch_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":35)
+Analyzing entity 'neorv32_bus_reg'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":185)
+Analyzing architecture 'neorv32_bus_reg_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":202)
+Analyzing entity 'neorv32_bus_gateway'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":280)
+Analyzing architecture 'neorv32_bus_gateway_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":319)
+Analyzing entity 'neorv32_bus_io_switch'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":489)
+Analyzing architecture 'neorv32_bus_io_switch_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":569)
+Analyzing entity 'neorv32_bus_amo_rmw'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":728)
+Analyzing architecture 'neorv32_bus_amo_rmw_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":742)
+Analyzing entity 'neorv32_bus_amo_rvs'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":889)
+Analyzing architecture 'neorv32_bus_amo_rvs_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":903)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_dma.vhd'
+Analyzing entity 'neorv32_dma'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_dma.vhd":18)
+Analyzing architecture 'neorv32_dma_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_dma.vhd":33)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_application_image.vhd'
+Analyzing package 'neorv32_application_image'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_application_image.vhd":7)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_imem.vhd'
+Analyzing entity 'neorv32_imem'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_imem.vhd":19)
+Analyzing architecture 'neorv32_imem_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_imem.vhd":33)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_dmem.vhd'
+Analyzing entity 'neorv32_dmem'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_dmem.vhd":18)
+Analyzing architecture 'neorv32_dmem_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_dmem.vhd":31)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_xbus.vhd'
+Analyzing entity 'neorv32_xbus'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_xbus.vhd":21)
+Analyzing architecture 'neorv32_xbus_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_xbus.vhd":45)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bootloader_image.vhd'
+Analyzing package 'neorv32_bootloader_image'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bootloader_image.vhd":7)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_boot_rom.vhd'
+Analyzing entity 'neorv32_boot_rom'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_boot_rom.vhd":19)
+Analyzing architecture 'neorv32_boot_rom_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_boot_rom.vhd":28)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cfs.vhd'
+Analyzing entity 'neorv32_cfs'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cfs.vhd":18)
+Analyzing architecture 'neorv32_cfs_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cfs.vhd":34)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_sdi.vhd'
+Analyzing entity 'neorv32_sdi'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_sdi.vhd":18)
+Analyzing architecture 'neorv32_sdi_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_sdi.vhd":35)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_gpio.vhd'
+Analyzing entity 'neorv32_gpio'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_gpio.vhd":17)
+Analyzing architecture 'neorv32_gpio_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_gpio.vhd":32)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_wdt.vhd'
+Analyzing entity 'neorv32_wdt'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_wdt.vhd":18)
+Analyzing architecture 'neorv32_wdt_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_wdt.vhd":31)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_clint.vhd'
+Analyzing entity 'neorv32_clint'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_clint.vhd":21)
+Analyzing architecture 'neorv32_clint_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_clint.vhd":36)
+Analyzing entity 'neorv32_clint_mtimecmp'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_clint.vhd":218)
+Analyzing architecture 'neorv32_clint_mtimecmp_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_clint.vhd":231)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_uart.vhd'
+Analyzing entity 'neorv32_uart'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_uart.vhd":24)
+Analyzing architecture 'neorv32_uart_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_uart.vhd":45)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_spi.vhd'
+Analyzing entity 'neorv32_spi'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_spi.vhd":18)
+Analyzing architecture 'neorv32_spi_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_spi.vhd":36)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_twi.vhd'
+Analyzing entity 'neorv32_twi'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_twi.vhd":18)
+Analyzing architecture 'neorv32_twi_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_twi.vhd":36)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_twd.vhd'
+Analyzing entity 'neorv32_twd'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_twd.vhd":18)
+Analyzing architecture 'neorv32_twd_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_twd.vhd":37)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_pwm.vhd'
+Analyzing entity 'neorv32_pwm'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_pwm.vhd":21)
+Analyzing architecture 'neorv32_pwm_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_pwm.vhd":35)
+Analyzing entity 'neorv32_pwm_channel'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_pwm.vhd":178)
+Analyzing architecture 'neorv32_pwm_channel_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_pwm.vhd":197)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_trng.vhd'
+Analyzing entity 'neorv32_trng'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_trng.vhd":20)
+Analyzing architecture 'neorv32_trng_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_trng.vhd":33)
+Analyzing entity 'neotrng'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_trng.vhd":223)
+Analyzing architecture 'neotrng_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_trng.vhd":239)
+Analyzing entity 'neotrng_cell'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_trng.vhd":399)
+Analyzing architecture 'neotrng_cell_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_trng.vhd":413)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_neoled.vhd'
+Analyzing entity 'neorv32_neoled'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_neoled.vhd":18)
+Analyzing architecture 'neorv32_neoled_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_neoled.vhd":33)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_gptmr.vhd'
+Analyzing entity 'neorv32_gptmr'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_gptmr.vhd":20)
+Analyzing architecture 'neorv32_gptmr_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_gptmr.vhd":34)
+Analyzing entity 'neorv32_gptmr_slice'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_gptmr.vhd":211)
+Analyzing architecture 'neorv32_gptmr_slice_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_gptmr.vhd":230)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_onewire.vhd'
+Analyzing entity 'neorv32_onewire'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_onewire.vhd":18)
+Analyzing architecture 'neorv32_onewire_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_onewire.vhd":34)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_slink.vhd'
+Analyzing entity 'neorv32_slink'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_slink.vhd":18)
+Analyzing architecture 'neorv32_slink_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_slink.vhd":45)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_tracer.vhd'
+Analyzing entity 'neorv32_tracer'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_tracer.vhd":18)
+Analyzing architecture 'neorv32_tracer_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_tracer.vhd":37)
+Analyzing entity 'neorv32_tracer_simlog'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_tracer.vhd":354)
+Analyzing architecture 'neorv32_tracer_simlog_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_tracer.vhd":365)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_sysinfo.vhd'
+Analyzing entity 'neorv32_sysinfo'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_sysinfo.vhd":18)
+Analyzing architecture 'neorv32_sysinfo_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_sysinfo.vhd":67)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_debug_dtm.vhd'
+Analyzing entity 'neorv32_debug_dtm'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_debug_dtm.vhd":19)
+Analyzing architecture 'neorv32_debug_dtm_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_debug_dtm.vhd":40)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_debug_auth.vhd'
+Analyzing entity 'neorv32_debug_auth'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_debug_auth.vhd":19)
+Analyzing architecture 'neorv32_debug_auth_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_debug_auth.vhd":36)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_debug_dm.vhd'
+Analyzing entity 'neorv32_debug_dm'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_debug_dm.vhd":21)
+Analyzing architecture 'neorv32_debug_dm_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_debug_dm.vhd":42)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_top.vhd'
+Analyzing entity 'neorv32_top'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_top.vhd":21)
+Analyzing architecture 'neorv32_top_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_top.vhd":249)
+Analyzing VHDL file 'C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_ProcessorTop_MinimalBoot.vhd'
+Analyzing entity 'neorv32_processortop_minimalboot'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_ProcessorTop_MinimalBoot.vhd":17)
+Analyzing architecture 'neorv32_processortop_minimalboot_rtl'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_ProcessorTop_MinimalBoot.vhd":53)
+Processing 'neorv32_ProcessorTop_MinimalBoot(neorv32_ProcessorTop_MinimalBoot_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_ProcessorTop_MinimalBoot.vhd":17)
+Processing 'uflash(clk_freq=27000000)(uflash_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\uflash.vhd":39)
+Processing 'Gowin_User_Flash(Behavioral)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\gowin_user_flash.vhd":13)
+Processing 'neorv32_top(clock_frequency=27000000,ocd_en=true,riscv_isa_zicntr=true,imem_size=0,dmem_en=true,dmem_size=6144,xbus_en=true,xbus_timeout=0,io_gpio_num=6,io_clint_en=true,io_uart0_en=true)(neorv32_top_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_top.vhd":21)
+Processing 'neorv32_sys_reset(neorv32_sys_reset_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_sys.vhd":17)
+Processing 'neorv32_sys_clock(neorv32_sys_clock_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_sys.vhd":97)
+Processing 'neorv32_cpu(hart_id=0,boot_addr="11111111111000000000000000000000",debug_park_addr="11111111111111111111111100000100",debug_exc_addr="11111111111111111111111100000000",riscv_isa_c=false,riscv_isa_e=false,riscv_isa_m=false,riscv_isa_u=false,riscv_isa_zaamo=false,riscv_isa_zalrsc=false,riscv_isa_zba=false,riscv_isa_zbb=false,riscv_isa_zbkb=false,riscv_isa_zbkc=false,riscv_isa_zbkx=false,riscv_isa_zbs=false,riscv_isa_zcb=false,riscv_isa_zfinx=false,riscv_isa_zibi=false,riscv_isa_zicntr=true,riscv_isa_zicond=false,riscv_isa_zihpm=false,riscv_isa_zimop=false,riscv_isa_zknd=false,riscv_isa_zkne=false,riscv_isa_zknh=false,riscv_isa_zksed=false,riscv_isa_zksh=false,riscv_isa_zmmul=false,riscv_isa_zxcfu=false,riscv_isa_sdext=true,riscv_isa_sdtrig=false,riscv_isa_smpmp=false,cpu_trace_en=true,cpu_constt_br_en=false,cpu_fast_mul_en=false,cpu_fast_shift_en=false,cpu_rf_hw_rst_en=false,pmp_num_regions=0,pmp_min_granularity=4,pmp_tor_mode_en=false,pmp_nap_mode_en=false,hpm_num_cnts=0,hpm_cnt_width=40,num_hw_triggers=0)(neorv32_cpu_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu.vhd":22)
+Processing 'neorv32_cpu_frontend(hart_id=0,riscv_c=false,riscv_zcb=false)(neorv32_cpu_frontend_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_frontend.vhd":22)
+'others' clause is never selected("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_frontend.vhd":143)
+Processing 'neorv32_cpu_frontend_ipb(awidth=1,dwidth=17)(neorv32_cpu_frontend_ipb_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_frontend.vhd":323)
+Extracting RAM for identifier 'ipb'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_frontend.vhd":352)
+Processing 'neorv32_cpu_control(hart_id=0,boot_addr="11111111111000000000000000000000",debug_park_addr="11111111111111111111111100000100",debug_exc_addr="11111111111111111111111100000000",riscv_isa_a=false,riscv_isa_b=false,riscv_isa_c=false,riscv_isa_e=false,riscv_isa_m=false,riscv_isa_u=false,riscv_isa_zaamo=false,riscv_isa_zalrsc=false,riscv_isa_zcb=false,riscv_isa_zba=false,riscv_isa_zbb=false,riscv_isa_zbkb=false,riscv_isa_zbkc=false,riscv_isa_zbkx=false,riscv_isa_zbs=false,riscv_isa_zfinx=false,riscv_isa_zibi=false,riscv_isa_zicntr=true,riscv_isa_zicond=false,riscv_isa_zihpm=false,riscv_isa_zimop=false,riscv_isa_zkn=false,riscv_isa_zknd=false,riscv_isa_zkne=false,riscv_isa_zknh=false,riscv_isa_zks=false,riscv_isa_zksed=false,riscv_isa_zksh=false,riscv_isa_zkt=false,riscv_isa_zmmul=false,riscv_isa_zxcfu=false,riscv_isa_sdext=true,riscv_isa_sdtrig=false,riscv_isa_smpmp=false,cpu_trace_en=true,cpu_constt_br_en=false,cpu_fast_mul_en=false,cpu_fast_shift_en=false,cpu_rf_hw_rst_en=false)(neorv32_cpu_control_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_control.vhd":24)
+'others' clause is never selected("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_control.vhd":556)
+Processing 'neorv32_cpu_counters(zicntr_en=true,zihpm_en=false,hpm_num=0,hpm_width=40)(neorv32_cpu_counters_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_counters.vhd":22)
+Processing 'neorv32_prim_cnt(cwidth=64)(neorv32_prim_cnt_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":407)
+Processing 'neorv32_cpu_regfile(rst_en=false,rve_en=false)(neorv32_cpu_regfile_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_regfile.vhd":30)
+Processing 'neorv32_prim_sdpram(awidth=5,dwidth=32,outreg=false)(neorv32_prim_sdpram_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":247)
+Extracting RAM for identifier 'sdpram'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":272)
+Processing 'neorv32_cpu_alu(riscv_isa_m=false,riscv_isa_zba=false,riscv_isa_zbb=false,riscv_isa_zbkb=false,riscv_isa_zbkc=false,riscv_isa_zbkx=false,riscv_isa_zbs=false,riscv_isa_zfinx=false,riscv_isa_zibi=false,riscv_isa_zicond=false,riscv_isa_zknd=false,riscv_isa_zkne=false,riscv_isa_zknh=false,riscv_isa_zksed=false,riscv_isa_zksh=false,riscv_isa_zmmul=false,riscv_isa_zxcfu=false,fast_mul_en=false,fast_shift_en=false)(neorv32_cpu_alu_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_alu.vhd":18)
+'others' clause is never selected("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_alu.vhd":148)
+Processing 'neorv32_cpu_cp_shifter(fast_shift_en=false)(neorv32_cpu_cp_shifter_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_cp_shifter.vhd":21)
+Processing 'neorv32_cpu_lsu(hart_id=0)(neorv32_cpu_lsu_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_lsu.vhd":18)
+Processing 'neorv32_cpu_trace(neorv32_cpu_trace_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu_trace.vhd":18)
+Processing 'neorv32_bus_switch(b_read_only=true)(neorv32_bus_switch_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":17)
+Processing 'neorv32_bus_gateway(tmo_int=16,tmo_ext=0,a_en=false,a_base="00000000000000000000000000000000",a_size=1,b_en=true,b_base="10000000000000000000000000000000",b_size=8192,c_en=true,c_base="11111111111000000000000000000000",c_size=2097152,x_en=true)(neorv32_bus_gateway_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":280)
+Processing 'neorv32_dmem(mem_size=8192,outreg_en=false)(neorv32_dmem_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_dmem.vhd":18)
+Processing 'neorv32_prim_spram(awidth=11,dwidth=8,outreg=false)(neorv32_prim_spram_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":168)
+Extracting RAM for identifier 'spram'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":189)
+Processing 'neorv32_xbus(regstage_en=false)(neorv32_xbus_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_xbus.vhd":21)
+Processing 'neorv32_bus_reg(neorv32_bus_reg_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":185)
+Processing 'neorv32_bus_io_switch(dev_size=65536,dev_00_en=true,dev_00_base="11111111111000000000000000000000",dev_10_base="11111111111010100000000000000000",dev_11_base="11111111111010110000000000000000",dev_12_base="11111111111011000000000000000000",dev_13_base="11111111111011010000000000000000",dev_16_base="11111111111100000000000000000000",dev_17_base="11111111111100010000000000000000",dev_18_base="11111111111100100000000000000000",dev_19_base="11111111111100110000000000000000",dev_20_en=true,dev_20_base="11111111111101000000000000000000",dev_21_en=true,dev_21_base="11111111111101010000000000000000",dev_22_base="11111111111101100000000000000000",dev_23_base="11111111111101110000000000000000",dev_24_base="11111111111110000000000000000000",dev_25_base="11111111111110010000000000000000",dev_26_base="11111111111110100000000000000000",dev_27_base="11111111111110110000000000000000",dev_28_en=true,dev_28_base="11111111111111000000000000000000",dev_29_base="11111111111111010000000000000000",dev_30_en=true,dev_30_base="11111111111111100000000000000000",dev_31_en=true,dev_31_base="11111111111111110000000000000000")(neorv32_bus_io_switch_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":489)
+Processing 'neorv32_bus_reg(req_reg_en=true,rsp_reg_en=true)(neorv32_bus_reg_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_bus.vhd":185)
+Processing 'neorv32_boot_rom(neorv32_boot_rom_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_boot_rom.vhd":19)
+Processing 'neorv32_gpio(gpio_num=6)(neorv32_gpio_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_gpio.vhd":17)
+'others' clause is never selected("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_gpio.vhd":125)
+Processing 'neorv32_clint(num_harts=1)(neorv32_clint_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_clint.vhd":21)
+Processing 'neorv32_clint_mtimecmp(neorv32_clint_mtimecmp_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_clint.vhd":218)
+Processing 'neorv32_uart(sim_mode_en=false,sim_log_file="neorv32.uart0.log",uart_rx_fifo=1,uart_tx_fifo=1)(1,17)(neorv32_uart_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_uart.vhd":24)
+Processing 'neorv32_prim_fifo(awidth=0,dwidth=8,outgate=false)(neorv32_prim_fifo_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_prim.vhd":24)
+Processing 'neorv32_sysinfo(bus_tmo_int=16,bus_tmo_ext=0,num_harts=1,clock_frequency=27000000,boot_mode_select=0,int_bootloader_en=true,imem_en=false,imem_rom=false,imem_size=1,dmem_en=true,dmem_size=8192,icache_en=false,icache_num_blocks=4,dcache_en=false,dcache_num_blocks=4,cache_block_size=64,cache_bursts_en=true,xbus_en=true,ocd_en=true,ocd_auth=false,io_gpio_en=true,io_clint_en=true,io_uart0_en=true,io_uart1_en=false,io_spi_en=false,io_sdi_en=false,io_twi_en=false,io_twd_en=false,io_pwm_en=false,io_wdt_en=false,io_trng_en=false,io_cfs_en=false,io_neoled_en=false,io_gptmr_en=false,io_onewire_en=false,io_dma_en=false,io_slink_en=false,io_tracer_en=false)(neorv32_sysinfo_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_sysinfo.vhd":18)
+Processing 'neorv32_debug_dtm(idcode_version=(others=>'0'),idcode_partid=(others=>'0'),idcode_manid="00000000000")(neorv32_debug_dtm_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_debug_dtm.vhd":19)
+'others' clause is never selected("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_debug_dtm.vhd":127)
+Processing 'neorv32_debug_dm(num_harts=1,authenticator=false)(neorv32_debug_dm_rtl)'("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_debug_dm.vhd":21)
+'others' clause is never selected("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_debug_dm.vhd":554)
+NOTE  (EX0101) : Current top module is "neorv32_ProcessorTop_MinimalBoot"
 [5%] Running netlist conversion ...
 Running device independent optimization ...
 [10%] Optimizing Phase 0 completed
@@ -19,6 +261,8 @@ Running technical mapping ...
 [75%] Tech-Mapping Phase 2 completed
 [80%] Tech-Mapping Phase 3 completed
 [90%] Tech-Mapping Phase 4 completed
-[95%] Generate netlist file "C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\Documents\gng\impl\gwsynthesis\gng.vg" completed
-[100%] Generate report file "C:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\Documents\gng\impl\gwsynthesis\gng_syn.rpt.html" completed
+WARN  (NL0002) : The module "neorv32_cpu_trace" instantiated to "trace_enabled.neorv32_cpu_trace_inst" is swept in optimizing("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_cpu.vhd":498)
+WARN  (NL0002) : The module "neorv32_bus_reg" instantiated to "reg_stage_inst" is swept in optimizing("C:\Users\HP\Documents\Github\fpga_gng\gng\src\neorv32_xbus.vhd":56)
+[95%] Generate netlist file "C:\Users\HP\Documents\Github\fpga_gng\gng\impl\gwsynthesis\gng.vg" completed
+[100%] Generate report file "C:\Users\HP\Documents\Github\fpga_gng\gng\impl\gwsynthesis\gng_syn.rpt.html" completed
 GowinSynthesis finish
