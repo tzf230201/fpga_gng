@@ -1,6 +1,6 @@
 # Ignore local NEORV32 sources (use as submodule / external dependency instead)
-neorv32/
-neorv32/**
+# neorv32/
+# neorv32/**
 
 # VS Code settings
 .vscode/
