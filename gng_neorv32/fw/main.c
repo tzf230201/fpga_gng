@@ -31,7 +31,8 @@
  **************************************************************************/
 /**@{*/
 /** UART BAUD rate */
-#define BAUD_RATE 115200
+#define BAUD_RATE 1000000
+
 /**@}*/
 
 // --------------------------------------------------------------------------
@@ -54,8 +55,7 @@ static int   dataCount = 0;
 static bool dataDone = false;
 static bool running  = false;
 
-// GNG parameters (lebih agresif supaya konvergensi lebih cepat)
-// Nilai ini mendekati tuning Arduino awal.
+// GNG parameters (disamakan dengan Arduino "two_moon" sketch)
 static const float epsilon_b = 0.08f;   // winner learning rate
 static const float epsilon_n = 0.02f;   // neighbor learning rate
 static const float alpha     = 0.5f;    // error reduction factor
@@ -131,7 +131,45 @@ static void connectNodes(int a, int b) {
   }
 }
 
-// age all edges incident to winner and delete very old ones
+// remove edge between two nodes (if it exists)
+static void removeEdgePair(int a, int b) {
+  for (int i = 0; i < MAX_EDGES; i++) {
+    if (edges[i].active &&
+        ((edges[i].a == a && edges[i].b == b) ||
+         (edges[i].a == b && edges[i].b == a))) {
+      edges[i].active = false;
+    }
+  }
+}
+
+// remove nodes that have lost all incident edges (Fritzke-style cleanup)
+static void pruneIsolatedNodes(void) {
+  nodeCount = 0;
+
+  for (int i = 0; i < MAX_NODES; i++) {
+    if (!nodes[i].active) {
+      continue;
+    }
+
+    bool has_edge = false;
+    for (int e = 0; e < MAX_EDGES; e++) {
+      if (edges[e].active &&
+          (edges[e].a == i || edges[e].b == i)) {
+        has_edge = true;
+        break;
+      }
+    }
+
+    if (!has_edge) {
+      nodes[i].active = false;
+    }
+    else {
+      nodeCount++;
+    }
+  }
+}
+
+// age all edges incident to winner and delete very old ones (a_max = 50)
 static void ageEdgesOfWinner(int winner) {
   for (int i = 0; i < MAX_EDGES; i++) {
     if (edges[i].active &&
@@ -142,6 +180,9 @@ static void ageEdgesOfWinner(int winner) {
       }
     }
   }
+
+  // remove units without any incident edge as in Fritzke's algorithm
+  pruneIsolatedNodes();
 }
 
 // --------------------------------------------------------------------------
@@ -243,16 +284,19 @@ static void insertNode(void) {
     return;
   }
 
-  // new node at midpoint
+  // new node at midpoint (Fritzke): error_r = error_q (before scaling)
   nodes[r].x      = 0.5f * (nodes[q].x + nodes[f].x);
   nodes[r].y      = 0.5f * (nodes[q].y + nodes[f].y);
-  nodes[r].error  = nodes[q].error * 0.5f;
+  nodes[r].error  = nodes[q].error;
   nodes[r].active = true;
   nodeCount++;
 
+  // decrease error of q and f
   nodes[q].error *= alpha;
   nodes[f].error *= alpha;
 
+  // remove old edge between q and f and connect via new node r
+  removeEdgePair(q, f);
   connectNodes(r, q);
   connectNodes(r, f);
 }
@@ -415,8 +459,9 @@ static void trainOneStep(float x, float y) {
 
   stepCount++;
 
-  // insert new node every lambda_it iterations
-  if ((stepCount % lambda_it) == 0 && nodeCount < MAX_NODES) {
+  // insert new node every lambda_it iterations (Fritzke-style)
+  // insertNode() sendiri akan gagal diam-diam jika tidak ada slot kosong
+  if ((stepCount % lambda_it) == 0) {
     insertNode();
   }
 

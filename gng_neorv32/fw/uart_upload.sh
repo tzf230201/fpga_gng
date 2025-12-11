@@ -13,11 +13,31 @@ then
   exit 0
 fi
 
-# configure serial port
-stty -F "$1" 115200 -hup raw -echo -echoe -echok -echoctl -echoke -ixon cs8 -cstopb noflsh clocal cread
+# configure serial port (match Python uploader: 256000 baud)
+stty -F "$1" 230400 -hup raw -echo -echoe -echok -echoctl -echoke -ixon cs8 -cstopb noflsh clocal cread
 
 # abort autoboot sequence
 printf " " > $1 # send any char that triggers no command
+
+# erase flash memory (same as Python uploader 'z' command)
+printf "Erasing flash memory..." 
+exec 3<$1                            # redirect serial output to fd 3
+cat <&3 > uart_upload.response.tmp & # redirect serial output to file
+PID=$!                               # save pid to kill cat later
+printf "z" > $1                     # send erase command to serial port
+sleep 3s                             # wait for bootloader response
+kill $PID                            # kill cat process
+
+exec 3<&- # free fd 3
+
+if ! grep -Fq "CMD:>" uart_upload.response.tmp;
+then
+  printf " FAILED!\n"
+  rm -f uart_upload.response.tmp
+  exit 1
+else
+  printf " OK\n"
+fi
 
 # execute upload command and get response
 exec 3<$1                            # redirect serial output to fd 3

@@ -1,4 +1,5 @@
 import processing.serial.*;
+import java.util.ArrayList;
 
 Serial myPort;
 
@@ -21,20 +22,17 @@ class Edge {
   boolean active = false;
 }
 
-Node[] gngNodes = new Node[20];
-Edge[] gngEdges = new Edge[40];
+// gunakan list dinamis agar tidak dibatasi ukuran tetap
+ArrayList<Node> gngNodes = new ArrayList<Node>();
+ArrayList<Edge> gngEdges = new ArrayList<Edge>();
 
 
 void setup() {
   size(1000, 600);
   surface.setTitle("Two Moons (100 pts) → Arduino → GNG");
 
-  // Init GNG arrays
-  for (int i=0;i<20;i++) gngNodes[i] = new Node();
-  for (int i=0;i<40;i++) gngEdges[i] = new Edge();
-
   println(Serial.list());
-  myPort = new Serial(this, "COM1", 115200);
+  myPort = new Serial(this, "COM1", 1000000);
   delay(1500);
 
   data = generateMoons100();
@@ -113,8 +111,9 @@ void readGNG() {
    PARSE GNG DATA
 -------------------------------------------------- */
 void parseGNG(String s) {
-  for (Node n : gngNodes) n.active = false;
-  for (Edge e : gngEdges) e.active = false;
+  // reset semua node & edge
+  gngNodes.clear();
+  gngEdges.clear();
 
   String[] parts = s.split(";");
 
@@ -122,20 +121,22 @@ void parseGNG(String s) {
     if (p.startsWith("N:")) {
       String[] a = p.substring(2).split(",");
       int id = int(a[0]);
-      gngNodes[id].x = float(a[1]);
-      gngNodes[id].y = float(a[2]);
-      gngNodes[id].active = true;
+      // pastikan list cukup besar
+      while (gngNodes.size() <= id) {
+        gngNodes.add(new Node());
+      }
+      Node n = gngNodes.get(id);
+      n.x = float(a[1]);
+      n.y = float(a[2]);
+      n.active = true;
     }
     else if (p.startsWith("E:")) {
       String[] a = p.substring(2).split(",");
-      for (Edge e : gngEdges) {
-        if (!e.active) {
-          e.a = int(a[0]);
-          e.b = int(a[1]);
-          e.active = true;
-          break;
-        }
-      }
+      Edge e = new Edge();
+      e.a = int(a[0]);
+      e.b = int(a[1]);
+      e.active = true;
+      gngEdges.add(e);
     }
   }
 }
@@ -165,12 +166,14 @@ void drawGNG() {
   stroke(255);
   strokeWeight(2);
   for (Edge e : gngEdges) {
-    if (e.active) {
-      Node a = gngNodes[e.a];
-      Node b = gngNodes[e.b];
-      line(a.x * 400 + 50, a.y * 400 + 50,
-           b.x * 400 + 50, b.y * 400 + 50);
-    }
+    if (!e.active) continue;
+    if (e.a < 0 || e.a >= gngNodes.size()) continue;
+    if (e.b < 0 || e.b >= gngNodes.size()) continue;
+    Node a = gngNodes.get(e.a);
+    Node b = gngNodes.get(e.b);
+    if (!a.active || !b.active) continue;
+    line(a.x * 400 + 50, a.y * 400 + 50,
+         b.x * 400 + 50, b.y * 400 + 50);
   }
 
   fill(0, 180, 255);
