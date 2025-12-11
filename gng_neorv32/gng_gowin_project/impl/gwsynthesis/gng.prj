@@ -56,8 +56,8 @@
         <File library="neorv32" path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32\gng_gowin_project\src\neorv32_uart.vhd" type="vhdl"/>
         <File library="neorv32" path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32\gng_gowin_project\src\neorv32_wdt.vhd" type="vhdl"/>
         <File library="neorv32" path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32\gng_gowin_project\src\neorv32_xbus.vhd" type="vhdl"/>
-        <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32\gng_gowin_project\src\uflash.vhd" type="vhdl"/>
         <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32\gng_gowin_project\src\tang_nano_9k.vhd" type="vhdl"/>
+        <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32\gng_gowin_project\src\uflash.vhd" type="vhdl"/>
     </FileList>
     <OptionList>
         <Option type="disable_insert_pad" value="0"/>

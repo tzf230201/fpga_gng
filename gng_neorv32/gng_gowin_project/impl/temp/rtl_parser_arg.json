@@ -263,12 +263,12 @@
   },
   {
    "Library" : "work",
-   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/uflash.vhd",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/tang_nano_9k.vhd",
    "Type" : "vhdl"
   },
   {
    "Library" : "work",
-   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/tang_nano_9k.vhd",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/uflash.vhd",
    "Type" : "vhdl"
   }
  ],

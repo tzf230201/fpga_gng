@@ -47,6 +47,16 @@ def main():
             if "CMD:>" in response:
                 break
 
+               # Erase flash memory
+        print("Erasing flash memory...", end='')
+        ser.write(b'z')
+        while True:
+            time.sleep(0.5)
+            response = ser.read_all().decode(errors='ignore')
+            print(response)
+            if "CMD:>" in response:
+                break
+
         # Execute upload command and get response
         print("Starting upload...", end='')
         ser.write(b'u')

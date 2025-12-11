@@ -19,6 +19,40 @@
 #include <twi_flash.h>
 
 /**********************************************************************//**
+ * User flash (uflash) layout on Tang Nano 9K
+ *
+ * See gng_gowin_project/src/tang_nano_9k.vhd and uflash.vhd:
+ * - Base address : 0x00000000
+ * - Size         : 38 pages * 2048 bytes = 0x00013000
+ * - To ERASE a page: do an 8-bit write (SEL = 0001) to any
+ *   32-bit-aligned address inside that page.
+ *
+ * We provide a small helper that erases all pages so a new
+ * application image can be programmed cleanly.
+ **************************************************************************/
+
+#define UFLASH_BASE_ADDR  ((uint32_t)0x00000000u)
+#define UFLASH_PAGE_SIZE  ((uint32_t)2048u)
+#define UFLASH_NUM_PAGES  ((uint32_t)38u)
+
+static void uflash_erase_all(void) {
+  uint32_t page;
+
+  uart_puts("Erasing uflash (" xstr(UFLASH_NUM_PAGES) " pages)...\n");
+
+  for (page = 0; page < UFLASH_NUM_PAGES; page++) {
+    volatile uint8_t *addr = (volatile uint8_t*)(UFLASH_BASE_ADDR + page * UFLASH_PAGE_SIZE);
+
+    // 8-bit write to a 32-bit-aligned address in the page triggers erase
+    *addr = 0x00;
+
+    uart_putc('.');
+  }
+
+  uart_puts("\nDone erasing uflash.\n");
+}
+
+/**********************************************************************//**
  * Bootloader main. "naked" because this is free-standing.
  **************************************************************************/
 int __attribute__((naked)) main(void) {
@@ -133,6 +167,7 @@ skip_auto_boot:
         "Available CMDs:\n"
         "h: Help\n"
         "i: System info\n"
+        "z: Erase user flash (uflash)\n"
         "r: Restart\n"
         "u: Upload via UART\n"
 #if (TWI_FLASH_EN == 1)
@@ -170,6 +205,11 @@ skip_auto_boot:
       uart_puts("\nMISC: ");
       uart_puth(NEORV32_SYSINFO->MISC);
       uart_puts("\n");
+    }
+
+    /**** erase user flash (Tang Nano 9K uflash) ****/
+    if (cmd == 'z') {
+      uflash_erase_all();
     }
 
     /**** TWI flash access ****/

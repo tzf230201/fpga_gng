@@ -304,3 +304,39 @@ we need an external memory for store the instruction.
 fortunately, gowin FPGA came with user flash memory, we can use that to store code from UART. 
 
 but another problem is, how to make it boot from user flash if uart not exist.
+
+so we modified the bootloader, you can see "erase" function, that didn't exist before,
+we need that to clean up the memory before overwrite newer firmware on it, 
+
+the most important things is 
+1. base address
+2. page size
+3. uflash num pages.
+
+these value is related to in uflash configuration in the top vhdl file.
+if we use another board, we have to change the size in boorloader main.c file
+```
+#define UFLASH_BASE_ADDR  ((uint32_t)0x00000000u)
+#define UFLASH_PAGE_SIZE  ((uint32_t)2048u)
+#define UFLASH_NUM_PAGES  ((uint32_t)38u)
+```
+and file and in the top vhdl file.
+
+```
+    UFLASH_BASE : std_logic_vector(31 downto 0) := x"00000000";
+    UFLASH_END : std_logic_vector(31 downto 0) :=  x"00013000" -- 38 pages * 2048 bytes
+```
+
+because of that, the uart_upload.py have to change, we need to add erase function.
+
+
+anyway, about the firmware, we have to adjust the rom (imem) and ram (dmem) size in the makefile according to our settings in vhdl. because we are using uflash right now, in top vhdl file, imem side is 0, but rom size follow uflash size.
+
+
+```
+# Adjust processor IMEM size
+USER_FLAGS += -Wl,--defsym,__neorv32_rom_size=72k
+
+# Adjust processor DMEM size
+USER_FLAGS += -Wl,--defsym,__neorv32_ram_size=16k
+```

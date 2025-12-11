@@ -14,10 +14,10 @@ EFFORT = -Os
 USER_FLAGS += -ggdb -gdwarf-3
 
 # Adjust processor IMEM size
-USER_FLAGS += -Wl,--defsym,__neorv32_rom_size=16k
+USER_FLAGS += -Wl,--defsym,__neorv32_rom_size=72k
 
 # Adjust processor DMEM size
-USER_FLAGS += -Wl,--defsym,__neorv32_ram_size=8k
+USER_FLAGS += -Wl,--defsym,__neorv32_ram_size=16k
 
 # Adjust maximum heap size
 #USER_FLAGS += -Wl,--defsym,__neorv32_heap_size=1k
