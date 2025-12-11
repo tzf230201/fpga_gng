@@ -226,10 +226,49 @@ Change `COM1` to your actual port.
 
 # neorv32 explanation
 
-so neorv32 is an FPGA based CPU,
-so it's super customable, you can maket only have 1 uart or 2 uart, how many pwm output, how many spi and so on.
+you need to get neorv32 first, well currently i'm using v1.12.5
 
-but the main problem is, all the code is in VHDL.
+```
+git clone https://github.com/tzf230201/fpga_gng.git
+cd fpga_gng
+git clone https://github.com/stnolting/neorv32.git
+```
+
+or use the same version as me, download zip version and extract
+
+```
+https://github.com/stnolting/neorv32/releases/tag/v1.12.5
+```
+
+and my reference for implementing neorv32 in tang nano 9k is form this 
+
+```
+https://github.com/jimmyw/tang_nano_9k_neorv32
+```
+
+but it seemslike the code kind of old version, so several things is not compatible anymore, especially for bootloader.
+
+so i decided to build a new one, i plan to have different direction with mr.jimmyw, i want to make it more arduino like.
+
+btw i also want to give credit to this
+
+```
+https://github.com/grughuhler/picorv32_tang_nano_unified
+```
+
+for the original version of `uart_upload.py`, but, i modify the code based to be compatible with newer bootloader version.
+
+many thanks.
+
+
+let's get back to neorv32,
+
+so neorv32 is an FPGA based CPU by Mr. Stephan Nolting
+i like it becuse it's super customable, you can make it only have 1 uart or 2 uart, how many pwm output, how many spi and so on.
+
+for now i'm talk about implementing neorv32 in gowin fpga.
+
+but the main problem is, all the code of neorv32 is in VHDL.
 so there is no non-volatile memory inside the design of CPU.
 
 so, the only way to program this CPU is to embed it into HDL code. 
