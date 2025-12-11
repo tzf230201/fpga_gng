@@ -234,7 +234,7 @@ cd fpga_gng
 git clone https://github.com/stnolting/neorv32.git
 ```
 
-or use the same version as me, download zip version and extract
+or use the same version as me, download zip version and extract, and rename the folder to `neorv32`
 
 ```
 https://github.com/stnolting/neorv32/releases/tag/v1.12.5
