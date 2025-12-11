@@ -62,7 +62,7 @@
 
 // Time until the auto-boot sequence starts (in seconds)
 #ifndef AUTO_BOOT_TIMEOUT
-#define AUTO_BOOT_TIMEOUT 5
+#define AUTO_BOOT_TIMEOUT 1
 #endif
 
 /**********************************************************************

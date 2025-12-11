@@ -260,6 +260,15 @@ for the original version of `uart_upload.py`, but, i modify the code based to be
 
 many thanks.
 
+to compile the firmware you can do this
+```
+cd gng_neorv32
+cd fw
+make exe
+python3 uart_upload.py /dev/ttyUSB0 neorv32_exe.bin
+```
+
+
 
 let's get back to neorv32,
 

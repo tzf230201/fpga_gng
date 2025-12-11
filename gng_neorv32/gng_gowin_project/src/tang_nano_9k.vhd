@@ -24,7 +24,7 @@ entity neorv32_ProcessorTop_MinimalBoot is
     IMEM_SIZE       : natural := 0*1024; -- size of processor-internal instruction memory in bytes --default 64
     -- Internal Data memory --
     DMEM_EN         : boolean := true;    -- implement processor-internal data memory
-    DMEM_SIZE       : natural := 6*1024; -- size of processor-internal data memory in bytes --default 64
+    DMEM_SIZE       : natural := 16*1024; -- size of processor-internal data memory in bytes --default 64
     -- Processor peripherals --
     IO_GPIO_NUM     : natural := 6;       -- number of GPIO input/output pairs (0..32)
     BOOT_MODE_SELECT : natural := 0;

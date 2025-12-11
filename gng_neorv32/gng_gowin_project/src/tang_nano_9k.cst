@@ -36,14 +36,14 @@ IO_PORT "clk_i" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 //    jtag_tdi_i     : in  std_ulogic;                                 -- serial data input
 //    jtag_tdo_o     : out std_ulogic;                                 -- serial data output
 //    jtag_tms_i     : in  std_ulogic;                                 -- mode select
-//IO_LOC "jtag_tck_i" 29;
-//IO_PORT "jtag_tck_i" IO_TYPE=LVCMOS33 PULL_MODE=UP
+IO_LOC "jtag_tck_i" 29;
+IO_PORT "jtag_tck_i" IO_TYPE=LVCMOS33 PULL_MODE=UP
 
-//IO_LOC "jtag_tdi_i" 30;
-//IO_PORT "jtag_tdi_i" IO_TYPE=LVCMOS33 PULL_MODE=UP
+IO_LOC "jtag_tdi_i" 30;
+IO_PORT "jtag_tdi_i" IO_TYPE=LVCMOS33 PULL_MODE=UP
 
-//IO_LOC "jtag_tdo_o" 33;
-//IO_PORT "jtag_tdo_o" IO_TYPE=LVCMOS33 DRIVE=8
+IO_LOC "jtag_tdo_o" 33;
+IO_PORT "jtag_tdo_o" IO_TYPE=LVCMOS33 DRIVE=8
 
-//IO_LOC "jtag_tms_i" 34;
-//IO_PORT "jtag_tms_i" IO_TYPE=LVCMOS33 PULL_MODE=UP
+IO_LOC "jtag_tms_i" 34;
+IO_PORT "jtag_tms_i" IO_TYPE=LVCMOS33 PULL_MODE=UP

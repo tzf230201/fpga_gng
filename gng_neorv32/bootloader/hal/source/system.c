@@ -262,12 +262,12 @@ int system_exe_store(int (*dev_init)(void), int (*dev_erase)(void), int (*stream
 void system_boot_app(void) {
 
   // executable available?
-  if (g_exe_size == 0) {
-    uart_puts("No executable. Boot anyway? (y/n)\n");
-    if (uart_getc() != 'y') {
-      return;
-    }
-  }
+  // if (g_exe_size == 0) {
+  //   uart_puts("No executable. Boot anyway? (y/n)\n");
+  //   if (uart_getc() != 'y') {
+  //     return;
+  //   }
+  // }
 
   // deactivate global IRQs
   neorv32_cpu_csr_clr(CSR_MSTATUS, 1 << CSR_MSTATUS_MIE);

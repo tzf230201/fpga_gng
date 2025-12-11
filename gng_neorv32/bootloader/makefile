@@ -27,5 +27,5 @@ USER_FLAGS += \
 USER_FLAGS += -DMAKE_BOOTLOADER -flto
 
 # include the main NEORV32 makefile
-NEORV32_HOME = ../..
+NEORV32_HOME ?= ../../neorv32
 include $(NEORV32_HOME)/sw/common/common.mk

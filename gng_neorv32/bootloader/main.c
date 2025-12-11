@@ -84,7 +84,9 @@ int __attribute__((naked)) main(void) {
   if (system_exe_load(sdcard_setup, sdcard_stream_get) == 0) { system_boot_app(); }
 #endif
 
+system_boot_app();
 skip_auto_boot:
+
 #endif
 
   // ------------------------------------------------
