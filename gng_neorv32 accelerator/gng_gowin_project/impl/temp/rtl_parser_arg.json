@@ -1,0 +1,283 @@
+{
+ "Device" : "GW1NR-9C",
+ "Files" : [
+  {
+   "Library" : "work",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/gowin_user_flash.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_application_image.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_boot_rom.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_bootloader_image.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_bus.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cache.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cfs.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_clint.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_alu.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_control.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_counters.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_cp_bitmanip.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_cp_cfu.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_cp_cond.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_cp_crypto.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_cp_fpu.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_cp_muldiv.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_cp_shifter.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_decompressor.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_frontend.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_hwtrig.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_lsu.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_pmp.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_regfile.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_cpu_trace.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_debug_auth.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_debug_dm.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_debug_dtm.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_dma.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_dmem.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_gpio.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_gptmr.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_imem.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_neoled.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_onewire.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_package.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_prim.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_pwm.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_sdi.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_slink.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_spi.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_sys.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_sysinfo.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_top.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_tracer.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_trng.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_twd.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_twi.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_uart.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_wdt.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "neorv32",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/neorv32_xbus.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "work",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/tang_nano_9k.vhd",
+   "Type" : "vhdl"
+  },
+  {
+   "Library" : "work",
+   "Path" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/src/uflash.vhd",
+   "Type" : "vhdl"
+  }
+ ],
+ "IncludePath" : [
+  "C:/Users/HP/Documents/Github/fpga_gng/gng/src"
+ ],
+ "LoopLimit" : 2000,
+ "ResultFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32/gng_gowin_project/impl/temp/rtl_parser.result",
+ "Top" : "",
+ "VerilogStd" : "verilog_2001",
+ "VhdlStd" : "vhdl_2019"
+}
