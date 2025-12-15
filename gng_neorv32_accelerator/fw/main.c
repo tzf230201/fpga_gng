@@ -14,22 +14,20 @@
 
 /**********************************************************************//**
  * ---------------- GNG TUNABLE PARAMETERS (EDIT HERE) ----------------
- * Sesuai paper Fritzke (contoh caption Figure):
- *   λ = 100, εb = 0.2, εn = 0.006, α = 0.5, a_max = 50, d = 0.995
  **************************************************************************/
-#define GNG_LAMBDA      100     // λ: insert node every λ steps
-#define GNG_EPSILON_B   0.3f    // εb: winner learning rate
-#define GNG_EPSILON_N   0.001f   // εn: neighbor learning rate
-#define GNG_ALPHA       0.5f    // α: error reduction for q and f at insertion
-#define GNG_A_MAX       50      // a_max: max edge age, delete if age > a_max
-#define GNG_D           0.995f  // d: global error decay each step
+#define GNG_LAMBDA      100
+#define GNG_EPSILON_B   0.3f
+#define GNG_EPSILON_N   0.001f
+#define GNG_ALPHA       0.5f
+#define GNG_A_MAX       50
+#define GNG_D           0.995f
 
 /**********************************************************************//**
  * Limits
  **************************************************************************/
-#define MAXPTS     100
-#define MAX_NODES   40
-#define MAX_EDGES   80
+#define MAXPTS      100
+#define MAX_NODES    40
+#define MAX_EDGES    80
 
 /**********************************************************************//**
  * UART protocol (split frames)
@@ -41,6 +39,9 @@
 #define CMD_RUN         0x03u
 #define CMD_GNG_NODES   0x10u
 #define CMD_GNG_EDGES   0x11u
+
+// send visualization not every step (biar Processing gak kewalahan)
+#define STREAM_EVERY_N  5
 
 // RX state machine
 enum {
@@ -112,18 +113,13 @@ static int findEdge(int a, int b) {
   return -1;
 }
 
-// Fritzke step: "create edge s1-s2 (or reset its age)"
 static void connectOrResetEdge(int a, int b) {
   int ei = findEdge(a, b);
-  if (ei >= 0) {
-    edges[ei].age = 0;
-    return;
-  }
+  if (ei >= 0) { edges[ei].age = 0; return; }
 
   for (int i = 0; i < MAX_EDGES; i++) {
     if (!edges[i].active) {
-      edges[i].a = a;
-      edges[i].b = b;
+      edges[i].a = a; edges[i].b = b;
       edges[i].age = 0;
       edges[i].active = true;
       return;
@@ -136,27 +132,20 @@ static void removeEdgePair(int a, int b) {
   if (ei >= 0) edges[ei].active = false;
 }
 
-// Fritzke step: "increment age of all edges emanating from winner"
 static void ageEdgesFromWinner(int winner) {
   for (int i = 0; i < MAX_EDGES; i++) {
     if (!edges[i].active) continue;
-    if (edges[i].a == winner || edges[i].b == winner) {
-      edges[i].age++;
-    }
+    if (edges[i].a == winner || edges[i].b == winner) edges[i].age++;
   }
 }
 
-// Fritzke step: "remove edges with age > a_max"
 static void deleteOldEdges(void) {
   for (int i = 0; i < MAX_EDGES; i++) {
     if (!edges[i].active) continue;
-    if (edges[i].age > GNG_A_MAX) {
-      edges[i].active = false;
-    }
+    if (edges[i].age > GNG_A_MAX) edges[i].active = false;
   }
 }
 
-// Fritzke step: "remove nodes with no incident edges"
 static void pruneIsolatedNodes(void) {
   for (int i = 0; i < MAX_NODES; i++) {
     if (!nodes[i].active) continue;
@@ -164,62 +153,51 @@ static void pruneIsolatedNodes(void) {
     bool has_edge = false;
     for (int e = 0; e < MAX_EDGES; e++) {
       if (!edges[e].active) continue;
-      if (edges[e].a == i || edges[e].b == i) {
-        has_edge = true;
-        break;
-      }
+      if (edges[e].a == i || edges[e].b == i) { has_edge = true; break; }
     }
     if (!has_edge) nodes[i].active = false;
   }
 }
 
-// Fritzke insertion rule
-static void insertNode(void) {
-  // q: node with maximum accumulated error
+// Fritzke insertion rule (return index r or -1)
+static int insertNode(void) {
   int q = -1;
   float maxErr = -1.0f;
   for (int i = 0; i < MAX_NODES; i++) {
-    if (nodes[i].active && nodes[i].error > maxErr) {
-      maxErr = nodes[i].error;
-      q = i;
-    }
+    if (nodes[i].active && nodes[i].error > maxErr) { maxErr = nodes[i].error; q = i; }
   }
-  if (q < 0) return;
+  if (q < 0) return -1;
 
-  // f: neighbor of q with maximum error
   int f = -1;
   maxErr = -1.0f;
   for (int i = 0; i < MAX_EDGES; i++) {
     if (!edges[i].active) continue;
-
     int nb = -1;
     if (edges[i].a == q) nb = edges[i].b;
     else if (edges[i].b == q) nb = edges[i].a;
-
     if (nb >= 0 && nodes[nb].active && nodes[nb].error > maxErr) {
       maxErr = nodes[nb].error;
       f = nb;
     }
   }
-  if (f < 0) return;
+  if (f < 0) return -1;
 
   int r = findFreeNode();
-  if (r < 0) return;
+  if (r < 0) return -1;
 
-  // r at midpoint
   nodes[r].x = 0.5f * (nodes[q].x + nodes[f].x);
   nodes[r].y = 0.5f * (nodes[q].y + nodes[f].y);
-  nodes[r].error = nodes[q].error; // common Fritzke choice
+  nodes[r].error  = nodes[q].error;
   nodes[r].active = true;
 
-  // decrease error of q and f
   nodes[q].error *= GNG_ALPHA;
   nodes[f].error *= GNG_ALPHA;
 
-  // remove edge q-f and add q-r, r-f
   removeEdgePair(q, f);
   connectOrResetEdge(q, r);
   connectOrResetEdge(r, f);
+
+  return r;
 }
 
 // ---------------- UART frame TX ----------------
@@ -237,12 +215,11 @@ static void uart_send_frame(uint8_t cmd, const uint8_t *payload, uint8_t len) {
 }
 
 static void sendGNGNodes(void) {
-  // payload: [frame_id][node_count] + node_count * { idx, x16, y16 }
   uint8_t payload[2 + MAX_NODES * 5];
   uint8_t p = 0;
 
   payload[p++] = frame_id;
-  payload[p++] = 0; // node_count placeholder
+  payload[p++] = 0;
 
   uint8_t node_count = 0;
   for (int i = 0; i < MAX_NODES; i++) {
@@ -256,21 +233,18 @@ static void sendGNGNodes(void) {
     payload[p++] = (uint8_t)((xi >> 8) & 0xFF);
     payload[p++] = (uint8_t)(yi & 0xFF);
     payload[p++] = (uint8_t)((yi >> 8) & 0xFF);
-
     node_count++;
   }
   payload[1] = node_count;
-
   uart_send_frame(CMD_GNG_NODES, payload, p);
 }
 
 static void sendGNGEdges(void) {
-  // payload: [frame_id][edge_count] + edge_count * { a, b }
   uint8_t payload[2 + MAX_EDGES * 2];
   uint8_t p = 0;
 
   payload[p++] = frame_id;
-  payload[p++] = 0; // edge_count placeholder
+  payload[p++] = 0;
 
   uint8_t edge_count = 0;
   for (int i = 0; i < MAX_EDGES; i++) {
@@ -280,7 +254,6 @@ static void sendGNGEdges(void) {
     edge_count++;
   }
   payload[1] = edge_count;
-
   uart_send_frame(CMD_GNG_EDGES, payload, p);
 }
 
@@ -288,7 +261,6 @@ static void sendGNGEdges(void) {
 static void handleCommand(uint8_t cmd, const uint8_t *payload, uint8_t len) {
   if (cmd == CMD_DATA_BATCH) {
     if (len < 1) return;
-
     uint8_t count = payload[0];
     if (len < (uint8_t)(1 + count * 4u)) return;
 
@@ -297,18 +269,15 @@ static void handleCommand(uint8_t cmd, const uint8_t *payload, uint8_t len) {
       int16_t xi = (int16_t)((uint16_t)payload[pos] | ((uint16_t)payload[pos + 1] << 8));
       int16_t yi = (int16_t)((uint16_t)payload[pos + 2] | ((uint16_t)payload[pos + 3] << 8));
       pos += 4;
-
       if (dataCount < MAXPTS) {
         dataX[dataCount] = (float)xi / 1000.0f;
         dataY[dataCount] = (float)yi / 1000.0f;
         dataCount++;
       }
     }
-  }
-  else if (cmd == CMD_DONE) {
+  } else if (cmd == CMD_DONE) {
     dataDone = true;
-  }
-  else if (cmd == CMD_RUN) {
+  } else if (cmd == CMD_RUN) {
     running = true;
   }
 }
@@ -316,23 +285,17 @@ static void handleCommand(uint8_t cmd, const uint8_t *payload, uint8_t len) {
 static void readSerial(void) {
   while (neorv32_uart0_char_received()) {
     uint8_t b = (uint8_t)neorv32_uart0_getc();
-
     switch (rx_state) {
       case RX_WAIT_H1:
         if (b == UART_HDR) rx_state = RX_WAIT_H2;
         break;
-
       case RX_WAIT_H2:
         if (b == UART_HDR) rx_state = RX_WAIT_CMD;
         else rx_state = RX_WAIT_H1;
         break;
-
       case RX_WAIT_CMD:
-        rx_cmd = b;
-        rx_sum = b;
-        rx_state = RX_WAIT_LEN;
+        rx_cmd = b; rx_sum = b; rx_state = RX_WAIT_LEN;
         break;
-
       case RX_WAIT_LEN:
         rx_len = b;
         rx_sum = (uint8_t)(rx_sum + b);
@@ -341,20 +304,17 @@ static void readSerial(void) {
         else if (rx_len > sizeof(rx_payload)) rx_state = RX_WAIT_H1;
         else rx_state = RX_WAIT_PAYLOAD;
         break;
-
       case RX_WAIT_PAYLOAD:
         rx_payload[rx_index++] = b;
         rx_sum = (uint8_t)(rx_sum + b);
         if (rx_index >= rx_len) rx_state = RX_WAIT_CHK;
         break;
-
       case RX_WAIT_CHK: {
         uint8_t expected = (uint8_t)(~rx_sum);
         if (b == expected) handleCommand(rx_cmd, rx_payload, rx_len);
         rx_state = RX_WAIT_H1;
         break;
       }
-
       default:
         rx_state = RX_WAIT_H1;
         break;
@@ -362,35 +322,201 @@ static void readSerial(void) {
   }
 }
 
+// ============================================================================
+// ======================  CFS WINNER-FINDER INTEGRATION  ======================
+// ============================================================================
+#include <neorv32_cfs.h>
+
+// register map must match VHDL
+#define CFS_REG_CTRL       0
+#define CFS_REG_COUNT      1
+
+#define CFS_REG_LAMBDA     2
+#define CFS_REG_A_MAX      3
+#define CFS_REG_EPS_B      4
+#define CFS_REG_EPS_N      5
+#define CFS_REG_ALPHA      6
+#define CFS_REG_D          7
+
+#define CFS_REG_XIN        8
+#define CFS_REG_YIN        9
+#define CFS_REG_NODE_COUNT 10
+#define CFS_REG_ACT_LO     11
+#define CFS_REG_ACT_HI     12
+
+#define CFS_REG_OUT_S12    13
+#define CFS_REG_OUT_MIN1   14
+#define CFS_REG_OUT_MIN2   15
+
+#define CFS_DATA_BASE      16
+#define CFS_NODE_BASE      128
+
+#define CFS_CTRL_CLEAR     (1u << 0)
+#define CFS_CTRL_START     (1u << 1)
+
+#define CFS_STATUS_BUSY    (1u << 16)
+#define CFS_STATUS_DONE    (1u << 17)
+
+static bool g_has_cfs = false;
+
+// float [0..1] -> Q0.16
+static inline uint16_t float_to_q16(float v) {
+  if (v <= 0.0f) return 0;
+  if (v >= 0.9999847412f) return 0xFFFF;
+  uint32_t q = (uint32_t)(v * 65536.0f + 0.5f);
+  if (q > 0xFFFF) q = 0xFFFF;
+  return (uint16_t)q;
+}
+
+// float [0..1] -> Q1.15 signed positive (0..0x7FFF)
+static inline int16_t float_to_q15_pos(float v) {
+  if (v <= 0.0f) return 0;
+  if (v >= 0.9999694824f) return (int16_t)0x7FFF; // (32767/32768)
+  int32_t q = (int32_t)(v * 32768.0f + 0.5f);
+  if (q > 0x7FFF) q = 0x7FFF;
+  return (int16_t)q;
+}
+
+// pack node xy: [15:0]=x_q15, [31:16]=y_q15
+static inline uint32_t pack_node_q15(float x, float y) {
+  int16_t xq = float_to_q15_pos(x);
+  int16_t yq = float_to_q15_pos(y);
+  return ((uint32_t)(uint16_t)xq) | (((uint32_t)(uint16_t)yq) << 16);
+}
+
+static inline float q30_to_float(uint32_t q30) {
+  // dist returned by CFS is Q2.30 (dx^2 + dy^2)
+  return (float)q30 / 1073741824.0f; // 2^30
+}
+
+static void cfs_write_settings(void) {
+  NEORV32_CFS->REG[CFS_REG_LAMBDA] = (uint32_t)GNG_LAMBDA;
+  NEORV32_CFS->REG[CFS_REG_A_MAX]  = (uint32_t)GNG_A_MAX;
+
+  NEORV32_CFS->REG[CFS_REG_EPS_B]  = (uint32_t)float_to_q16(GNG_EPSILON_B);
+  NEORV32_CFS->REG[CFS_REG_EPS_N]  = (uint32_t)float_to_q16(GNG_EPSILON_N);
+  NEORV32_CFS->REG[CFS_REG_ALPHA]  = (uint32_t)float_to_q16(GNG_ALPHA);
+  NEORV32_CFS->REG[CFS_REG_D]      = (uint32_t)float_to_q16(GNG_D);
+}
+
+static void cfs_sync_nodes_full(void) {
+  for (int i = 0; i < MAX_NODES; i++) {
+    // write even if inactive (aman). active mask will filter.
+    NEORV32_CFS->REG[CFS_NODE_BASE + i] = pack_node_q15(nodes[i].x, nodes[i].y);
+  }
+}
+
+static inline void cfs_write_one_node(int i) {
+  NEORV32_CFS->REG[CFS_NODE_BASE + i] = pack_node_q15(nodes[i].x, nodes[i].y);
+}
+
+static void cfs_build_active_mask(uint32_t *lo, uint32_t *hi8) {
+  uint32_t mlo = 0;
+  uint32_t mhi = 0;
+  for (int i = 0; i < MAX_NODES; i++) {
+    if (!nodes[i].active) continue;
+    if (i < 32) mlo |= (1u << i);
+    else mhi |= (1u << (i - 32));
+  }
+  *lo = mlo;
+  *hi8 = (mhi & 0xFFu);
+}
+
+static bool cfs_find_winners(float x, float y, int *s1, int *s2, float *d1_out) {
+  uint32_t act_lo, act_hi8;
+  cfs_build_active_mask(&act_lo, &act_hi8);
+
+  NEORV32_CFS->REG[CFS_REG_XIN]        = (uint32_t)(uint16_t)float_to_q15_pos(x);
+  NEORV32_CFS->REG[CFS_REG_YIN]        = (uint32_t)(uint16_t)float_to_q15_pos(y);
+  NEORV32_CFS->REG[CFS_REG_NODE_COUNT] = (uint32_t)MAX_NODES;
+  NEORV32_CFS->REG[CFS_REG_ACT_LO]     = act_lo;
+  NEORV32_CFS->REG[CFS_REG_ACT_HI]     = act_hi8;
+
+  NEORV32_CFS->REG[CFS_REG_CTRL] = CFS_CTRL_START;
+
+  // wait done (timeout)
+  const uint32_t TIMEOUT = 20000u;
+  for (uint32_t t = 0; t < TIMEOUT; t++) {
+    uint32_t st = NEORV32_CFS->REG[CFS_REG_CTRL]; // status bits in readback
+    if (st & CFS_STATUS_DONE) break;
+    if (t == TIMEOUT - 1) return false;
+  }
+
+  uint32_t s12  = NEORV32_CFS->REG[CFS_REG_OUT_S12];
+  uint32_t min1 = NEORV32_CFS->REG[CFS_REG_OUT_MIN1];
+
+  *s1 = (int)(s12 & 0xFFu);
+  *s2 = (int)((s12 >> 8) & 0xFFu);
+  *d1_out = q30_to_float(min1);
+  return true;
+}
+
+// dataset upload optional (kalau VHDL kamu masih punya DATA_BASE)
+static inline uint32_t pack_xy_i16(int16_t xi, int16_t yi) {
+  return ((uint32_t)(uint16_t)xi) | (((uint32_t)(uint16_t)yi) << 16);
+}
+
+static void cfs_upload_dataset_and_settings_once(void) {
+  const int n = (dataCount < MAXPTS) ? dataCount : MAXPTS;
+
+  NEORV32_CFS->REG[CFS_REG_CTRL]  = CFS_CTRL_CLEAR;
+  NEORV32_CFS->REG[CFS_REG_COUNT] = (uint32_t)n;
+
+  // dataset (optional, boleh kamu comment kalau mau hemat resource VHDL)
+  for (int i = 0; i < n; i++) {
+    int16_t xi = (int16_t)(dataX[i] * 1000.0f);
+    int16_t yi = (int16_t)(dataY[i] * 1000.0f);
+    NEORV32_CFS->REG[CFS_DATA_BASE + i] = pack_xy_i16(xi, yi);
+  }
+
+  cfs_write_settings();
+  cfs_sync_nodes_full();
+}
+
 // ---------------- GNG step (Fritzke order) ----------------
 static void trainOneStep(float x, float y) {
   int   s1 = -1, s2 = -1;
-  float d1 = 1e30f, d2 = 1e30f;
+  float d1 = 1e30f;
 
-  // 1) find nearest and second nearest
-  for (int i = 0; i < MAX_NODES; i++) {
-    if (!nodes[i].active) continue;
-
-    float d = dist2(x, y, nodes[i].x, nodes[i].y);
-    if (d < d1) {
-      d2 = d1; s2 = s1;
-      d1 = d;  s1 = i;
-    } else if (d < d2) {
-      d2 = d;  s2 = i;
+  // ========== winner search ==========
+  if (g_has_cfs) {
+    // keep HW node_mem up-to-date enough:
+    // (at least winner + neighbors will be updated after movement; full sync on init/insert)
+    if (!cfs_find_winners(x, y, &s1, &s2, &d1)) {
+      // fallback SW if HW timeout
+      s1 = -1; s2 = -1; d1 = 1e30f;
+      float d2 = 1e30f;
+      for (int i = 0; i < MAX_NODES; i++) {
+        if (!nodes[i].active) continue;
+        float d = dist2(x, y, nodes[i].x, nodes[i].y);
+        if (d < d1) { d2 = d1; s2 = s1; d1 = d; s1 = i; }
+        else if (d < d2) { d2 = d; s2 = i; }
+      }
+    }
+  } else {
+    float d2 = 1e30f;
+    for (int i = 0; i < MAX_NODES; i++) {
+      if (!nodes[i].active) continue;
+      float d = dist2(x, y, nodes[i].x, nodes[i].y);
+      if (d < d1) { d2 = d1; s2 = s1; d1 = d; s1 = i; }
+      else if (d < d2) { d2 = d; s2 = i; }
     }
   }
+
   if (s1 < 0 || s2 < 0) return;
 
   // 2) increment age of edges from winner
   ageEdgesFromWinner(s1);
 
-  // 3) add error to winner (use squared distance is OK)
+  // 3) add error to winner
   nodes[s1].error += d1;
 
-  // 4) move winner and its neighbors
+  // 4) move winner
   nodes[s1].x += GNG_EPSILON_B * (x - nodes[s1].x);
   nodes[s1].y += GNG_EPSILON_B * (y - nodes[s1].y);
+  if (g_has_cfs) cfs_write_one_node(s1);
 
+  // move neighbors
   for (int i = 0; i < MAX_EDGES; i++) {
     if (!edges[i].active) continue;
     if (edges[i].a == s1 || edges[i].b == s1) {
@@ -398,11 +524,12 @@ static void trainOneStep(float x, float y) {
       if (nodes[nb].active) {
         nodes[nb].x += GNG_EPSILON_N * (x - nodes[nb].x);
         nodes[nb].y += GNG_EPSILON_N * (y - nodes[nb].y);
+        if (g_has_cfs) cfs_write_one_node(nb);
       }
     }
   }
 
-  // 5) connect s1-s2 (reset age to 0)
+  // 5) connect s1-s2
   connectOrResetEdge(s1, s2);
 
   // 6) remove old edges
@@ -414,14 +541,18 @@ static void trainOneStep(float x, float y) {
   // bookkeeping
   stepCount++;
 
-  // 8) every λ steps insert a new node
+  // 8) every λ steps insert
   if ((stepCount % GNG_LAMBDA) == 0) {
-    insertNode();
-    // after insertion, cleanup isolated (safe)
+    int r = insertNode();
     pruneIsolatedNodes();
+    if (g_has_cfs) {
+      // insertion rare -> full sync is OK & safe
+      cfs_sync_nodes_full();
+      (void)r;
+    }
   }
 
-  // 9) decrease all errors by factor d
+  // 9) decay errors
   for (int i = 0; i < MAX_NODES; i++) {
     if (nodes[i].active) nodes[i].error *= GNG_D;
   }
@@ -452,148 +583,6 @@ static void initGNG(void) {
   nodes[1].x = 0.8f; nodes[1].y = 0.8f; nodes[1].active = true;
 }
 
-#include <neorv32_cfs.h>
-
-// ---- CFS register map (match your VHDL) ----
-#define CFS_REG_CTRL     0
-#define CFS_REG_STATUS   0
-#define CFS_REG_COUNT    1
-
-// settings regs (baru)
-#define CFS_REG_LAMBDA   2
-#define CFS_REG_A_MAX    3
-#define CFS_REG_EPS_B    4
-#define CFS_REG_EPS_N    5
-#define CFS_REG_ALPHA    6
-#define CFS_REG_D        7
-
-#define CFS_DATA_BASE    16
-
-#define CFS_CTRL_CLEAR   (1u << 0)
-#define CFS_CTRL_START   (1u << 1)
-
-#define CFS_STATUS_BUSY  (1u << 16)
-#define CFS_STATUS_DONE  (1u << 17)
-
-// pack xi,yi into one 32-bit word: [15:0]=xi, [31:16]=yi
-static inline uint32_t pack_xy(int16_t xi, int16_t yi) {
-  return ((uint32_t)(uint16_t)xi) | (((uint32_t)(uint16_t)yi) << 16);
-}
-
-// float [0..1] -> Q0.16 (0..65535)  (IMPORTANT: 1.0 jangan jadi 65536!)
-static inline uint16_t float_to_q16(float v) {
-  if (v <= 0.0f) return 0;
-  if (v >= 0.9999847412f) return 0xFFFF; // (65535/65536)
-  uint32_t q = (uint32_t)(v * 65536.0f + 0.5f);
-  if (q > 0xFFFF) q = 0xFFFF;
-  return (uint16_t)q;
-}
-
-static void cfs_write_settings(void) {
-  NEORV32_CFS->REG[CFS_REG_LAMBDA] = (uint32_t)GNG_LAMBDA;
-  NEORV32_CFS->REG[CFS_REG_A_MAX]  = (uint32_t)GNG_A_MAX;
-
-  NEORV32_CFS->REG[CFS_REG_EPS_B]  = (uint32_t)float_to_q16(GNG_EPSILON_B);
-  NEORV32_CFS->REG[CFS_REG_EPS_N]  = (uint32_t)float_to_q16(GNG_EPSILON_N);
-  NEORV32_CFS->REG[CFS_REG_ALPHA]  = (uint32_t)float_to_q16(GNG_ALPHA);
-  NEORV32_CFS->REG[CFS_REG_D]      = (uint32_t)float_to_q16(GNG_D);
-}
-
-
-
-static void cfs_upload_dataset_once(void) {
-
-  const int n = (dataCount < MAXPTS) ? dataCount : MAXPTS;
-
-  // 1) clear status/counters (VHDL baru kamu: tidak clear data_mem massal)
-  NEORV32_CFS->REG[CFS_REG_CTRL] = CFS_CTRL_CLEAR;
-
-  // 2) write dataset
-  for (int i = 0; i < n; i++) {
-    int16_t xi = (int16_t)(dataX[i] * 1000.0f);
-    int16_t yi = (int16_t)(dataY[i] * 1000.0f);
-    NEORV32_CFS->REG[CFS_DATA_BASE + i] = pack_xy(xi, yi);
-  }
-
-  // 3) write count
-  NEORV32_CFS->REG[CFS_REG_COUNT] = (uint32_t)n;
-
-  // 4) write settings
-  cfs_write_settings();
-
-  // 5) READ-BACK VERIFY (dataset + count + settings)
-  int mismatch = 0;
-  int mis_i = -1;
-  uint32_t expw = 0, gotw = 0;
-
-  // check count
-  uint32_t rb_count = NEORV32_CFS->REG[CFS_REG_COUNT];
-  if ((int)rb_count != n) {
-    mismatch = 1;
-    mis_i = -2;
-    expw = (uint32_t)n;
-    gotw = rb_count;
-  } else {
-    // check some dataset words (biar gak terlalu lama, tapi cukup kuat)
-    for (int i = 0; i < n; i++) {
-      int16_t xi = (int16_t)(dataX[i] * 1000.0f);
-      int16_t yi = (int16_t)(dataY[i] * 1000.0f);
-      uint32_t w = pack_xy(xi, yi);
-      uint32_t r = NEORV32_CFS->REG[CFS_DATA_BASE + i];
-      if (r != w) {
-        mismatch = 1;
-        mis_i = i;
-        expw = w;
-        gotw = r;
-        break;
-      }
-    }
-  }
-
-  // check settings readback (opsional tapi enak buat debug)
-  if (!mismatch) {
-    uint32_t rb_lambda = NEORV32_CFS->REG[CFS_REG_LAMBDA];
-    uint32_t rb_amax   = NEORV32_CFS->REG[CFS_REG_A_MAX];
-    if ((int)rb_lambda != GNG_LAMBDA || (int)rb_amax != GNG_A_MAX) {
-      mismatch = 1;
-      mis_i = -3;
-      expw = ((uint32_t)GNG_LAMBDA << 16) | (uint32_t)GNG_A_MAX;
-      gotw = (rb_lambda << 16) | (rb_amax & 0xFFFF);
-    }
-  }
-
-  if (mismatch) {
-    neorv32_uart0_printf("CFS VERIFY FAIL i=%d exp=0x%08x got=0x%08x n=%d\n",
-                         mis_i, (unsigned)expw, (unsigned)gotw, n);
-  } else {
-    neorv32_uart0_printf("CFS VERIFY OK n=%d\n", n);
-  }
-
-  // 6) start placeholder
-  NEORV32_CFS->REG[CFS_REG_CTRL] = CFS_CTRL_START;
-}
-
-
-
-
-static bool preprocessed = false;
-
-static void print_hex32(uint32_t x) {
-  for (int i = 7; i >= 0; i--) {
-    uint8_t n = (x >> (i*4)) & 0xF;
-    neorv32_uart0_putc((n < 10) ? ('0'+n) : ('A'+(n-10)));
-  }
-}
-
-void dbg_print_soc(void) {
-  uint32_t soc = NEORV32_SYSINFO->SOC;
-  neorv32_uart0_puts("SYSINFO.SOC=0x");
-  print_hex32(soc);
-  neorv32_uart0_puts(" CFS=");
-  neorv32_uart0_putc(((soc >> SYSINFO_SOC_IO_CFS) & 1) ? '1' : '0');
-  neorv32_uart0_puts("\n");
-}
-
 int main(void) {
   neorv32_rte_setup();
   neorv32_uart0_setup(BAUD_RATE, 0);
@@ -601,43 +590,44 @@ int main(void) {
   initGNG();
   neorv32_uart0_puts("READY\n");
 
-  dbg_print_soc();
-  // neorv32_aux_delay_ms(neorv32_sysinfo_get_clk(),5000);
+  // detect CFS
+  g_has_cfs = (neorv32_cfs_available() != 0);
+  neorv32_uart0_puts(g_has_cfs ? "CFS=1\n" : "CFS=0\n");
+
+  bool preprocessed = false;
 
   while (1) {
     readSerial();
-    
-    
 
-    if (dataDone && !preprocessed) 
-    {
-      if (neorv32_cfs_available() == 0) 
-      {
-        neorv32_uart0_puts("CFS not available\r\n");
-      }
-      else 
-      {
-        cfs_upload_dataset_once();
-        neorv32_uart0_puts("CFS available\r\n");
+    // setelah dataset selesai diterima, lakukan init CFS sekali
+    if (dataDone && !preprocessed) {
+      if (g_has_cfs) {
+        cfs_upload_dataset_and_settings_once();
+        neorv32_uart0_puts("CFS available\n");
+      } else {
+        neorv32_uart0_puts("CFS not available\n");
       }
       preprocessed = true;
+
+      // aman: boleh tunggu CMD_RUN dari Processing, tapi kalau kamu mau auto-run:
       running = true;
-      // neorv32_aux_delay_ms(neorv32_sysinfo_get_clk(),5000);
     }
 
     if (!dataDone || !running || (dataCount <= 0)) continue;
 
     float x = dataX[dataIndex];
     float y = dataY[dataIndex];
-
     dataIndex++;
     if (dataIndex >= dataCount) dataIndex = 0;
 
     trainOneStep(x, y);
 
-    frame_id++;
-    sendGNGNodes();
-    sendGNGEdges();
+    // throttle UART streaming
+    if ((stepCount % STREAM_EVERY_N) == 0) {
+      frame_id++;
+      sendGNGNodes();
+      sendGNGEdges();
+    }
   }
 
   return 0;
