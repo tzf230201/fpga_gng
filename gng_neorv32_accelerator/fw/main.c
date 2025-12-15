@@ -455,33 +455,60 @@ static void initGNG(void) {
 #include <neorv32_cfs.h>
 
 // ---- CFS register map (match your VHDL) ----
-#define MAXPTS          100
-#define CFS_DATA_BASE   16
+#define CFS_REG_CTRL     0
+#define CFS_REG_STATUS   0
+#define CFS_REG_COUNT    1
 
-#define CFS_REG_CTRL    0
-#define CFS_REG_STATUS  0
-#define CFS_REG_COUNT   1
+// settings regs (baru)
+#define CFS_REG_LAMBDA   2
+#define CFS_REG_A_MAX    3
+#define CFS_REG_EPS_B    4
+#define CFS_REG_EPS_N    5
+#define CFS_REG_ALPHA    6
+#define CFS_REG_D        7
 
-#define CFS_CTRL_CLEAR  (1u << 0)
-#define CFS_CTRL_START  (1u << 1)
+#define CFS_DATA_BASE    16
 
-#define CFS_STATUS_BUSY (1u << 16)
-#define CFS_STATUS_DONE (1u << 17)
+#define CFS_CTRL_CLEAR   (1u << 0)
+#define CFS_CTRL_START   (1u << 1)
+
+#define CFS_STATUS_BUSY  (1u << 16)
+#define CFS_STATUS_DONE  (1u << 17)
 
 // pack xi,yi into one 32-bit word: [15:0]=xi, [31:16]=yi
 static inline uint32_t pack_xy(int16_t xi, int16_t yi) {
   return ((uint32_t)(uint16_t)xi) | (((uint32_t)(uint16_t)yi) << 16);
 }
 
+// float [0..1] -> Q0.16 (0..65535)  (IMPORTANT: 1.0 jangan jadi 65536!)
+static inline uint16_t float_to_q16(float v) {
+  if (v <= 0.0f) return 0;
+  if (v >= 0.9999847412f) return 0xFFFF; // (65535/65536)
+  uint32_t q = (uint32_t)(v * 65536.0f + 0.5f);
+  if (q > 0xFFFF) q = 0xFFFF;
+  return (uint16_t)q;
+}
+
+static void cfs_write_settings(void) {
+  NEORV32_CFS->REG[CFS_REG_LAMBDA] = (uint32_t)GNG_LAMBDA;
+  NEORV32_CFS->REG[CFS_REG_A_MAX]  = (uint32_t)GNG_A_MAX;
+
+  NEORV32_CFS->REG[CFS_REG_EPS_B]  = (uint32_t)float_to_q16(GNG_EPSILON_B);
+  NEORV32_CFS->REG[CFS_REG_EPS_N]  = (uint32_t)float_to_q16(GNG_EPSILON_N);
+  NEORV32_CFS->REG[CFS_REG_ALPHA]  = (uint32_t)float_to_q16(GNG_ALPHA);
+  NEORV32_CFS->REG[CFS_REG_D]      = (uint32_t)float_to_q16(GNG_D);
+}
+
+
 
 static void cfs_upload_dataset_once(void) {
 
   const int n = (dataCount < MAXPTS) ? dataCount : MAXPTS;
 
-  // 1) clear (also resets done/busy in your VHDL)
+  // 1) clear status/counters (VHDL baru kamu: tidak clear data_mem massal)
   NEORV32_CFS->REG[CFS_REG_CTRL] = CFS_CTRL_CLEAR;
 
-  // 2) write data
+  // 2) write dataset
   for (int i = 0; i < n; i++) {
     int16_t xi = (int16_t)(dataX[i] * 1000.0f);
     int16_t yi = (int16_t)(dataY[i] * 1000.0f);
@@ -491,27 +518,27 @@ static void cfs_upload_dataset_once(void) {
   // 3) write count
   NEORV32_CFS->REG[CFS_REG_COUNT] = (uint32_t)n;
 
-  // -----------------------------
-  // (A) READ-BACK VERIFY (paling penting)
-  // -----------------------------
+  // 4) write settings
+  cfs_write_settings();
+
+  // 5) READ-BACK VERIFY (dataset + count + settings)
   int mismatch = 0;
   int mis_i = -1;
   uint32_t expw = 0, gotw = 0;
 
-  // verify count readback
+  // check count
   uint32_t rb_count = NEORV32_CFS->REG[CFS_REG_COUNT];
   if ((int)rb_count != n) {
     mismatch = 1;
-    mis_i = -2; // code: count mismatch
+    mis_i = -2;
     expw = (uint32_t)n;
     gotw = rb_count;
   } else {
-    // verify all points (MAX 100, aman)
+    // check some dataset words (biar gak terlalu lama, tapi cukup kuat)
     for (int i = 0; i < n; i++) {
       int16_t xi = (int16_t)(dataX[i] * 1000.0f);
       int16_t yi = (int16_t)(dataY[i] * 1000.0f);
       uint32_t w = pack_xy(xi, yi);
-
       uint32_t r = NEORV32_CFS->REG[CFS_DATA_BASE + i];
       if (r != w) {
         mismatch = 1;
@@ -523,6 +550,18 @@ static void cfs_upload_dataset_once(void) {
     }
   }
 
+  // check settings readback (opsional tapi enak buat debug)
+  if (!mismatch) {
+    uint32_t rb_lambda = NEORV32_CFS->REG[CFS_REG_LAMBDA];
+    uint32_t rb_amax   = NEORV32_CFS->REG[CFS_REG_A_MAX];
+    if ((int)rb_lambda != GNG_LAMBDA || (int)rb_amax != GNG_A_MAX) {
+      mismatch = 1;
+      mis_i = -3;
+      expw = ((uint32_t)GNG_LAMBDA << 16) | (uint32_t)GNG_A_MAX;
+      gotw = (rb_lambda << 16) | (rb_amax & 0xFFFF);
+    }
+  }
+
   if (mismatch) {
     neorv32_uart0_printf("CFS VERIFY FAIL i=%d exp=0x%08x got=0x%08x n=%d\n",
                          mis_i, (unsigned)expw, (unsigned)gotw, n);
@@ -530,26 +569,10 @@ static void cfs_upload_dataset_once(void) {
     neorv32_uart0_printf("CFS VERIFY OK n=%d\n", n);
   }
 
-  // -----------------------------
-  // (B) START + WAIT DONE
-  // -----------------------------
+  // 6) start placeholder
   NEORV32_CFS->REG[CFS_REG_CTRL] = CFS_CTRL_START;
-
-  // in your current VHDL, START sets done <= '1' immediately (placeholder),
-  // so this should finish instantly. Still keep timeout to avoid hang later.
-  const uint32_t TIMEOUT = 2000000u;
-  uint32_t t;
-  for (t = 0; t < TIMEOUT; t++) {
-    uint32_t st = NEORV32_CFS->REG[CFS_REG_STATUS];
-    if (st & CFS_STATUS_DONE) break;
-  }
-  if (t >= TIMEOUT) {
-    neorv32_uart0_puts("CFS TIMEOUT waiting DONE\n");
-  } else {
-    uint32_t st = NEORV32_CFS->REG[CFS_REG_STATUS];
-    neorv32_uart0_printf("CFS DONE (status=0x%08x)\n", (unsigned)st);
-  }
 }
+
 
 
 
