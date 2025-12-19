@@ -278,7 +278,7 @@
       "InstLine" : 1032,
       "InstName" : "io_system.neorv32_cfs_enabled.neorv32_cfs_inst",
       "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator/gng_gowin_project/src/neorv32_cfs.vhd",
-      "ModuleLine" : 13,
+      "ModuleLine" : 14,
       "ModuleName" : "neorv32_cfs"
      },
      {

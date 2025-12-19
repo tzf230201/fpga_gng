@@ -1,6 +1,7 @@
 -- ================================================================================
 -- NEORV32 SoC - Custom Functions Subsystem (CFS)
 -- Winner finder accelerator (s1/s2) + dataset storage + settings regs
+-- + EDGE BRAM storage (REG[EDGE_BASE..EDGE_BASE+MAXEDGES-1])
 -- ================================================================================
 
 library ieee;
@@ -58,6 +59,10 @@ architecture neorv32_cfs_rtl of neorv32_cfs is
   constant MAXNODES  : natural := 40;
   constant NODE_BASE : natural := 128; -- REG[128..167]
 
+  -- edge mem (NEW)
+  constant MAXEDGES  : natural := 80;
+  constant EDGE_BASE : natural := 168; -- REG[168..247]
+
   -- -------------------------------
   -- storage
   -- -------------------------------
@@ -66,6 +71,11 @@ architecture neorv32_cfs_rtl of neorv32_cfs is
 
   type node_mem_t is array (0 to MAXNODES-1) of std_ulogic_vector(31 downto 0);
   signal node_mem : node_mem_t := (others => (others => '0'));
+
+  -- Edge word format:
+  -- [7:0]=a, [15:8]=b, [23:16]=age, [24]=active, others=0
+  type edge_mem_t is array (0 to MAXEDGES-1) of std_ulogic_vector(31 downto 0);
+  signal edge_mem : edge_mem_t := (others => (others => '0'));
 
   signal count_u   : unsigned(31 downto 0) := (others => '0');
 
@@ -118,7 +128,6 @@ begin
     variable xi_u, yi_u : unsigned(15 downto 0);
     variable dx_s, dy_s : signed(15 downto 0);
 
-    -- square results
     variable dx2_u, dy2_u : unsigned(31 downto 0);
     variable dist_u       : unsigned(31 downto 0);
   begin
@@ -178,7 +187,6 @@ begin
             dx_s := signed(xin_q15) - signed(xi_u);
             dy_s := signed(yin_q15) - signed(yi_u);
 
-            -- square (signed*signed -> signed), then cast to unsigned
             dx2_u := unsigned(dx_s * dx_s);
             dy2_u := unsigned(dy_s * dy_s);
 
@@ -277,6 +285,11 @@ begin
               di := reg_idx - NODE_BASE;
               node_mem(di) <= bus_req_i.data;
 
+            -- edges (NEW)
+            elsif (reg_idx >= EDGE_BASE) and (reg_idx < EDGE_BASE + MAXEDGES) then
+              di := reg_idx - EDGE_BASE;
+              edge_mem(di) <= bus_req_i.data;
+
             end if;
           end if;
 
@@ -333,6 +346,11 @@ begin
           elsif (reg_idx >= NODE_BASE) and (reg_idx < NODE_BASE + MAXNODES) then
             di := reg_idx - NODE_BASE;
             bus_rsp_o.data <= node_mem(di);
+
+          -- edge mem read (NEW)
+          elsif (reg_idx >= EDGE_BASE) and (reg_idx < EDGE_BASE + MAXEDGES) then
+            di := reg_idx - EDGE_BASE;
+            bus_rsp_o.data <= edge_mem(di);
 
           else
             bus_rsp_o.data <= (others => '0');

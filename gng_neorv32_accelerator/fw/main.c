@@ -4,6 +4,7 @@
 // ================================================================================ //
 
 #include <neorv32.h>
+#include <neorv32_cfs.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -40,10 +41,8 @@
 #define CMD_GNG_NODES   0x10u
 #define CMD_GNG_EDGES   0x11u
 
-// send visualization not every step (biar Processing gak kewalahan)
 #define STREAM_EVERY_N  5
 
-// RX state machine
 enum {
   RX_WAIT_H1 = 0,
   RX_WAIT_H2,
@@ -60,28 +59,21 @@ static uint8_t  rx_index = 0;
 static uint8_t  rx_sum   = 0;
 static uint8_t  rx_payload[256];
 
-// Dataset
+// Dataset in CPU (stream points)
 static float dataX[MAXPTS];
 static float dataY[MAXPTS];
 static int   dataCount = 0;
 static bool  dataDone  = false;
 static bool  running   = false;
 
-// GNG structures
+// Node CPU struct (edges stored in CFS BRAM)
 typedef struct {
   float x, y;
   float error;
   bool  active;
 } Node;
 
-typedef struct {
-  int  a, b;
-  int  age;
-  bool active;
-} Edge;
-
 static Node nodes[MAX_NODES];
-static Edge edges[MAX_EDGES];
 
 static int stepCount = 0;
 static int dataIndex = 0;
@@ -101,12 +93,100 @@ static int findFreeNode(void) {
   return -1;
 }
 
-// return edge index if exists else -1
+// ============================================================================
+// ======================  CFS REG MAP (must match VHDL)  ======================
+// ============================================================================
+#define CFS_REG_CTRL       0
+#define CFS_REG_COUNT      1
+#define CFS_REG_LAMBDA     2
+#define CFS_REG_A_MAX      3
+#define CFS_REG_EPS_B      4
+#define CFS_REG_EPS_N      5
+#define CFS_REG_ALPHA      6
+#define CFS_REG_D          7
+#define CFS_REG_XIN        8
+#define CFS_REG_YIN        9
+#define CFS_REG_NODE_COUNT 10
+#define CFS_REG_ACT_LO     11
+#define CFS_REG_ACT_HI     12
+#define CFS_REG_OUT_S12    13
+#define CFS_REG_OUT_MIN1   14
+#define CFS_REG_OUT_MIN2   15
+
+#define CFS_DATA_BASE      16
+#define CFS_NODE_BASE      128
+#define CFS_EDGE_BASE      168  // NEW: must match VHDL EDGE_BASE
+
+#define CFS_CTRL_CLEAR     (1u << 0)
+#define CFS_CTRL_START     (1u << 1)
+#define CFS_STATUS_BUSY    (1u << 16)
+#define CFS_STATUS_DONE    (1u << 17)
+
+static bool g_has_cfs = false;
+
+// ===================== Fixed-point helpers =====================
+static inline uint16_t float_to_q16(float v) {
+  if (v <= 0.0f) return 0;
+  if (v >= 0.9999847412f) return 0xFFFF;
+  uint32_t q = (uint32_t)(v * 65536.0f + 0.5f);
+  if (q > 0xFFFF) q = 0xFFFF;
+  return (uint16_t)q;
+}
+
+static inline int16_t float_to_q15_pos(float v) {
+  if (v <= 0.0f) return 0;
+  if (v >= 0.9999694824f) return (int16_t)0x7FFF;
+  int32_t q = (int32_t)(v * 32768.0f + 0.5f);
+  if (q > 0x7FFF) q = 0x7FFF;
+  return (int16_t)q;
+}
+
+static inline uint32_t pack_node_q15(float x, float y) {
+  int16_t xq = float_to_q15_pos(x);
+  int16_t yq = float_to_q15_pos(y);
+  return ((uint32_t)(uint16_t)xq) | (((uint32_t)(uint16_t)yq) << 16);
+}
+
+static inline float q30_to_float(uint32_t q30) {
+  return (float)q30 / 1073741824.0f;
+}
+
+// ===================== EDGE BRAM packing =====================
+// [7:0]=a, [15:8]=b, [23:16]=age, [24]=active
+static inline uint32_t pack_edge(uint8_t a, uint8_t b, uint8_t age, bool active) {
+  uint32_t v = (uint32_t)a | ((uint32_t)b << 8) | ((uint32_t)age << 16);
+  if (active) v |= (1u << 24);
+  return v;
+}
+
+static inline void unpack_edge(uint32_t v, uint8_t *a, uint8_t *b, uint8_t *age, bool *active) {
+  *a = (uint8_t)(v & 0xFFu);
+  *b = (uint8_t)((v >> 8) & 0xFFu);
+  *age = (uint8_t)((v >> 16) & 0xFFu);
+  *active = ((v >> 24) & 0x1u) ? true : false;
+}
+
+static inline uint32_t edge_read_word(int i) {
+  return NEORV32_CFS->REG[CFS_EDGE_BASE + i];
+}
+
+static inline void edge_write_word(int i, uint32_t w) {
+  NEORV32_CFS->REG[CFS_EDGE_BASE + i] = w;
+}
+
+static inline void edges_clear_all(void) {
+  for (int i = 0; i < MAX_EDGES; i++) edge_write_word(i, 0u);
+}
+
+// return edge index if exists else -1 (EDGE in BRAM)
 static int findEdge(int a, int b) {
   for (int i = 0; i < MAX_EDGES; i++) {
-    if (!edges[i].active) continue;
-    if ((edges[i].a == a && edges[i].b == b) ||
-        (edges[i].a == b && edges[i].b == a)) {
+    uint8_t ea, eb, age;
+    bool active;
+    unpack_edge(edge_read_word(i), &ea, &eb, &age, &active);
+    if (!active) continue;
+    if ((ea == (uint8_t)a && eb == (uint8_t)b) ||
+        (ea == (uint8_t)b && eb == (uint8_t)a)) {
       return i;
     }
   }
@@ -115,13 +195,17 @@ static int findEdge(int a, int b) {
 
 static void connectOrResetEdge(int a, int b) {
   int ei = findEdge(a, b);
-  if (ei >= 0) { edges[ei].age = 0; return; }
+  if (ei >= 0) {
+    edge_write_word(ei, pack_edge((uint8_t)a, (uint8_t)b, 0, true));
+    return;
+  }
 
   for (int i = 0; i < MAX_EDGES; i++) {
-    if (!edges[i].active) {
-      edges[i].a = a; edges[i].b = b;
-      edges[i].age = 0;
-      edges[i].active = true;
+    uint8_t ea, eb, age;
+    bool active;
+    unpack_edge(edge_read_word(i), &ea, &eb, &age, &active);
+    if (!active) {
+      edge_write_word(i, pack_edge((uint8_t)a, (uint8_t)b, 0, true));
       return;
     }
   }
@@ -129,20 +213,36 @@ static void connectOrResetEdge(int a, int b) {
 
 static void removeEdgePair(int a, int b) {
   int ei = findEdge(a, b);
-  if (ei >= 0) edges[ei].active = false;
+  if (ei >= 0) {
+    uint8_t ea, eb, age;
+    bool active;
+    unpack_edge(edge_read_word(ei), &ea, &eb, &age, &active);
+    (void)active;
+    edge_write_word(ei, pack_edge(ea, eb, age, false));
+  }
 }
 
-static void ageEdgesFromWinner(int winner) {
+static void ageEdgesFromWinner(int w) {
   for (int i = 0; i < MAX_EDGES; i++) {
-    if (!edges[i].active) continue;
-    if (edges[i].a == winner || edges[i].b == winner) edges[i].age++;
+    uint8_t a, b, age;
+    bool active;
+    unpack_edge(edge_read_word(i), &a, &b, &age, &active);
+    if (!active) continue;
+    if ((int)a == w || (int)b == w) {
+      edge_write_word(i, pack_edge(a, b, (uint8_t)(age + 1u), true));
+    }
   }
 }
 
 static void deleteOldEdges(void) {
   for (int i = 0; i < MAX_EDGES; i++) {
-    if (!edges[i].active) continue;
-    if (edges[i].age > GNG_A_MAX) edges[i].active = false;
+    uint8_t a, b, age;
+    bool active;
+    unpack_edge(edge_read_word(i), &a, &b, &age, &active);
+    if (!active) continue;
+    if (age > (uint8_t)GNG_A_MAX) {
+      edge_write_word(i, pack_edge(a, b, age, false));
+    }
   }
 }
 
@@ -152,14 +252,17 @@ static void pruneIsolatedNodes(void) {
 
     bool has_edge = false;
     for (int e = 0; e < MAX_EDGES; e++) {
-      if (!edges[e].active) continue;
-      if (edges[e].a == i || edges[e].b == i) { has_edge = true; break; }
+      uint8_t a, b, age;
+      bool active;
+      unpack_edge(edge_read_word(e), &a, &b, &age, &active);
+      if (!active) continue;
+      if ((int)a == i || (int)b == i) { has_edge = true; break; }
     }
     if (!has_edge) nodes[i].active = false;
   }
 }
 
-// Fritzke insertion rule (return index r or -1)
+// Fritzke insertion rule
 static int insertNode(void) {
   int q = -1;
   float maxErr = -1.0f;
@@ -170,12 +273,18 @@ static int insertNode(void) {
 
   int f = -1;
   maxErr = -1.0f;
+
   for (int i = 0; i < MAX_EDGES; i++) {
-    if (!edges[i].active) continue;
+    uint8_t a, b, age;
+    bool active;
+    unpack_edge(edge_read_word(i), &a, &b, &age, &active);
+    if (!active) continue;
+
     int nb = -1;
-    if (edges[i].a == q) nb = edges[i].b;
-    else if (edges[i].b == q) nb = edges[i].a;
-    if (nb >= 0 && nodes[nb].active && nodes[nb].error > maxErr) {
+    if ((int)a == q) nb = (int)b;
+    else if ((int)b == q) nb = (int)a;
+
+    if (nb >= 0 && nb < MAX_NODES && nodes[nb].active && nodes[nb].error > maxErr) {
       maxErr = nodes[nb].error;
       f = nb;
     }
@@ -248,11 +357,15 @@ static void sendGNGEdges(void) {
 
   uint8_t edge_count = 0;
   for (int i = 0; i < MAX_EDGES; i++) {
-    if (!edges[i].active) continue;
-    payload[p++] = (uint8_t)edges[i].a;
-    payload[p++] = (uint8_t)edges[i].b;
+    uint8_t a, b, age;
+    bool active;
+    unpack_edge(edge_read_word(i), &a, &b, &age, &active);
+    if (!active) continue;
+    payload[p++] = a;
+    payload[p++] = b;
     edge_count++;
   }
+
   payload[1] = edge_count;
   uart_send_frame(CMD_GNG_EDGES, payload, p);
 }
@@ -322,77 +435,10 @@ static void readSerial(void) {
   }
 }
 
-// ============================================================================
-// ======================  CFS WINNER-FINDER INTEGRATION  ======================
-// ============================================================================
-#include <neorv32_cfs.h>
-
-// register map must match VHDL
-#define CFS_REG_CTRL       0
-#define CFS_REG_COUNT      1
-
-#define CFS_REG_LAMBDA     2
-#define CFS_REG_A_MAX      3
-#define CFS_REG_EPS_B      4
-#define CFS_REG_EPS_N      5
-#define CFS_REG_ALPHA      6
-#define CFS_REG_D          7
-
-#define CFS_REG_XIN        8
-#define CFS_REG_YIN        9
-#define CFS_REG_NODE_COUNT 10
-#define CFS_REG_ACT_LO     11
-#define CFS_REG_ACT_HI     12
-
-#define CFS_REG_OUT_S12    13
-#define CFS_REG_OUT_MIN1   14
-#define CFS_REG_OUT_MIN2   15
-
-#define CFS_DATA_BASE      16
-#define CFS_NODE_BASE      128
-
-#define CFS_CTRL_CLEAR     (1u << 0)
-#define CFS_CTRL_START     (1u << 1)
-
-#define CFS_STATUS_BUSY    (1u << 16)
-#define CFS_STATUS_DONE    (1u << 17)
-
-static bool g_has_cfs = false;
-
-// float [0..1] -> Q0.16
-static inline uint16_t float_to_q16(float v) {
-  if (v <= 0.0f) return 0;
-  if (v >= 0.9999847412f) return 0xFFFF;
-  uint32_t q = (uint32_t)(v * 65536.0f + 0.5f);
-  if (q > 0xFFFF) q = 0xFFFF;
-  return (uint16_t)q;
-}
-
-// float [0..1] -> Q1.15 signed positive (0..0x7FFF)
-static inline int16_t float_to_q15_pos(float v) {
-  if (v <= 0.0f) return 0;
-  if (v >= 0.9999694824f) return (int16_t)0x7FFF; // (32767/32768)
-  int32_t q = (int32_t)(v * 32768.0f + 0.5f);
-  if (q > 0x7FFF) q = 0x7FFF;
-  return (int16_t)q;
-}
-
-// pack node xy: [15:0]=x_q15, [31:16]=y_q15
-static inline uint32_t pack_node_q15(float x, float y) {
-  int16_t xq = float_to_q15_pos(x);
-  int16_t yq = float_to_q15_pos(y);
-  return ((uint32_t)(uint16_t)xq) | (((uint32_t)(uint16_t)yq) << 16);
-}
-
-static inline float q30_to_float(uint32_t q30) {
-  // dist returned by CFS is Q2.30 (dx^2 + dy^2)
-  return (float)q30 / 1073741824.0f; // 2^30
-}
-
+// ===================== CFS helpers =====================
 static void cfs_write_settings(void) {
   NEORV32_CFS->REG[CFS_REG_LAMBDA] = (uint32_t)GNG_LAMBDA;
   NEORV32_CFS->REG[CFS_REG_A_MAX]  = (uint32_t)GNG_A_MAX;
-
   NEORV32_CFS->REG[CFS_REG_EPS_B]  = (uint32_t)float_to_q16(GNG_EPSILON_B);
   NEORV32_CFS->REG[CFS_REG_EPS_N]  = (uint32_t)float_to_q16(GNG_EPSILON_N);
   NEORV32_CFS->REG[CFS_REG_ALPHA]  = (uint32_t)float_to_q16(GNG_ALPHA);
@@ -401,7 +447,6 @@ static void cfs_write_settings(void) {
 
 static void cfs_sync_nodes_full(void) {
   for (int i = 0; i < MAX_NODES; i++) {
-    // write even if inactive (aman). active mask will filter.
     NEORV32_CFS->REG[CFS_NODE_BASE + i] = pack_node_q15(nodes[i].x, nodes[i].y);
   }
 }
@@ -434,10 +479,9 @@ static bool cfs_find_winners(float x, float y, int *s1, int *s2, float *d1_out) 
 
   NEORV32_CFS->REG[CFS_REG_CTRL] = CFS_CTRL_START;
 
-  // wait done (timeout)
   const uint32_t TIMEOUT = 20000u;
   for (uint32_t t = 0; t < TIMEOUT; t++) {
-    uint32_t st = NEORV32_CFS->REG[CFS_REG_CTRL]; // status bits in readback
+    uint32_t st = NEORV32_CFS->REG[CFS_REG_CTRL];
     if (st & CFS_STATUS_DONE) break;
     if (t == TIMEOUT - 1) return false;
   }
@@ -451,9 +495,17 @@ static bool cfs_find_winners(float x, float y, int *s1, int *s2, float *d1_out) 
   return true;
 }
 
-// dataset upload optional (kalau VHDL kamu masih punya DATA_BASE)
+// dataset upload optional (kalau VHDL masih punya DATA_BASE)
 static inline uint32_t pack_xy_i16(int16_t xi, int16_t yi) {
   return ((uint32_t)(uint16_t)xi) | (((uint32_t)(uint16_t)yi) << 16);
+}
+
+static bool cfs_edge_sanity_check(void) {
+  // write test to EDGE[0], read back
+  uint32_t w = pack_edge(7, 9, 3, true);
+  edge_write_word(0, w);
+  uint32_t r = edge_read_word(0);
+  return (r == w);
 }
 
 static void cfs_upload_dataset_and_settings_once(void) {
@@ -462,7 +514,6 @@ static void cfs_upload_dataset_and_settings_once(void) {
   NEORV32_CFS->REG[CFS_REG_CTRL]  = CFS_CTRL_CLEAR;
   NEORV32_CFS->REG[CFS_REG_COUNT] = (uint32_t)n;
 
-  // dataset (optional, boleh kamu comment kalau mau hemat resource VHDL)
   for (int i = 0; i < n; i++) {
     int16_t xi = (int16_t)(dataX[i] * 1000.0f);
     int16_t yi = (int16_t)(dataY[i] * 1000.0f);
@@ -471,29 +522,21 @@ static void cfs_upload_dataset_and_settings_once(void) {
 
   cfs_write_settings();
   cfs_sync_nodes_full();
+
+  edges_clear_all();
+
+  // IMPORTANT: create initial edge 0-1 (prevent prune on first step if desired)
+  connectOrResetEdge(0, 1);
 }
 
-// ---------------- GNG step (Fritzke order) ----------------
+// ---------------- GNG step ----------------
 static void trainOneStep(float x, float y) {
   int   s1 = -1, s2 = -1;
   float d1 = 1e30f;
 
-  // ========== winner search ==========
-  if (g_has_cfs) {
-    // keep HW node_mem up-to-date enough:
-    // (at least winner + neighbors will be updated after movement; full sync on init/insert)
-    if (!cfs_find_winners(x, y, &s1, &s2, &d1)) {
-      // fallback SW if HW timeout
-      s1 = -1; s2 = -1; d1 = 1e30f;
-      float d2 = 1e30f;
-      for (int i = 0; i < MAX_NODES; i++) {
-        if (!nodes[i].active) continue;
-        float d = dist2(x, y, nodes[i].x, nodes[i].y);
-        if (d < d1) { d2 = d1; s2 = s1; d1 = d; s1 = i; }
-        else if (d < d2) { d2 = d; s2 = i; }
-      }
-    }
-  } else {
+  if (!cfs_find_winners(x, y, &s1, &s2, &d1)) {
+    // fallback SW search (still ok)
+    s1 = -1; s2 = -1; d1 = 1e30f;
     float d2 = 1e30f;
     for (int i = 0; i < MAX_NODES; i++) {
       if (!nodes[i].active) continue;
@@ -505,54 +548,44 @@ static void trainOneStep(float x, float y) {
 
   if (s1 < 0 || s2 < 0) return;
 
-  // 2) increment age of edges from winner
   ageEdgesFromWinner(s1);
 
-  // 3) add error to winner
   nodes[s1].error += d1;
 
-  // 4) move winner
   nodes[s1].x += GNG_EPSILON_B * (x - nodes[s1].x);
   nodes[s1].y += GNG_EPSILON_B * (y - nodes[s1].y);
-  if (g_has_cfs) cfs_write_one_node(s1);
+  cfs_write_one_node(s1);
 
-  // move neighbors
+  // move neighbors: scan edges in BRAM
   for (int i = 0; i < MAX_EDGES; i++) {
-    if (!edges[i].active) continue;
-    if (edges[i].a == s1 || edges[i].b == s1) {
-      int nb = (edges[i].a == s1) ? edges[i].b : edges[i].a;
-      if (nodes[nb].active) {
+    uint8_t a, b, age;
+    bool active;
+    unpack_edge(edge_read_word(i), &a, &b, &age, &active);
+    if (!active) continue;
+
+    if ((int)a == s1 || (int)b == s1) {
+      int nb = ((int)a == s1) ? (int)b : (int)a;
+      if (nb >= 0 && nb < MAX_NODES && nodes[nb].active) {
         nodes[nb].x += GNG_EPSILON_N * (x - nodes[nb].x);
         nodes[nb].y += GNG_EPSILON_N * (y - nodes[nb].y);
-        if (g_has_cfs) cfs_write_one_node(nb);
+        cfs_write_one_node(nb);
       }
     }
   }
 
-  // 5) connect s1-s2
   connectOrResetEdge(s1, s2);
 
-  // 6) remove old edges
   deleteOldEdges();
-
-  // 7) remove isolated nodes
   pruneIsolatedNodes();
 
-  // bookkeeping
   stepCount++;
 
-  // 8) every λ steps insert
   if ((stepCount % GNG_LAMBDA) == 0) {
-    int r = insertNode();
+    (void)insertNode();
     pruneIsolatedNodes();
-    if (g_has_cfs) {
-      // insertion rare -> full sync is OK & safe
-      cfs_sync_nodes_full();
-      (void)r;
-    }
+    cfs_sync_nodes_full();
   }
 
-  // 9) decay errors
   for (int i = 0; i < MAX_NODES; i++) {
     if (nodes[i].active) nodes[i].error *= GNG_D;
   }
@@ -565,11 +598,6 @@ static void initGNG(void) {
     nodes[i].error = 0.0f;
     nodes[i].active = false;
   }
-  for (int i = 0; i < MAX_EDGES; i++) {
-    edges[i].a = 0; edges[i].b = 0;
-    edges[i].age = 0;
-    edges[i].active = false;
-  }
 
   dataCount = 0;
   dataDone  = false;
@@ -578,7 +606,6 @@ static void initGNG(void) {
   dataIndex = 0;
   frame_id  = 0;
 
-  // initial 2 nodes
   nodes[0].x = 0.2f; nodes[0].y = 0.2f; nodes[0].active = true;
   nodes[1].x = 0.8f; nodes[1].y = 0.8f; nodes[1].active = true;
 }
@@ -590,26 +617,31 @@ int main(void) {
   initGNG();
   neorv32_uart0_puts("READY\n");
 
-  // detect CFS
   g_has_cfs = (neorv32_cfs_available() != 0);
   neorv32_uart0_puts(g_has_cfs ? "CFS=1\n" : "CFS=0\n");
+
+  if (!g_has_cfs) {
+    neorv32_uart0_puts("ERROR: CFS missing\n");
+    while (1) { }
+  }
 
   bool preprocessed = false;
 
   while (1) {
     readSerial();
 
-    // setelah dataset selesai diterima, lakukan init CFS sekali
     if (dataDone && !preprocessed) {
-      if (g_has_cfs) {
-        cfs_upload_dataset_and_settings_once();
-        neorv32_uart0_puts("CFS available\n");
-      } else {
-        neorv32_uart0_puts("CFS not available\n");
+      cfs_upload_dataset_and_settings_once();
+
+      if (!cfs_edge_sanity_check()) {
+        neorv32_uart0_puts("ERROR: EDGE BRAM not working (check VHDL EDGE_BASE/edge_mem)\n");
+        while (1) { }
       }
+
+      neorv32_uart0_puts("CFS init done\n");
       preprocessed = true;
 
-      // aman: boleh tunggu CMD_RUN dari Processing, tapi kalau kamu mau auto-run:
+      // AUTO-RUN so you don't depend on Processing CMD_RUN
       running = true;
     }
 
@@ -622,7 +654,6 @@ int main(void) {
 
     trainOneStep(x, y);
 
-    // throttle UART streaming
     if ((stepCount % STREAM_EVERY_N) == 0) {
       frame_id++;
       sendGNGNodes();
