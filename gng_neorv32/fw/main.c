@@ -209,12 +209,14 @@ static void insertNode(void) {
   // r at midpoint
   nodes[r].x = 0.5f * (nodes[q].x + nodes[f].x);
   nodes[r].y = 0.5f * (nodes[q].y + nodes[f].y);
-  nodes[r].error = nodes[q].error; // common Fritzke choice
+  
   nodes[r].active = true;
 
   // decrease error of q and f
   nodes[q].error *= GNG_ALPHA;
   nodes[f].error *= GNG_ALPHA;
+
+  nodes[r].error = nodes[q].error; // common Fritzke choice
 
   // remove edge q-f and add q-r, r-f
   removeEdgePair(q, f);

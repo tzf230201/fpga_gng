@@ -263,6 +263,7 @@ static void pruneIsolatedNodes(void) {
 }
 
 // Fritzke insertion rule
+// Fritzke insertion rule (FIXED to match Fritzke 1995)
 static int insertNode(void) {
   int q = -1;
   float maxErr = -1.0f;
@@ -275,8 +276,7 @@ static int insertNode(void) {
   maxErr = -1.0f;
 
   for (int i = 0; i < MAX_EDGES; i++) {
-    uint8_t a, b, age;
-    bool active;
+    uint8_t a, b, age; bool active;
     unpack_edge(edge_read_word(i), &a, &b, &age, &active);
     if (!active) continue;
 
@@ -294,20 +294,24 @@ static int insertNode(void) {
   int r = findFreeNode();
   if (r < 0) return -1;
 
+  // new unit position
   nodes[r].x = 0.5f * (nodes[q].x + nodes[f].x);
   nodes[r].y = 0.5f * (nodes[q].y + nodes[f].y);
-  nodes[r].error  = nodes[q].error;
   nodes[r].active = true;
 
-  nodes[q].error *= GNG_ALPHA;
-  nodes[f].error *= GNG_ALPHA;
-
+  // topology update
   removeEdgePair(q, f);
   connectOrResetEdge(q, r);
   connectOrResetEdge(r, f);
 
+  // ---- FIX: error update order (Fritzke 1995) ----
+  nodes[q].error *= GNG_ALPHA;
+  nodes[f].error *= GNG_ALPHA;
+  nodes[r].error  = nodes[q].error;   // r gets the NEW value of q
+
   return r;
 }
+
 
 // ---------------- UART frame TX ----------------
 static void uart_send_frame(uint8_t cmd, const uint8_t *payload, uint8_t len) {
@@ -526,7 +530,7 @@ static void cfs_upload_dataset_and_settings_once(void) {
   edges_clear_all();
 
   // IMPORTANT: create initial edge 0-1 (prevent prune on first step if desired)
-  connectOrResetEdge(0, 1);
+  // connectOrResetEdge(0, 1);
 }
 
 // ---------------- GNG step ----------------
