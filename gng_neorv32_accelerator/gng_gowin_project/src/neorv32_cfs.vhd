@@ -1,7 +1,10 @@
 -- ================================================================================
--- NEORV32 SoC - Custom Functions Subsystem (CFS)
--- Winner finder accelerator (s1/s2) + dataset storage + settings regs
--- + EDGE BRAM storage (REG[EDGE_BASE..EDGE_BASE+MAXEDGES-1])
+-- NEORV32 CFS
+-- - Winner finder accelerator (s1/s2)
+-- - NODE mem: register-array (dibaca 1 node/clock)
+-- - EDGE mem: dipaksa BSRAM (single-port sync read, registered output)
+-- - Bus: 1-cycle response (wait-state) agar RAM inference aman
+-- - Settings/count regs tidak disimpan (hemat FF), alamat tetap kompatibel
 -- ================================================================================
 
 library ieee;
@@ -17,90 +20,63 @@ entity neorv32_cfs is
     rstn_i    : in  std_ulogic;
     bus_req_i : in  bus_req_t;
     bus_rsp_o : out bus_rsp_t;
-    irq_o     : out std_ulogic;
-    cfs_in_i  : in  std_ulogic_vector(255 downto 0);
-    cfs_out_o : out std_ulogic_vector(255 downto 0)
+    irq_o     : out std_ulogic
   );
 end neorv32_cfs;
 
 architecture neorv32_cfs_rtl of neorv32_cfs is
 
-  -- -------------------------------
-  -- Address map (word index REG[idx])
-  -- -------------------------------
-  constant REG_CTRL       : natural := 0;  -- bit0=CLEAR, bit1=START (writes), bit16=BUSY, bit17=DONE (reads)
+  -- Address map
+  constant REG_CTRL       : natural := 0;
   constant REG_COUNT      : natural := 1;
 
-  -- settings regs (optional, stored only)
   constant REG_LAMBDA     : natural := 2;
   constant REG_A_MAX      : natural := 3;
-  constant REG_EPS_B      : natural := 4;  -- Q0.16 in [15:0]
+  constant REG_EPS_B      : natural := 4;
   constant REG_EPS_N      : natural := 5;
   constant REG_ALPHA      : natural := 6;
   constant REG_D          : natural := 7;
 
-  -- winner input regs
-  constant REG_XIN        : natural := 8;  -- Q1.15 in [15:0]
-  constant REG_YIN        : natural := 9;  -- Q1.15 in [15:0]
-  constant REG_NODE_COUNT : natural := 10; -- [7:0]
-  constant REG_ACT_LO     : natural := 11; -- 32-bit mask for node 0..31
-  constant REG_ACT_HI     : natural := 12; -- [7:0] mask for node 32..39
+  constant REG_XIN        : natural := 8;   -- Q1.15 in [15:0]
+  constant REG_YIN        : natural := 9;   -- Q1.15 in [15:0]
+  constant REG_NODE_COUNT : natural := 10;  -- [7:0]
+  constant REG_ACT_LO     : natural := 11;  -- 0..31
+  constant REG_ACT_HI     : natural := 12;  -- 32..39 in [7:0]
 
-  -- winner output regs
-  constant REG_OUT_S12    : natural := 13; -- [7:0]=s1, [15:8]=s2
-  constant REG_OUT_MIN1   : natural := 14; -- u32
-  constant REG_OUT_MIN2   : natural := 15; -- u32
+  constant REG_OUT_S12    : natural := 13;
+  constant REG_OUT_MIN1   : natural := 14;
+  constant REG_OUT_MIN2   : natural := 15;
 
-  -- dataset mem
-  constant MAXPTS    : natural := 100;
-  constant DATA_BASE : natural := 16;  -- REG[16..115]
-
-  -- node mem (positions)
   constant MAXNODES  : natural := 40;
-  constant NODE_BASE : natural := 128; -- REG[128..167]
+  constant NODE_BASE : natural := 128;
 
-  -- edge mem (NEW)
   constant MAXEDGES  : natural := 80;
-  constant EDGE_BASE : natural := 168; -- REG[168..247]
+  constant EDGE_BASE : natural := 168;
 
-  -- -------------------------------
-  -- storage
-  -- -------------------------------
-  type data_mem_t is array (0 to MAXPTS-1) of std_ulogic_vector(31 downto 0);
-  signal data_mem : data_mem_t := (others => (others => '0'));
-
+  -- NODE storage
   type node_mem_t is array (0 to MAXNODES-1) of std_ulogic_vector(31 downto 0);
   signal node_mem : node_mem_t := (others => (others => '0'));
 
-  -- Edge word format:
-  -- [7:0]=a, [15:8]=b, [23:16]=age, [24]=active, others=0
+  -- EDGE storage (force BRAM)
   type edge_mem_t is array (0 to MAXEDGES-1) of std_ulogic_vector(31 downto 0);
-  signal edge_mem : edge_mem_t := (others => (others => '0'));
+  signal edge_mem  : edge_mem_t; -- no init helps BRAM inference
+  signal edge_dout : std_ulogic_vector(31 downto 0) := (others => '0');
 
-  signal count_u   : unsigned(31 downto 0) := (others => '0');
+  attribute syn_ramstyle : string;
+  attribute syn_ramstyle of edge_mem : signal is "block_ram";
 
-  -- settings storage
-  signal lambda_u  : unsigned(31 downto 0) := to_unsigned(100, 32);
-  signal amax_u    : unsigned(31 downto 0) := to_unsigned(50, 32);
-  signal eps_b_q16 : unsigned(15 downto 0) := to_unsigned(19661, 16);
-  signal eps_n_q16 : unsigned(15 downto 0) := to_unsigned(65, 16);
-  signal alpha_q16 : unsigned(15 downto 0) := to_unsigned(32768, 16);
-  signal d_q16     : unsigned(15 downto 0) := to_unsigned(65101, 16);
-
-  -- winner inputs
+  -- winner IO regs
   signal xin_q15       : unsigned(15 downto 0) := (others => '0');
   signal yin_q15       : unsigned(15 downto 0) := (others => '0');
   signal node_count_u8 : unsigned(7 downto 0)  := to_unsigned(2, 8);
   signal act_lo        : std_ulogic_vector(31 downto 0) := (others => '0');
   signal act_hi        : std_ulogic_vector(7 downto 0)  := (others => '0');
 
-  -- winner outputs
-  signal out_s1   : unsigned(7 downto 0) := (others => '0');
-  signal out_s2   : unsigned(7 downto 0) := (others => '0');
+  signal out_s1   : unsigned(7 downto 0)  := (others => '0');
+  signal out_s2   : unsigned(7 downto 0)  := (others => '0');
   signal out_min1 : unsigned(31 downto 0) := (others => '1');
   signal out_min2 : unsigned(31 downto 0) := (others => '1');
 
-  -- control/status
   signal busy        : std_ulogic := '0';
   signal done        : std_ulogic := '0';
   signal start_pulse : std_ulogic := '0';
@@ -110,15 +86,27 @@ architecture neorv32_cfs_rtl of neorv32_cfs is
   signal fsm : fsm_t := IDLE;
   signal i_u : unsigned(7 downto 0) := (others => '0');
 
+  -- Bus wait-state
+  signal stb_prev  : std_ulogic := '0';
+  signal req_valid : std_ulogic := '0';
+  signal req_rw    : std_ulogic := '0';
+  signal req_ben   : std_ulogic_vector(3 downto 0) := (others => '0');
+  signal req_addr  : std_ulogic_vector(31 downto 0) := (others => '0');
+  signal req_wdata : std_ulogic_vector(31 downto 0) := (others => '0');
+  signal req_idx_u : unsigned(13 downto 0) := (others => '0'); -- addr[15:2]
+
+  signal accept : std_ulogic;
+
 begin
 
-  cfs_out_o <= (others => '0');
-  irq_o     <= '0';
+  irq_o <= '0';
+
+  accept <= bus_req_i.stb and (not stb_prev) and (not req_valid);
 
   -- ==========================================================
   -- Winner finder FSM (1 node/clock)
-  -- node word format: [15:0]=x_q15, [31:16]=y_q15
-  -- dist = (xin-xi)^2 + (yin-yi)^2  (32-bit)
+  -- dist = (xin-xi)^2 + (yin-yi)^2
+  -- NOTE: diff dibuat 18-bit signed (DSP 18x18 friendly)
   -- ==========================================================
   winner_fsm: process(clk_i, rstn_i)
     variable idx_i      : natural;
@@ -126,10 +114,10 @@ begin
     variable active_bit : std_ulogic;
 
     variable xi_u, yi_u : unsigned(15 downto 0);
-    variable dx_s, dy_s : signed(15 downto 0);
 
-    variable dx2_u, dy2_u : unsigned(31 downto 0);
-    variable dist_u       : unsigned(31 downto 0);
+    variable dx18, dy18 : signed(17 downto 0);
+    variable dx2_36, dy2_36 : unsigned(35 downto 0);
+    variable dist_u      : unsigned(31 downto 0);
   begin
     if rstn_i = '0' then
       fsm      <= IDLE;
@@ -173,7 +161,6 @@ begin
         else
           idx_i := to_integer(i_u);
 
-          -- active check
           if idx_i < 32 then
             active_bit := act_lo(idx_i);
           else
@@ -184,13 +171,19 @@ begin
             xi_u := unsigned(node_mem(idx_i)(15 downto 0));
             yi_u := unsigned(node_mem(idx_i)(31 downto 16));
 
-            dx_s := signed(xin_q15) - signed(xi_u);
-            dy_s := signed(yin_q15) - signed(yi_u);
+            -- FIX: unsigned -> std_ulogic_vector -> signed, then resize to 18
+            dx18 := resize(signed(std_ulogic_vector(xin_q15)), 18) -
+                    resize(signed(std_ulogic_vector(xi_u   )), 18);
 
-            dx2_u := unsigned(dx_s * dx_s);
-            dy2_u := unsigned(dy_s * dy_s);
+            dy18 := resize(signed(std_ulogic_vector(yin_q15)), 18) -
+                    resize(signed(std_ulogic_vector(yi_u   )), 18);
 
-            dist_u := dx2_u + dy2_u;
+            -- squares (should infer DSP by default)
+            dx2_36 := unsigned(dx18 * dx18);
+            dy2_36 := unsigned(dy18 * dy18);
+
+            -- shift-right 15 (Q2.30 -> ~Q2.15) so sum stays small
+            dist_u := resize(dx2_36(35 downto 15), 32) + resize(dy2_36(35 downto 15), 32);
 
             if dist_u < out_min1 then
               out_min2 <= out_min1;
@@ -211,112 +204,120 @@ begin
   end process;
 
   -- ==========================================================
-  -- Bus access
+  -- EDGE RAM (single-port, sync, registered dout)
+  -- ==========================================================
+  edge_ram: process(clk_i)
+    variable reg_idx : natural;
+    variable di      : natural;
+  begin
+    if rising_edge(clk_i) then
+      if rstn_i = '0' then
+        edge_dout <= (others => '0');
+      else
+        if accept = '1' then
+          reg_idx := to_integer(unsigned(bus_req_i.addr(15 downto 2)));
+
+          if (reg_idx >= EDGE_BASE) and (reg_idx < EDGE_BASE + MAXEDGES) then
+            di := reg_idx - EDGE_BASE;
+
+            if (bus_req_i.rw = '1') and (bus_req_i.ben = "1111") then
+              edge_mem(di) <= bus_req_i.data;
+              edge_dout    <= bus_req_i.data;
+            else
+              edge_dout    <= edge_mem(di);
+            end if;
+          end if;
+        end if;
+      end if;
+    end if;
+  end process;
+
+  -- ==========================================================
+  -- Bus access with 1-cycle response
   -- ==========================================================
   bus_access: process(clk_i, rstn_i)
     variable reg_idx : natural;
     variable di      : natural;
+
+    constant C_LAMBDA : std_ulogic_vector(31 downto 0) := std_ulogic_vector(to_unsigned(100,32));
+    constant C_A_MAX  : std_ulogic_vector(31 downto 0) := std_ulogic_vector(to_unsigned(50,32));
   begin
     if rstn_i = '0' then
       bus_rsp_o <= rsp_terminate_c;
+
+      req_valid <= '0';
+      req_rw    <= '0';
+      req_ben   <= (others => '0');
+      req_addr  <= (others => '0');
+      req_wdata <= (others => '0');
+      req_idx_u <= (others => '0');
+
+      stb_prev    <= '0';
       start_pulse <= '0';
       clear_pulse <= '0';
 
     elsif rising_edge(clk_i) then
-      -- default
-      bus_rsp_o.ack  <= bus_req_i.stb;
+      stb_prev <= bus_req_i.stb;
+
+      bus_rsp_o.ack  <= '0';
       bus_rsp_o.err  <= '0';
       bus_rsp_o.data <= (others => '0');
 
       start_pulse <= '0';
       clear_pulse <= '0';
 
-      if bus_req_i.stb = '1' then
+      if accept = '1' then
+        req_valid <= '1';
+        req_rw    <= bus_req_i.rw;
+        req_ben   <= bus_req_i.ben;
+        req_addr  <= bus_req_i.addr;
+        req_wdata <= bus_req_i.data;
+        req_idx_u <= unsigned(bus_req_i.addr(15 downto 2));
+
         reg_idx := to_integer(unsigned(bus_req_i.addr(15 downto 2)));
 
-        -- WRITE
-        if bus_req_i.rw = '1' then
-          if bus_req_i.ben = "1111" then
+        if (bus_req_i.rw = '1') and (bus_req_i.ben = "1111") then
+          if reg_idx = REG_CTRL then
+            if bus_req_i.data(0) = '1' then clear_pulse <= '1'; end if;
+            if bus_req_i.data(1) = '1' then start_pulse <= '1'; end if;
 
-            if reg_idx = REG_CTRL then
-              if bus_req_i.data(0) = '1' then
-                clear_pulse <= '1';
-              end if;
-              if bus_req_i.data(1) = '1' then
-                start_pulse <= '1';
-              end if;
+          elsif reg_idx = REG_XIN then
+            xin_q15 <= unsigned(bus_req_i.data(15 downto 0));
+          elsif reg_idx = REG_YIN then
+            yin_q15 <= unsigned(bus_req_i.data(15 downto 0));
+          elsif reg_idx = REG_NODE_COUNT then
+            node_count_u8 <= unsigned(bus_req_i.data(7 downto 0));
+          elsif reg_idx = REG_ACT_LO then
+            act_lo <= bus_req_i.data;
+          elsif reg_idx = REG_ACT_HI then
+            act_hi <= bus_req_i.data(7 downto 0);
 
-            elsif reg_idx = REG_COUNT then
-              count_u <= unsigned(bus_req_i.data);
+          elsif (reg_idx >= NODE_BASE) and (reg_idx < NODE_BASE + MAXNODES) then
+            di := reg_idx - NODE_BASE;
+            node_mem(di) <= bus_req_i.data;
 
-            -- settings
-            elsif reg_idx = REG_LAMBDA then
-              lambda_u <= unsigned(bus_req_i.data);
-            elsif reg_idx = REG_A_MAX then
-              amax_u <= unsigned(bus_req_i.data);
-            elsif reg_idx = REG_EPS_B then
-              eps_b_q16 <= unsigned(bus_req_i.data(15 downto 0));
-            elsif reg_idx = REG_EPS_N then
-              eps_n_q16 <= unsigned(bus_req_i.data(15 downto 0));
-            elsif reg_idx = REG_ALPHA then
-              alpha_q16 <= unsigned(bus_req_i.data(15 downto 0));
-            elsif reg_idx = REG_D then
-              d_q16 <= unsigned(bus_req_i.data(15 downto 0));
-
-            -- winner inputs
-            elsif reg_idx = REG_XIN then
-              xin_q15 <= unsigned(bus_req_i.data(15 downto 0));
-            elsif reg_idx = REG_YIN then
-              yin_q15 <= unsigned(bus_req_i.data(15 downto 0));
-            elsif reg_idx = REG_NODE_COUNT then
-              node_count_u8 <= unsigned(bus_req_i.data(7 downto 0));
-            elsif reg_idx = REG_ACT_LO then
-              act_lo <= bus_req_i.data;
-            elsif reg_idx = REG_ACT_HI then
-              act_hi <= bus_req_i.data(7 downto 0);
-
-            -- dataset
-            elsif (reg_idx >= DATA_BASE) and (reg_idx < DATA_BASE + MAXPTS) then
-              di := reg_idx - DATA_BASE;
-              data_mem(di) <= bus_req_i.data;
-
-            -- nodes
-            elsif (reg_idx >= NODE_BASE) and (reg_idx < NODE_BASE + MAXNODES) then
-              di := reg_idx - NODE_BASE;
-              node_mem(di) <= bus_req_i.data;
-
-            -- edges (NEW)
-            elsif (reg_idx >= EDGE_BASE) and (reg_idx < EDGE_BASE + MAXEDGES) then
-              di := reg_idx - EDGE_BASE;
-              edge_mem(di) <= bus_req_i.data;
-
-            end if;
+          else
+            null;
           end if;
+        end if;
+      end if;
 
-        -- READ
-        else
+      if req_valid = '1' then
+        req_valid     <= '0';
+        bus_rsp_o.ack <= '1';
+
+        reg_idx := to_integer(req_idx_u);
+
+        if req_rw = '0' then
           if reg_idx = REG_CTRL then
             bus_rsp_o.data(16) <= busy;
             bus_rsp_o.data(17) <= done;
 
-          elsif reg_idx = REG_COUNT then
-            bus_rsp_o.data <= std_ulogic_vector(count_u);
-
-          -- settings
           elsif reg_idx = REG_LAMBDA then
-            bus_rsp_o.data <= std_ulogic_vector(lambda_u);
+            bus_rsp_o.data <= C_LAMBDA;
           elsif reg_idx = REG_A_MAX then
-            bus_rsp_o.data <= std_ulogic_vector(amax_u);
-          elsif reg_idx = REG_EPS_B then
-            bus_rsp_o.data(15 downto 0) <= std_ulogic_vector(eps_b_q16);
-          elsif reg_idx = REG_EPS_N then
-            bus_rsp_o.data(15 downto 0) <= std_ulogic_vector(eps_n_q16);
-          elsif reg_idx = REG_ALPHA then
-            bus_rsp_o.data(15 downto 0) <= std_ulogic_vector(alpha_q16);
-          elsif reg_idx = REG_D then
-            bus_rsp_o.data(15 downto 0) <= std_ulogic_vector(d_q16);
+            bus_rsp_o.data <= C_A_MAX;
 
-          -- winner inputs readback
           elsif reg_idx = REG_XIN then
             bus_rsp_o.data(15 downto 0) <= std_ulogic_vector(xin_q15);
           elsif reg_idx = REG_YIN then
@@ -328,7 +329,6 @@ begin
           elsif reg_idx = REG_ACT_HI then
             bus_rsp_o.data(7 downto 0) <= act_hi;
 
-          -- winner outputs
           elsif reg_idx = REG_OUT_S12 then
             bus_rsp_o.data(7 downto 0)  <= std_ulogic_vector(out_s1);
             bus_rsp_o.data(15 downto 8) <= std_ulogic_vector(out_s2);
@@ -337,27 +337,19 @@ begin
           elsif reg_idx = REG_OUT_MIN2 then
             bus_rsp_o.data <= std_ulogic_vector(out_min2);
 
-          -- dataset read
-          elsif (reg_idx >= DATA_BASE) and (reg_idx < DATA_BASE + MAXPTS) then
-            di := reg_idx - DATA_BASE;
-            bus_rsp_o.data <= data_mem(di);
-
-          -- node mem read
           elsif (reg_idx >= NODE_BASE) and (reg_idx < NODE_BASE + MAXNODES) then
             di := reg_idx - NODE_BASE;
             bus_rsp_o.data <= node_mem(di);
 
-          -- edge mem read (NEW)
           elsif (reg_idx >= EDGE_BASE) and (reg_idx < EDGE_BASE + MAXEDGES) then
-            di := reg_idx - EDGE_BASE;
-            bus_rsp_o.data <= edge_mem(di);
+            bus_rsp_o.data <= edge_dout;
 
           else
             bus_rsp_o.data <= (others => '0');
           end if;
-
         end if;
       end if;
+
     end if;
   end process;
 

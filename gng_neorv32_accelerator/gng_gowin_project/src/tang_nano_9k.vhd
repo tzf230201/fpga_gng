@@ -157,8 +157,8 @@ begin
     -- PWM (available if IO_PWM_NUM > 0) --
 --    pwm_o       => con_pwm_o                     -- pwm channels
 
-    cfs_in_i => cfs_in_i_r,
-    cfs_out_o => cfs_out_o_r,
+--    cfs_in_i => cfs_in_i_r,
+--    cfs_out_o => cfs_out_o_r,
 
 -- JTAG (available if IO_JTAG_EN = true) --
     jtag_tck_i => jtag_tck_i,                                 -- serial clock

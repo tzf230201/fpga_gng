@@ -29,19 +29,13 @@ boolean running  = false;
 // debug strings
 String lastTX   = "";
 String lastRX   = "";
-String lastTXT  = "";   // <-- last ASCII line from NEORV32
+String lastTXT  = "";   // last ASCII line from NEORV32
 
 // counts from payload
 int gngNodeCount = 0;
 int gngEdgeCount = 0;
 int lastFrameNodes = -1;
 int lastFrameEdges = -1;
-
-// ===============================
-// TIMER (seconds + milliseconds)
-// ===============================
-long tStartMs    = 0;   // waktu sketch mulai
-long tRunStartMs = -1;  // waktu RUN dikirim (optional)
 
 // ===============================
 // UART Binary protocol (match main.c)
@@ -77,36 +71,316 @@ byte[] rxPayload  = new byte[512];
 StringBuilder asciiBuf = new StringBuilder(256);
 
 // ===============================
-// GNG structures
+// HW GNG structures (from NEORV32 frames)
 // ===============================
-class Node {
+class NodeHW {
   float x, y;
   boolean active = false;
 }
-class Edge {
+class EdgeHW {
   int a, b;
   boolean active = false;
 }
+ArrayList<NodeHW> gngNodes = new ArrayList<NodeHW>();
+ArrayList<EdgeHW> gngEdges = new ArrayList<EdgeHW>();
 
-ArrayList<Node> gngNodes = new ArrayList<Node>();
-ArrayList<Edge> gngEdges = new ArrayList<Edge>();
+// =====================================================================
+// ========================== PC GNG (Processing) =======================
+// =====================================================================
 
-// ===============================
-// Setup / Draw
-// ===============================
+// ---- match your firmware parameters ----
+final int   MAX_NODES = 40;
+final int   MAX_EDGES = 80;
+
+final int   GNG_LAMBDA      = 100;
+final float GNG_EPSILON_B   = 0.3f;
+final float GNG_EPSILON_N   = 0.001f;
+final float GNG_ALPHA       = 0.5f;
+final int   GNG_A_MAX       = 50;
+final float GNG_D           = 0.995f;
+
+// how many training steps per frame (PC)
+final int   PC_STEPS_PER_DRAW = 2000;   // naikkan kalau PC kuat
+final int   PC_DRAW_EVERY_N   = 5;      // redraw overlay tiap N step
+
+boolean pcEnabled = true;   // overlay PC GNG
+boolean pcRunning = false;  // mulai setelah RUN dikirim
+int     pcStepCount = 0;
+int     pcDataIndex = 0;
+
+// perf measurement
+float pcStepsPerSec = 0;
+int   pcLastStepPerf = 0;
+int   pcLastMsPerf   = 0;
+
+// PC nodes/edges
+class NodePC {
+  float x, y;
+  float error;
+  boolean active;
+}
+class EdgePC {
+  int a, b;
+  int age;
+  boolean active;
+}
+NodePC[] pcNodes = new NodePC[MAX_NODES];
+EdgePC[] pcEdges = new EdgePC[MAX_EDGES];
+
+float dist2(float x1, float y1, float x2, float y2) {
+  float dx = x1 - x2;
+  float dy = y1 - y2;
+  return dx*dx + dy*dy;
+}
+
+void initPCGNG() {
+  for (int i = 0; i < MAX_NODES; i++) {
+    pcNodes[i] = new NodePC();
+    pcNodes[i].x = 0;
+    pcNodes[i].y = 0;
+    pcNodes[i].error = 0;
+    pcNodes[i].active = false;
+  }
+  for (int i = 0; i < MAX_EDGES; i++) {
+    pcEdges[i] = new EdgePC();
+    pcEdges[i].a = 0;
+    pcEdges[i].b = 0;
+    pcEdges[i].age = 0;
+    pcEdges[i].active = false;
+  }
+
+  // same init as firmware
+  pcNodes[0].x = 0.2f; pcNodes[0].y = 0.2f; pcNodes[0].active = true;
+  pcNodes[1].x = 0.8f; pcNodes[1].y = 0.8f; pcNodes[1].active = true;
+
+  pcStepCount = 0;
+  pcDataIndex = 0;
+
+  pcLastStepPerf = 0;
+  pcLastMsPerf   = millis();
+  pcStepsPerSec  = 0;
+}
+
+int findFreeNodePC() {
+  for (int i = 0; i < MAX_NODES; i++) {
+    if (!pcNodes[i].active) return i;
+  }
+  return -1;
+}
+
+// returns edge index if exists else -1
+int findEdgePC(int a, int b) {
+  int aa = min(a, b);
+  int bb = max(a, b);
+  for (int i = 0; i < MAX_EDGES; i++) {
+    EdgePC e = pcEdges[i];
+    if (!e.active) continue;
+    int ea = min(e.a, e.b);
+    int eb = max(e.a, e.b);
+    if (ea == aa && eb == bb) return i;
+  }
+  return -1;
+}
+
+void connectOrResetEdgePC(int a, int b) {
+  int ei = findEdgePC(a, b);
+  if (ei >= 0) {
+    pcEdges[ei].a = a;
+    pcEdges[ei].b = b;
+    pcEdges[ei].age = 0;
+    pcEdges[ei].active = true;
+    return;
+  }
+  for (int i = 0; i < MAX_EDGES; i++) {
+    if (!pcEdges[i].active) {
+      pcEdges[i].a = a;
+      pcEdges[i].b = b;
+      pcEdges[i].age = 0;
+      pcEdges[i].active = true;
+      return;
+    }
+  }
+}
+
+void removeEdgePairPC(int a, int b) {
+  int ei = findEdgePC(a, b);
+  if (ei >= 0) pcEdges[ei].active = false;
+}
+
+void ageEdgesFromWinnerPC(int w) {
+  for (int i = 0; i < MAX_EDGES; i++) {
+    EdgePC e = pcEdges[i];
+    if (!e.active) continue;
+    if (e.a == w || e.b == w) e.age++;
+  }
+}
+
+void deleteOldEdgesPC() {
+  for (int i = 0; i < MAX_EDGES; i++) {
+    EdgePC e = pcEdges[i];
+    if (!e.active) continue;
+    if (e.age > GNG_A_MAX) e.active = false;
+  }
+}
+
+void pruneIsolatedNodesPC() {
+  for (int i = 0; i < MAX_NODES; i++) {
+    if (!pcNodes[i].active) continue;
+    boolean hasEdge = false;
+    for (int e = 0; e < MAX_EDGES; e++) {
+      EdgePC ed = pcEdges[e];
+      if (!ed.active) continue;
+      if (ed.a == i || ed.b == i) { hasEdge = true; break; }
+    }
+    if (!hasEdge) pcNodes[i].active = false;
+  }
+}
+
+// Fritzke insertion rule (match your firmware FIX)
+int insertNodePC() {
+  int q = -1;
+  float maxErr = -1;
+  for (int i = 0; i < MAX_NODES; i++) {
+    if (pcNodes[i].active && pcNodes[i].error > maxErr) {
+      maxErr = pcNodes[i].error;
+      q = i;
+    }
+  }
+  if (q < 0) return -1;
+
+  int f = -1;
+  maxErr = -1;
+  for (int i = 0; i < MAX_EDGES; i++) {
+    EdgePC e = pcEdges[i];
+    if (!e.active) continue;
+
+    int nb = -1;
+    if (e.a == q) nb = e.b;
+    else if (e.b == q) nb = e.a;
+
+    if (nb >= 0 && nb < MAX_NODES && pcNodes[nb].active && pcNodes[nb].error > maxErr) {
+      maxErr = pcNodes[nb].error;
+      f = nb;
+    }
+  }
+  if (f < 0) return -1;
+
+  int r = findFreeNodePC();
+  if (r < 0) return -1;
+
+  pcNodes[r].x = 0.5f * (pcNodes[q].x + pcNodes[f].x);
+  pcNodes[r].y = 0.5f * (pcNodes[q].y + pcNodes[f].y);
+  pcNodes[r].active = true;
+
+  removeEdgePairPC(q, f);
+  connectOrResetEdgePC(q, r);
+  connectOrResetEdgePC(r, f);
+
+  // IMPORTANT: order matches your firmware
+  pcNodes[q].error *= GNG_ALPHA;
+  pcNodes[f].error *= GNG_ALPHA;
+  pcNodes[r].error  = pcNodes[q].error;
+
+  return r;
+}
+
+void trainOneStepPC(float x, float y) {
+  int s1 = -1, s2 = -1;
+  float d1 = 1e30f;
+  float d2 = 1e30f;
+
+  for (int i = 0; i < MAX_NODES; i++) {
+    if (!pcNodes[i].active) continue;
+    float d = dist2(x, y, pcNodes[i].x, pcNodes[i].y);
+    if (d < d1) { d2 = d1; s2 = s1; d1 = d; s1 = i; }
+    else if (d < d2) { d2 = d; s2 = i; }
+  }
+  if (s1 < 0 || s2 < 0) return;
+
+  ageEdgesFromWinnerPC(s1);
+
+  pcNodes[s1].error += d1;
+
+  // move winner
+  pcNodes[s1].x += GNG_EPSILON_B * (x - pcNodes[s1].x);
+  pcNodes[s1].y += GNG_EPSILON_B * (y - pcNodes[s1].y);
+
+  // move neighbors (scan edges)
+  for (int i = 0; i < MAX_EDGES; i++) {
+    EdgePC e = pcEdges[i];
+    if (!e.active) continue;
+    if (e.a == s1 || e.b == s1) {
+      int nb = (e.a == s1) ? e.b : e.a;
+      if (nb >= 0 && nb < MAX_NODES && pcNodes[nb].active) {
+        pcNodes[nb].x += GNG_EPSILON_N * (x - pcNodes[nb].x);
+        pcNodes[nb].y += GNG_EPSILON_N * (y - pcNodes[nb].y);
+      }
+    }
+  }
+
+  connectOrResetEdgePC(s1, s2);
+
+  deleteOldEdgesPC();
+  pruneIsolatedNodesPC();
+
+  pcStepCount++;
+
+  if ((pcStepCount % GNG_LAMBDA) == 0) {
+    insertNodePC();
+    pruneIsolatedNodesPC();
+  }
+
+  for (int i = 0; i < MAX_NODES; i++) {
+    if (pcNodes[i].active) pcNodes[i].error *= GNG_D;
+  }
+}
+
+int countActiveNodesPC() {
+  int c = 0;
+  for (int i = 0; i < MAX_NODES; i++) if (pcNodes[i].active) c++;
+  return c;
+}
+int countActiveEdgesPC() {
+  int c = 0;
+  for (int i = 0; i < MAX_EDGES; i++) if (pcEdges[i].active) c++;
+  return c;
+}
+
+void runPCGNGSteps() {
+  if (!pcEnabled || !pcRunning) return;
+  if (data == null || data.length == 0) return;
+
+  for (int k = 0; k < PC_STEPS_PER_DRAW; k++) {
+    float x = data[pcDataIndex][0];
+    float y = data[pcDataIndex][1];
+    pcDataIndex++;
+    if (pcDataIndex >= data.length) pcDataIndex = 0;
+    trainOneStepPC(x, y);
+  }
+
+  // update perf roughly 4x per second
+  int now = millis();
+  int dt = now - pcLastMsPerf;
+  if (dt >= 250) {
+    int ds = pcStepCount - pcLastStepPerf;
+    pcStepsPerSec = (dt > 0) ? (1000.0f * ds / dt) : 0;
+    pcLastMsPerf = now;
+    pcLastStepPerf = pcStepCount;
+  }
+}
+
+// =====================================================================
+// =============================== Setup / Draw ==========================
+// =====================================================================
+
 void setup() {
   size(1000, 600);
-  surface.setTitle("Two Moons → NEORV32 GNG (binary + text)");
-
-  // Timer start
-  tStartMs = millis();
+  surface.setTitle("Two Moons → NEORV32 GNG + PC GNG (overlay)");
 
   println("Available serial ports:");
   println(Serial.list());
 
   myPort = new Serial(this, PORT_NAME, BAUD);
-
-  // optional: buang data awal yang “nyangkut”
   myPort.clear();
   delay(1200);
 
@@ -119,17 +393,26 @@ void setup() {
     MOONS_NORMALIZE01
   );
 
+  // init PC GNG now; we start running after RUN
+  initPCGNG();
+
   println("Uploading dataset...");
 }
 
 void draw() {
   background(30);
 
-  // IMPORTANT: selalu baca serial, biar text seperti "READY\n" kebaca
+  // ALWAYS read serial (for READY, frames, etc.)
   processSerial();
 
+  // PC GNG runs in parallel after RUN
+  if (uploaded && running) {
+    pcRunning = true;
+    runPCGNGSteps();
+  }
+
   drawDataset();
-  drawGNG();
+  drawGNG();    // draws HW + overlay PC
   drawDebug();
 
   if (!uploaded) {
@@ -137,7 +420,16 @@ void draw() {
   } else if (!running) {
     sendRunCommand();
   }
-  // kalau sudah running, data akan terus masuk via processSerial()
+}
+
+void keyPressed() {
+  if (key == 'p' || key == 'P') {
+    pcEnabled = !pcEnabled;
+  }
+  if (key == 'r' || key == 'R') {
+    // reset PC side only (NEORV32 reset perlu command khusus kalau mau)
+    initPCGNG();
+  }
 }
 
 // ===============================
@@ -186,10 +478,6 @@ void sendRunCommand() {
   sendFrame((byte)CMD_RUN, new byte[0]);
   lastTX = "RUN";
   running = true;
-
-  // Timer RUN mulai saat command RUN dikirim
-  tRunStartMs = millis();
-
   println("[TX] RUN");
 }
 
@@ -218,10 +506,7 @@ void processSerial() {
 
       case RX_WAIT_H2:
         if (b == UART_HDR) rxState = RX_WAIT_CMD;
-        else {
-          // false alarm: we saw one 0xFF but not second
-          rxState = RX_WAIT_H1;
-        }
+        else rxState = RX_WAIT_H1;
         break;
 
       case RX_WAIT_CMD:
@@ -249,9 +534,6 @@ void processSerial() {
         int expected = (~rxChecksum) & 0xFF;
         if (b == expected) {
           handleFrame(rxCmd, rxPayload, rxLen);
-        } else {
-          // checksum fail (optional debug)
-          // println("[RX] checksum fail cmd=" + hex(rxCmd) + " len=" + rxLen);
         }
         rxState = RX_WAIT_H1;
         break;
@@ -265,10 +547,8 @@ void processSerial() {
 }
 
 void handleAsciiByte(int b) {
-  // ignore CR
   if (b == '\r') return;
 
-  // newline -> flush line
   if (b == '\n') {
     if (asciiBuf.length() > 0) {
       String line = asciiBuf.toString();
@@ -279,9 +559,7 @@ void handleAsciiByte(int b) {
     return;
   }
 
-  // keep printable chars + tab
   if ((b >= 32 && b <= 126) || b == '\t') {
-    // optional limit biar gak membengkak kalau never ends
     if (asciiBuf.length() < 400) asciiBuf.append((char)b);
   }
 }
@@ -312,8 +590,8 @@ void handleFrame(int cmd, byte[] payload, int len) {
       if (xi >= 32768) xi -= 65536;
       if (yi >= 32768) yi -= 65536;
 
-      while (gngNodes.size() <= idxNode) gngNodes.add(new Node());
-      Node n = gngNodes.get(idxNode);
+      while (gngNodes.size() <= idxNode) gngNodes.add(new NodeHW());
+      NodeHW n = gngNodes.get(idxNode);
       n.x = xi / 1000.0;
       n.y = yi / 1000.0;
       n.active = true;
@@ -335,7 +613,7 @@ void handleFrame(int cmd, byte[] payload, int len) {
 
     for (int i = 0; i < edgeCount; i++) {
       if (pos + 2 > len) break;
-      Edge e = new Edge();
+      EdgeHW e = new EdgeHW();
       e.a = payload[pos++] & 0xFF;
       e.b = payload[pos++] & 0xFF;
       e.active = true;
@@ -390,14 +668,15 @@ void drawGNG() {
   pushMatrix();
   translate(500, 0);
 
+  // ---------------- HW (NEORV32) ----------------
   stroke(255);
   strokeWeight(2);
-  for (Edge e : gngEdges) {
+  for (EdgeHW e : gngEdges) {
     if (!e.active) continue;
     if (e.a < 0 || e.a >= gngNodes.size()) continue;
     if (e.b < 0 || e.b >= gngNodes.size()) continue;
-    Node a = gngNodes.get(e.a);
-    Node b = gngNodes.get(e.b);
+    NodeHW a = gngNodes.get(e.a);
+    NodeHW b = gngNodes.get(e.b);
     if (!a.active || !b.active) continue;
 
     line(a.x * 400 + 50, a.y * 400 + 50,
@@ -406,51 +685,70 @@ void drawGNG() {
 
   fill(0, 180, 255);
   noStroke();
-  for (Node n : gngNodes) {
+  for (NodeHW n : gngNodes) {
     if (n.active) ellipse(n.x * 400 + 50, n.y * 400 + 50, 12, 12);
   }
 
+  // ---------------- PC (Processing) overlay ----------------
+  if (pcEnabled) {
+    // edges PC
+    stroke(255, 80, 200);
+    strokeWeight(2);
+    for (int i = 0; i < MAX_EDGES; i++) {
+      EdgePC e = pcEdges[i];
+      if (!e.active) continue;
+      if (e.a < 0 || e.a >= MAX_NODES) continue;
+      if (e.b < 0 || e.b >= MAX_NODES) continue;
+      if (!pcNodes[e.a].active || !pcNodes[e.b].active) continue;
+
+      line(pcNodes[e.a].x * 400 + 50, pcNodes[e.a].y * 400 + 50,
+           pcNodes[e.b].x * 400 + 50, pcNodes[e.b].y * 400 + 50);
+    }
+
+    // nodes PC
+    noStroke();
+    fill(255, 80, 200);
+    for (int i = 0; i < MAX_NODES; i++) {
+      if (!pcNodes[i].active) continue;
+      ellipse(pcNodes[i].x * 400 + 50, pcNodes[i].y * 400 + 50, 9, 9);
+    }
+  }
+
+  // legend
   fill(200);
-  text("NEORV32 GNG Output", 150, 30);
+  text("Right panel overlay:", 50, 30);
+  fill(0,180,255); text("HW (NEORV32)", 50, 50);
+  fill(255,80,200); text("PC (Processing)  [P toggle]", 50, 70);
+
   popMatrix();
 }
 
 void drawDebug() {
-  // panel debug diperbesar agar muat timer + TX/RX/TXT
   fill(0, 0, 0, 180);
-  rect(0, height - 130, width, 130);
+  noStroke();
+  rect(0, height - 120, width, 120);
 
-  long now = millis();
-
-  // Uptime (sejak sketch start)
-  long upMs = now - tStartMs;
-  int upS = (int)(upMs / 1000);
-  int upRemMs = (int)(upMs % 1000);
-
-  // Run time (sejak RUN dikirim)
-  long runMs = (tRunStartMs >= 0) ? (now - tRunStartMs) : -1;
-  int runS = (runMs >= 0) ? (int)(runMs / 1000) : 0;
-  int runRemMs = (runMs >= 0) ? (int)(runMs % 1000) : 0;
-
-  fill(200);
-  String runStr = (runMs >= 0) ? (runS + " s " + nf(runRemMs, 3) + " ms") : "--";
-  text("Uptime: " + upS + " s " + nf(upRemMs, 3) + " ms" +
-       "   |   Run: " + runStr,
-       10, height - 110);
-
-  fill(0, 255, 0);
+  fill(0,255,0);
   text("TX: " + lastTX, 10, height - 90);
 
-  fill(255, 200, 0);
+  fill(255,200,0);
   text("RX: " + lastRX, 10, height - 70);
 
-  fill(180, 180, 255);
+  fill(180,180,255);
   text("TXT: " + lastTXT, 10, height - 50);
 
   fill(200);
-  text("Nodes=" + gngNodeCount + "  Edges=" + gngEdgeCount +
+  text("HW Nodes=" + gngNodeCount + "  HW Edges=" + gngEdgeCount +
        "  FrameN=" + lastFrameNodes + "  FrameE=" + lastFrameEdges,
        10, height - 30);
+
+  fill(255,80,200);
+  text("PC steps=" + pcStepCount +
+       "  PC steps/sec≈" + nf(pcStepsPerSec, 1, 1) +
+       "  PC active nodes=" + countActiveNodesPC() +
+       "  PC active edges=" + countActiveEdgesPC() +
+       "  (R=reset PC)",
+       10, height - 10);
 }
 
 // ===============================

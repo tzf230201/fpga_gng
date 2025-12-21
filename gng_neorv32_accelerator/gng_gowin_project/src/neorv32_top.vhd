@@ -230,8 +230,8 @@ entity neorv32_top is
     pwm_o          : out std_ulogic_vector(31 downto 0);                    -- pwm channels
 
     -- Custom Functions Subsystem IO (available if IO_CFS_EN = true) --
-    cfs_in_i       : in  std_ulogic_vector(255 downto 0) := (others => 'L'); -- custom CFS inputs conduit
-    cfs_out_o      : out std_ulogic_vector(255 downto 0);                    -- custom CFS outputs conduit
+--    cfs_in_i       : in  std_ulogic_vector(255 downto 0) := (others => 'L'); -- custom CFS inputs conduit
+--    cfs_out_o      : out std_ulogic_vector(255 downto 0);                    -- custom CFS outputs conduit
 
     -- NeoPixel-compatible smart LED interface (available if IO_NEOLED_EN = true) --
     neoled_o       : out std_ulogic;                                        -- async serial data line
@@ -1035,9 +1035,9 @@ begin
         rstn_i      => rstn_sys,
         bus_req_i   => iodev_req(IODEV_CFS),
         bus_rsp_o   => iodev_rsp(IODEV_CFS),
-        irq_o       => firq(FIRQ_CFS),
-        cfs_in_i    => cfs_in_i,
-        cfs_out_o   => cfs_out_o
+        irq_o       => firq(FIRQ_CFS)
+--        cfs_in_i    => cfs_in_i,
+--        cfs_out_o   => cfs_out_o
       );
     end generate;
 
@@ -1045,7 +1045,7 @@ begin
     if not IO_CFS_EN generate
       iodev_rsp(IODEV_CFS) <= rsp_terminate_c;
       firq(FIRQ_CFS)       <= '0';
-      cfs_out_o            <= (others => '0');
+--      cfs_out_o            <= (others => '0');
     end generate;
 
 
