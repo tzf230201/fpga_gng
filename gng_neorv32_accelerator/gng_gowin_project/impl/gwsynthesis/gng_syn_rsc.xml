@@ -1,54 +1,54 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Module name="neorv32_ProcessorTop_MinimalBoot" T_Register="2002(0)" T_Alu="331(0)" T_Lut="3494(0)" T_MULT18X18="2(0)" T_Bsram="13(0)" T_Ssram="33(0)">
- <SubModule name="uflash_inst" Register="45" Lut="113" T_Register="45(45)" T_Lut="113(113)">
+<Module name="neorv32_ProcessorTop_MinimalBoot" T_Register="2020(0)" T_Alu="328(0)" T_Lut="3554(0)" T_MULTADDALU18X18="1(0)" T_Bsram="13(0)" T_Ssram="33(0)">
+ <SubModule name="uflash_inst" Register="45" Lut="112" T_Register="45(45)" T_Lut="112(112)">
   <SubModule name="flash_inst"/>
  </SubModule>
- <SubModule name="neorv32_inst" T_Register="1957(0)" T_Alu="331(0)" T_Lut="3381(0)" T_MULT18X18="2(0)" T_Bsram="13(0)" T_Ssram="33(0)">
+ <SubModule name="neorv32_inst" T_Register="1975(0)" T_Alu="328(0)" T_Lut="3442(0)" T_MULTADDALU18X18="1(0)" T_Bsram="13(0)" T_Ssram="33(0)">
   <SubModule name="soc_generators.neorv32_sys_reset_inst" Register="10" Lut="6" T_Register="10(10)" T_Lut="6(6)"/>
   <SubModule name="soc_generators.neorv32_sys_clock_inst" Register="20" Alu="11" Lut="2" T_Register="20(20)" T_Alu="11(11)" T_Lut="2(2)"/>
-  <SubModule name="core_complex_gen[0].neorv32_cpu_inst" Lut="131" T_Register="835(0)" T_Alu="97(0)" T_Lut="1757(131)" T_Bsram="2(0)" T_Ssram="9(0)">
-   <SubModule name="neorv32_cpu_frontend_inst" Register="34" Lut="89" T_Register="38(34)" T_Lut="94(89)" T_Ssram="9(0)">
+  <SubModule name="core_complex_gen[0].neorv32_cpu_inst" Lut="131" T_Register="835(0)" T_Alu="97(0)" T_Lut="1744(131)" T_Bsram="2(0)" T_Ssram="9(0)">
+   <SubModule name="neorv32_cpu_frontend_inst" Register="34" Lut="91" T_Register="38(34)" T_Lut="97(91)" T_Ssram="9(0)">
     <SubModule name="prefetch_buffer[0].ipb_inst" Register="4" Lut="1" Ssram="5" T_Register="4(4)" T_Lut="1(1)" T_Ssram="5(5)"/>
-    <SubModule name="prefetch_buffer[1].ipb_inst" Lut="4" Ssram="4" T_Lut="4(4)" T_Ssram="4(4)"/>
+    <SubModule name="prefetch_buffer[1].ipb_inst" Lut="5" Ssram="4" T_Lut="5(5)" T_Ssram="4(4)"/>
    </SubModule>
-   <SubModule name="neorv32_cpu_control_inst" Register="520" Lut="924" T_Register="520(520)" T_Lut="924(924)"/>
-   <SubModule name="cnts_enabled.neorv32_cpu_counters_inst" Register="4" Lut="4" T_Register="134(4)" T_Lut="291(4)">
-    <SubModule name="base_enabled.cycle_inst" Register="65" Lut="144" T_Register="65(65)" T_Lut="144(144)"/>
-    <SubModule name="base_enabled.instret_inst" Register="65" Lut="143" T_Register="65(65)" T_Lut="143(143)"/>
+   <SubModule name="neorv32_cpu_control_inst" Register="520" Lut="922" T_Register="520(520)" T_Lut="922(922)"/>
+   <SubModule name="cnts_enabled.neorv32_cpu_counters_inst" Register="4" Lut="7" T_Register="134(4)" T_Lut="297(7)">
+    <SubModule name="base_enabled.cycle_inst" Register="65" Lut="146" T_Register="65(65)" T_Lut="146(146)"/>
+    <SubModule name="base_enabled.instret_inst" Register="65" Lut="144" T_Register="65(65)" T_Lut="144(144)"/>
    </SubModule>
    <SubModule name="neorv32_cpu_regfile_inst" Lut="8" T_Lut="8(8)" T_Bsram="2(0)">
     <SubModule name="register_file_fpga.reg_file_inst" Bsram="2" T_Bsram="2(2)"/>
    </SubModule>
-   <SubModule name="neorv32_cpu_alu_inst" Alu="97" Lut="66" T_Register="39(0)" T_Alu="97(97)" T_Lut="146(66)">
-    <SubModule name="neorv32_cpu_cp_shifter_inst" Register="39" Lut="80" T_Register="39(39)" T_Lut="80(80)"/>
+   <SubModule name="neorv32_cpu_alu_inst" Alu="97" Lut="66" T_Register="39(0)" T_Alu="97(97)" T_Lut="147(66)">
+    <SubModule name="neorv32_cpu_cp_shifter_inst" Register="39" Lut="81" T_Register="39(39)" T_Lut="81(81)"/>
    </SubModule>
-   <SubModule name="neorv32_cpu_lsu_inst" Register="104" Lut="163" T_Register="104(104)" T_Lut="163(163)"/>
+   <SubModule name="neorv32_cpu_lsu_inst" Register="104" Lut="142" T_Register="104(104)" T_Lut="142(142)"/>
   </SubModule>
-  <SubModule name="core_complex_gen[0].neorv32_core_bus_switch_inst" Register="4" Lut="41" T_Register="4(4)" T_Lut="41(41)"/>
-  <SubModule name="neorv32_bus_gateway_inst" Register="8" Lut="107" T_Register="8(8)" T_Lut="107(107)"/>
-  <SubModule name="memory_system.neorv32_dmem_enabled.neorv32_dmem_inst" Register="2" Lut="7" T_Register="2(2)" T_Lut="7(7)" T_Bsram="8(0)">
+  <SubModule name="core_complex_gen[0].neorv32_core_bus_switch_inst" Register="4" Lut="33" T_Register="4(4)" T_Lut="33(33)"/>
+  <SubModule name="neorv32_bus_gateway_inst" Register="8" Lut="128" T_Register="8(8)" T_Lut="128(128)"/>
+  <SubModule name="memory_system.neorv32_dmem_enabled.neorv32_dmem_inst" Register="2" Lut="6" T_Register="2(2)" T_Lut="6(6)" T_Bsram="8(0)">
    <SubModule name="dmem_ram_gen[0].ram_inst" Bsram="2" T_Bsram="2(2)"/>
    <SubModule name="dmem_ram_gen[1].ram_inst" Bsram="2" T_Bsram="2(2)"/>
    <SubModule name="dmem_ram_gen[2].ram_inst" Bsram="2" T_Bsram="2(2)"/>
    <SubModule name="dmem_ram_gen[3].ram_inst" Bsram="2" T_Bsram="2(2)"/>
   </SubModule>
-  <SubModule name="memory_system.neorv32_xbus_enabled.neorv32_xbus_inst" Register="1" Lut="3" T_Register="1(1)" T_Lut="3(3)"/>
+  <SubModule name="memory_system.neorv32_xbus_enabled.neorv32_xbus_inst" Register="1" Lut="5" T_Register="1(1)" T_Lut="5(5)"/>
   <SubModule name="io_system.neorv32_bus_io_switch_inst" Lut="115" T_Register="92(0)" T_Lut="115(115)">
    <SubModule name="neorv32_bus_reg_inst" Register="92" T_Register="92(92)"/>
   </SubModule>
   <SubModule name="io_system.neorv32_boot_rom_enabled.neorv32_boot_rom_inst" Register="34" Lut="34" T_Register="34(34)" T_Lut="34(34)"/>
-  <SubModule name="io_system.neorv32_cfs_enabled.neorv32_cfs_inst" Register="200" Alu="97" Lut="371" MULT18X18="2" Bsram="1" Ssram="24" T_Register="200(200)" T_Alu="97(97)" T_Lut="371(371)" T_MULT18X18="2(2)" T_Bsram="1(1)" T_Ssram="24(24)"/>
+  <SubModule name="io_system.neorv32_cfs_enabled.neorv32_cfs_inst" Register="218" Alu="94" Lut="437" MULTADDALU18X18="1" Bsram="1" Ssram="24" T_Register="218(218)" T_Alu="94(94)" T_Lut="437(437)" T_MULTADDALU18X18="1(1)" T_Bsram="1(1)" T_Ssram="24(24)"/>
   <SubModule name="io_system.neorv32_gpio_enabled.neorv32_gpio_inst" Register="43" Lut="52" T_Register="43(43)" T_Lut="52(52)"/>
-  <SubModule name="io_system.neorv32_clint_enabled.neorv32_clint_inst" Register="34" Lut="111" T_Register="165(34)" T_Alu="126(0)" T_Lut="255(111)">
+  <SubModule name="io_system.neorv32_clint_enabled.neorv32_clint_inst" Register="34" Lut="115" T_Register="165(34)" T_Alu="126(0)" T_Lut="259(115)">
    <SubModule name="neorv32_clint_mtime_inst" Register="65" Lut="142" T_Register="65(65)" T_Lut="142(142)"/>
    <SubModule name="neorv32_clint_mtimecmp_gen[0].neorv32_clint_mtimecmp_inst" Register="66" Alu="126" Lut="2" T_Register="66(66)" T_Alu="126(126)" T_Lut="2(2)"/>
   </SubModule>
-  <SubModule name="io_system.neorv32_uart0_enabled.neorv32_uart0_inst" Register="101" Lut="124" T_Register="121(101)" T_Lut="134(124)">
+  <SubModule name="io_system.neorv32_uart0_enabled.neorv32_uart0_inst" Register="101" Lut="121" T_Register="121(101)" T_Lut="129(121)">
    <SubModule name="tx_engine_fifo_inst" Register="10" Lut="4" T_Register="10(10)" T_Lut="4(4)"/>
-   <SubModule name="rx_engine_fifo_inst" Register="10" Lut="6" T_Register="10(10)" T_Lut="6(6)"/>
+   <SubModule name="rx_engine_fifo_inst" Register="10" Lut="4" T_Register="10(10)" T_Lut="4(4)"/>
   </SubModule>
-  <SubModule name="io_system.neorv32_sysinfo_enabled.neorv32_sysinfo_inst" Register="66" Lut="37" T_Register="66(66)" T_Lut="37(37)"/>
-  <SubModule name="neorv32_ocd_enabled.neorv32_debug_dtm_inst" Register="114" Lut="122" T_Register="114(114)" T_Lut="122(122)"/>
-  <SubModule name="neorv32_ocd_enabled.neorv32_debug_dm_inst" Register="242" Lut="338" Bsram="2" T_Register="242(242)" T_Lut="338(338)" T_Bsram="2(2)"/>
+  <SubModule name="io_system.neorv32_sysinfo_enabled.neorv32_sysinfo_inst" Register="66" Lut="35" T_Register="66(66)" T_Lut="35(35)"/>
+  <SubModule name="neorv32_ocd_enabled.neorv32_debug_dtm_inst" Register="114" Lut="121" T_Register="114(114)" T_Lut="121(121)"/>
+  <SubModule name="neorv32_ocd_enabled.neorv32_debug_dm_inst" Register="242" Lut="336" Bsram="2" T_Register="242(242)" T_Lut="336(336)" T_Bsram="2(2)"/>
  </SubModule>
 </Module>

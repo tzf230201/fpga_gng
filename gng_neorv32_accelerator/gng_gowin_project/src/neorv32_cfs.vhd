@@ -1,5 +1,9 @@
 -- ================================================================================
--- NEORV32 CFS (Winner Finder) - SAFE (NO blocking-read)
+-- NEORV32 CFS (Winner Finder) - SAFE (NO blocking-read), Q2.30 correct
+-- - Node mem: 40 x 32-bit (packed Q1.15 x,y)
+-- - Winner scan: 1 node per clock
+-- - dist_u = dx^2 + dy^2 in Q2.30 (NO >>15)
+-- - Bus: 1-cycle response (registered)
 -- ================================================================================
 library ieee;
 use ieee.std_logic_1164.all;
@@ -80,7 +84,7 @@ begin
   accept <= bus_req_i.stb and (not stb_prev) and (not req_valid);
 
   -- ==========================================================
-  -- Winner FSM (1 node/clock)
+  -- Winner FSM (1 node/clock) - Q2.30 correct
   -- ==========================================================
   winner_fsm: process(clk_i, rstn_i)
     variable idx_i      : natural;
@@ -153,7 +157,8 @@ begin
             dx2_36 := unsigned(dx18 * dx18);
             dy2_36 := unsigned(dy18 * dy18);
 
-            dist_u := resize(dx2_36(35 downto 15), 32) + resize(dy2_36(35 downto 15), 32);
+            -- Q2.30 (no shift): (Q1.15)^2 => Q2.30
+            dist_u := resize(dx2_36, 32) + resize(dy2_36, 32);
 
             if dist_u < out_min1 then
               out_min2 <= out_min1;
