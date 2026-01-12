@@ -1,0 +1,36 @@
+[
+ {
+  "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
+  "InstLine" : 4,
+  "InstName" : "tang_nano_9k",
+  "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
+  "ModuleLine" : 4,
+  "ModuleName" : "tang_nano_9k",
+  "SubInsts" : [
+   {
+    "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
+    "InstLine" : 40,
+    "InstName" : "u_rx",
+    "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/uart_rx.vhd",
+    "ModuleLine" : 5,
+    "ModuleName" : "uart_rx"
+   },
+   {
+    "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
+    "InstLine" : 55,
+    "InstName" : "u_buf",
+    "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/rx_buffer_400.vhd",
+    "ModuleLine" : 5,
+    "ModuleName" : "rx_buffer_400"
+   },
+   {
+    "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
+    "InstLine" : 71,
+    "InstName" : "u_tx",
+    "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/uart_tx.vhd",
+    "ModuleLine" : 5,
+    "ModuleName" : "uart_tx"
+   }
+  ]
+ }
+]

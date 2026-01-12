@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Module name="tang_nano_9k" Lut="2" T_Register="127(0)" T_Lut="274(2)" T_Bsram="1(0)">
+ <SubModule name="u_rx" Register="48" Lut="115" T_Register="48(48)" T_Lut="115(115)"/>
+ <SubModule name="u_buf" Register="39" Lut="64" Bsram="1" T_Register="39(39)" T_Lut="64(64)" T_Bsram="1(1)"/>
+ <SubModule name="u_tx" Register="40" Lut="93" T_Register="40(40)" T_Lut="93(93)"/>
+</Module>
