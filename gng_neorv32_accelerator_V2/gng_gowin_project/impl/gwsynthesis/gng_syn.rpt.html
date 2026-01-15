@@ -55,11 +55,12 @@ table.detail_table td.label { min-width: 100px; width: 8%;}
 </tr>
 <tr>
 <td class="label">Design File</td>
-<td>C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\bram_copy_and_send.vhd<br>
+<td>C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\bram_send.vhd<br>
 C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\rx_store.vhd<br>
 C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\tang_nano_9k.vhd<br>
 C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\uart_rx.vhd<br>
 C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\uart_tx.vhd<br>
+C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\bram_copy.vhd<br>
 </td>
 </tr>
 <tr>
@@ -84,7 +85,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 </tr>
 <tr>
 <td class="label">Created Time</td>
-<td>Wed Jan 14 02:25:00 2026
+<td>Thu Jan 15 19:15:25 2026
 </td>
 </tr>
 <tr>
@@ -100,11 +101,11 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 </tr>
 <tr>
 <td class="label">Synthesis Process</td>
-<td>Running parser:<br/>&nbsp;&nbsp;&nbsp;&nbsp;CPU time = 0h 0m 0.218s, Elapsed time = 0h 0m 0.228s, Peak memory usage = 326.008MB<br/>Running netlist conversion:<br/>&nbsp;&nbsp;&nbsp;&nbsp;CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s, Peak memory usage = 0MB<br/>Running device independent optimization:<br/>&nbsp;&nbsp;&nbsp;&nbsp;Optimizing Phase 0: CPU time = 0h 0m 0.031s, Elapsed time = 0h 0m 0.03s, Peak memory usage = 326.008MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Optimizing Phase 1: CPU time = 0h 0m 0.015s, Elapsed time = 0h 0m 0.012s, Peak memory usage = 326.008MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Optimizing Phase 2: CPU time = 0h 0m 0.015s, Elapsed time = 0h 0m 0.025s, Peak memory usage = 326.008MB<br/>Running inference:<br/>&nbsp;&nbsp;&nbsp;&nbsp;Inferring Phase 0: CPU time = 0h 0m 0.046s, Elapsed time = 0h 0m 0.022s, Peak memory usage = 326.008MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Inferring Phase 1: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0.001s, Peak memory usage = 326.008MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Inferring Phase 2: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0.002s, Peak memory usage = 326.008MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Inferring Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0.002s, Peak memory usage = 326.008MB<br/>Running technical mapping:<br/>&nbsp;&nbsp;&nbsp;&nbsp;Tech-Mapping Phase 0: CPU time = 0h 0m 0.031s, Elapsed time = 0h 0m 0.03s, Peak memory usage = 326.008MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Tech-Mapping Phase 1: CPU time = 0h 0m 0.015s, Elapsed time = 0h 0m 0.011s, Peak memory usage = 326.008MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Tech-Mapping Phase 2: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0.006s, Peak memory usage = 326.008MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Tech-Mapping Phase 3: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s, Peak memory usage = 326.008MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Tech-Mapping Phase 4: CPU time = 0h 0m 0.093s, Elapsed time = 0h 0m 0.106s, Peak memory usage = 326.008MB<br/>Generate output files:<br/>&nbsp;&nbsp;&nbsp;&nbsp;CPU time = 0h 0m 0.015s, Elapsed time = 0h 0m 0.028s, Peak memory usage = 326.008MB<br/></td>
+<td>Running parser:<br/>&nbsp;&nbsp;&nbsp;&nbsp;CPU time = 0h 0m 0.25s, Elapsed time = 0h 0m 0.266s, Peak memory usage = 297.664MB<br/>Running netlist conversion:<br/>&nbsp;&nbsp;&nbsp;&nbsp;CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s, Peak memory usage = 0MB<br/>Running device independent optimization:<br/>&nbsp;&nbsp;&nbsp;&nbsp;Optimizing Phase 0: CPU time = 0h 0m 0.015s, Elapsed time = 0h 0m 0.039s, Peak memory usage = 297.664MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Optimizing Phase 1: CPU time = 0h 0m 0.031s, Elapsed time = 0h 0m 0.017s, Peak memory usage = 297.664MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Optimizing Phase 2: CPU time = 0h 0m 0.031s, Elapsed time = 0h 0m 0.036s, Peak memory usage = 297.664MB<br/>Running inference:<br/>&nbsp;&nbsp;&nbsp;&nbsp;Inferring Phase 0: CPU time = 0h 0m 0.031s, Elapsed time = 0h 0m 0.027s, Peak memory usage = 297.664MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Inferring Phase 1: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0.001s, Peak memory usage = 297.664MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Inferring Phase 2: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0.002s, Peak memory usage = 297.664MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Inferring Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0.003s, Peak memory usage = 297.664MB<br/>Running technical mapping:<br/>&nbsp;&nbsp;&nbsp;&nbsp;Tech-Mapping Phase 0: CPU time = 0h 0m 0.031s, Elapsed time = 0h 0m 0.033s, Peak memory usage = 297.664MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Tech-Mapping Phase 1: CPU time = 0h 0m 0.015s, Elapsed time = 0h 0m 0.011s, Peak memory usage = 297.664MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Tech-Mapping Phase 2: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0.006s, Peak memory usage = 297.664MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Tech-Mapping Phase 3: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s, Peak memory usage = 297.664MB<br/>&nbsp;&nbsp;&nbsp;&nbsp;Tech-Mapping Phase 4: CPU time = 0h 0m 0.125s, Elapsed time = 0h 0m 0.132s, Peak memory usage = 297.664MB<br/>Generate output files:<br/>&nbsp;&nbsp;&nbsp;&nbsp;CPU time = 0h 0m 0.046s, Elapsed time = 0h 0m 0.037s, Peak memory usage = 297.664MB<br/></td>
 </tr>
 <tr>
 <td class="label">Total Time and Memory Usage</td>
-<td>CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s, Peak memory usage = 326.008MB</td>
+<td>CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s, Peak memory usage = 297.664MB</td>
 </tr>
 </table>
 <h1><a name="resource">Resource</a></h1>
@@ -132,11 +133,11 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 </tr>
 <tr>
 <td class="label"><b>Register </b></td>
-<td>133</td>
+<td>164</td>
 </tr>
 <tr>
 <td class="label">&nbsp&nbsp&nbsp&nbspDFFS</td>
-<td>3</td>
+<td>4</td>
 </tr>
 <tr>
 <td class="label">&nbsp&nbsp&nbsp&nbspDFFSE</td>
@@ -144,23 +145,23 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 </tr>
 <tr>
 <td class="label">&nbsp&nbsp&nbsp&nbspDFFR</td>
-<td>83</td>
+<td>86</td>
 </tr>
 <tr>
 <td class="label">&nbsp&nbsp&nbsp&nbspDFFRE</td>
-<td>46</td>
+<td>73</td>
 </tr>
 <tr>
 <td class="label"><b>LUT </b></td>
-<td>285</td>
+<td>284</td>
 </tr>
 <tr>
 <td class="label">&nbsp&nbsp&nbsp&nbspLUT2</td>
-<td>38</td>
+<td>39</td>
 </tr>
 <tr>
 <td class="label">&nbsp&nbsp&nbsp&nbspLUT3</td>
-<td>77</td>
+<td>75</td>
 </tr>
 <tr>
 <td class="label">&nbsp&nbsp&nbsp&nbspLUT4</td>
@@ -168,11 +169,11 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 </tr>
 <tr>
 <td class="label"><b>INV </b></td>
-<td>4</td>
+<td>5</td>
 </tr>
 <tr>
 <td class="label">&nbsp&nbsp&nbsp&nbspINV</td>
-<td>4</td>
+<td>5</td>
 </tr>
 <tr>
 <td class="label"><b>BSRAM </b></td>
@@ -197,8 +198,8 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 </tr>
 <tr>
 <td class="label">Register</td>
-<td>133 / 6693</td>
-<td>2%</td>
+<td>164 / 6693</td>
+<td>3%</td>
 </tr>
 <tr>
 <td class="label">&nbsp&nbsp--Register as Latch</td>
@@ -207,8 +208,8 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 </tr>
 <tr>
 <td class="label">&nbsp&nbsp--Register as FF</td>
-<td>133 / 6693</td>
-<td>2%</td>
+<td>164 / 6693</td>
+<td>3%</td>
 </tr>
 <tr>
 <td class="label">BSRAM</td>
@@ -327,7 +328,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>0.000</td>
 <td>tINS</td>
 <td>RR</td>
-<td>137</td>
+<td>168</td>
 <td>clk_i_ibuf/O</td>
 </tr>
 <tr>
@@ -352,7 +353,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>tNET</td>
 <td>FF</td>
 <td>1</td>
-<td>u_rx/n208_s12/I1</td>
+<td>u_rx/n208_s13/I1</td>
 </tr>
 <tr>
 <td>3.243</td>
@@ -360,7 +361,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>tINS</td>
 <td>FF</td>
 <td>1</td>
-<td>u_rx/n208_s12/F</td>
+<td>u_rx/n208_s13/F</td>
 </tr>
 <tr>
 <td>4.203</td>
@@ -375,7 +376,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>1.099</td>
 <td>tINS</td>
 <td>FF</td>
-<td>4</td>
+<td>5</td>
 <td>u_rx/n208_s6/F</td>
 </tr>
 <tr>
@@ -391,7 +392,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>1.099</td>
 <td>tINS</td>
 <td>FF</td>
-<td>34</td>
+<td>33</td>
 <td>u_rx/n208_s2/F</td>
 </tr>
 <tr>
@@ -450,7 +451,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>0.000</td>
 <td>tINS</td>
 <td>RR</td>
-<td>137</td>
+<td>168</td>
 <td>clk_i_ibuf/O</td>
 </tr>
 <tr>
@@ -509,235 +510,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 </tr>
 <tr>
 <td class="label">From</td>
-<td>u_rx/clk_cnt_21_s0</td>
-</tr>
-<tr>
-<td class="label">To</td>
-<td>u_rx/bit_idx_0_s1</td>
-</tr>
-<tr>
-<td class="label">Launch Clk</td>
-<td>clk_i[R]</td>
-</tr>
-<tr>
-<td class="label">Latch Clk</td>
-<td>clk_i[R]</td>
-</tr>
-</table>
-<b>Data Arrival Path:</b>
-<table class="summary_table">
-<tr>
-<th>AT</th>
-<th>DELAY</th>
-<th>TYPE</th>
-<th>RF</th>
-<th>FANOUT</th>
-<th>NODE</th>
-</tr>
-<tr>
-<td>0.000</td>
-<td>0.000</td>
-<td> </td>
-<td> </td>
-<td> </td>
-<td>clk_i</td>
-</tr>
-<tr>
-<td>0.000</td>
-<td>0.000</td>
-<td>tCL</td>
-<td>RR</td>
-<td>1</td>
-<td>clk_i_ibuf/I</td>
-</tr>
-<tr>
-<td>0.000</td>
-<td>0.000</td>
-<td>tINS</td>
-<td>RR</td>
-<td>137</td>
-<td>clk_i_ibuf/O</td>
-</tr>
-<tr>
-<td>0.726</td>
-<td>0.726</td>
-<td>tNET</td>
-<td>RR</td>
-<td>1</td>
-<td>u_rx/clk_cnt_21_s0/CLK</td>
-</tr>
-<tr>
-<td>1.184</td>
-<td>0.458</td>
-<td>tC2Q</td>
-<td>RF</td>
-<td>3</td>
-<td>u_rx/clk_cnt_21_s0/Q</td>
-</tr>
-<tr>
-<td>2.144</td>
-<td>0.960</td>
-<td>tNET</td>
-<td>FF</td>
-<td>1</td>
-<td>u_rx/n208_s12/I1</td>
-</tr>
-<tr>
-<td>3.243</td>
-<td>1.099</td>
-<td>tINS</td>
-<td>FF</td>
-<td>1</td>
-<td>u_rx/n208_s12/F</td>
-</tr>
-<tr>
-<td>4.203</td>
-<td>0.960</td>
-<td>tNET</td>
-<td>FF</td>
-<td>1</td>
-<td>u_rx/n208_s6/I1</td>
-</tr>
-<tr>
-<td>5.302</td>
-<td>1.099</td>
-<td>tINS</td>
-<td>FF</td>
-<td>4</td>
-<td>u_rx/n208_s6/F</td>
-</tr>
-<tr>
-<td>6.262</td>
-<td>0.960</td>
-<td>tNET</td>
-<td>FF</td>
-<td>1</td>
-<td>u_rx/n323_s8/I1</td>
-</tr>
-<tr>
-<td>7.361</td>
-<td>1.099</td>
-<td>tINS</td>
-<td>FF</td>
-<td>2</td>
-<td>u_rx/n323_s8/F</td>
-</tr>
-<tr>
-<td>8.321</td>
-<td>0.960</td>
-<td>tNET</td>
-<td>FF</td>
-<td>1</td>
-<td>u_rx/n323_s7/I1</td>
-</tr>
-<tr>
-<td>9.420</td>
-<td>1.099</td>
-<td>tINS</td>
-<td>FF</td>
-<td>1</td>
-<td>u_rx/n323_s7/F</td>
-</tr>
-<tr>
-<td>10.380</td>
-<td>0.960</td>
-<td>tNET</td>
-<td>FF</td>
-<td>1</td>
-<td>u_rx/bit_idx_0_s1/D</td>
-</tr>
-</table>
-<b>Data Required Path:</b>
-<table class="summary_table">
-<tr>
-<th>AT</th>
-<th>DELAY</th>
-<th>TYPE</th>
-<th>RF</th>
-<th>FANOUT</th>
-<th>NODE</th>
-</tr>
-<tr>
-<td>20.000</td>
-<td>0.000</td>
-<td> </td>
-<td> </td>
-<td> </td>
-<td>clk_i</td>
-</tr>
-<tr>
-<td>20.000</td>
-<td>0.000</td>
-<td>tCL</td>
-<td>RR</td>
-<td>1</td>
-<td>clk_i_ibuf/I</td>
-</tr>
-<tr>
-<td>20.000</td>
-<td>0.000</td>
-<td>tINS</td>
-<td>RR</td>
-<td>137</td>
-<td>clk_i_ibuf/O</td>
-</tr>
-<tr>
-<td>20.726</td>
-<td>0.726</td>
-<td>tNET</td>
-<td>RR</td>
-<td>1</td>
-<td>u_rx/bit_idx_0_s1/CLK</td>
-</tr>
-<tr>
-<td>20.326</td>
-<td>-0.400</td>
-<td>tSu</td>
-<td> </td>
-<td>1</td>
-<td>u_rx/bit_idx_0_s1</td>
-</tr>
-</table>
-<b>Path Statistics:</b>
-<table class="summary_table">
-<tr>
-<td class="label">Clock Skew:</td>
-<td>0.000</td>
-</tr>
-<tr>
-<td class="label">Setup Relationship:</td>
-<td>20.000</td>
-</tr>
-<tr>
-<td class="label">Logic Level:</td>
-<td>5</td>
-</tr>
-<tr>
-<td class="label">Arrival Clock Path Delay:</td><td> cell: 0.000, 0.000%; route: 0.726, 100.000%</td></tr>
-<tr>
-<td class="label">Arrival Data Path Delay:</td><td> cell: 4.396, 45.534%; route: 4.800, 49.719%; tC2Q: 0.458, 4.747%</td></tr>
-<tr>
-<td class="label">Required Clock Path Delay:</td><td> cell: 0.000, 0.000%; route: 0.726, 100.000%</td></tr>
-</table>
-<br/>
-<h3>Path&nbsp3</h3>
-<b>Path Summary:</b></br>
-<table class="summary_table">
-<tr>
-<td class="label">Slack</td>
-<td>9.946</td>
-</tr>
-<tr>
-<td class="label">Data Arrival Time</td>
-<td>10.380</td>
-</tr>
-<tr>
-<td class="label">Data Required Time</td>
-<td>20.326</td>
-</tr>
-<tr>
-<td class="label">From</td>
-<td>u_tx/clk_cnt_21_s0</td>
+<td>u_tx/clk_cnt_25_s0</td>
 </tr>
 <tr>
 <td class="label">To</td>
@@ -783,7 +556,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>0.000</td>
 <td>tINS</td>
 <td>RR</td>
-<td>137</td>
+<td>168</td>
 <td>clk_i_ibuf/O</td>
 </tr>
 <tr>
@@ -792,15 +565,15 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>tNET</td>
 <td>RR</td>
 <td>1</td>
-<td>u_tx/clk_cnt_21_s0/CLK</td>
+<td>u_tx/clk_cnt_25_s0/CLK</td>
 </tr>
 <tr>
 <td>1.184</td>
 <td>0.458</td>
 <td>tC2Q</td>
 <td>RF</td>
-<td>3</td>
-<td>u_tx/clk_cnt_21_s0/Q</td>
+<td>6</td>
+<td>u_tx/clk_cnt_25_s0/Q</td>
 </tr>
 <tr>
 <td>2.144</td>
@@ -847,7 +620,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>1.099</td>
 <td>tINS</td>
 <td>FF</td>
-<td>19</td>
+<td>17</td>
 <td>u_tx/txd_s14/F</td>
 </tr>
 <tr>
@@ -906,7 +679,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>0.000</td>
 <td>tINS</td>
 <td>RR</td>
-<td>137</td>
+<td>168</td>
 <td>clk_i_ibuf/O</td>
 </tr>
 <tr>
@@ -948,7 +721,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td class="label">Required Clock Path Delay:</td><td> cell: 0.000, 0.000%; route: 0.726, 100.000%</td></tr>
 </table>
 <br/>
-<h3>Path&nbsp4</h3>
+<h3>Path&nbsp3</h3>
 <b>Path Summary:</b></br>
 <table class="summary_table">
 <tr>
@@ -1011,7 +784,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>0.000</td>
 <td>tINS</td>
 <td>RR</td>
-<td>137</td>
+<td>168</td>
 <td>clk_i_ibuf/O</td>
 </tr>
 <tr>
@@ -1059,7 +832,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>1.099</td>
 <td>tINS</td>
 <td>FF</td>
-<td>9</td>
+<td>7</td>
 <td>u_tx/n284_s6/F</td>
 </tr>
 <tr>
@@ -1134,7 +907,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>0.000</td>
 <td>tINS</td>
 <td>RR</td>
-<td>137</td>
+<td>168</td>
 <td>clk_i_ibuf/O</td>
 </tr>
 <tr>
@@ -1176,7 +949,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td class="label">Required Clock Path Delay:</td><td> cell: 0.000, 0.000%; route: 0.726, 100.000%</td></tr>
 </table>
 <br/>
-<h3>Path&nbsp5</h3>
+<h3>Path&nbsp4</h3>
 <b>Path Summary:</b></br>
 <table class="summary_table">
 <tr>
@@ -1197,7 +970,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 </tr>
 <tr>
 <td class="label">To</td>
-<td>u_tx/clk_cnt_20_s0</td>
+<td>u_tx/clk_cnt_19_s0</td>
 </tr>
 <tr>
 <td class="label">Launch Clk</td>
@@ -1239,7 +1012,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>0.000</td>
 <td>tINS</td>
 <td>RR</td>
-<td>137</td>
+<td>168</td>
 <td>clk_i_ibuf/O</td>
 </tr>
 <tr>
@@ -1287,7 +1060,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>1.099</td>
 <td>tINS</td>
 <td>FF</td>
-<td>9</td>
+<td>7</td>
 <td>u_tx/n284_s6/F</td>
 </tr>
 <tr>
@@ -1296,15 +1069,15 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>tNET</td>
 <td>FF</td>
 <td>1</td>
-<td>u_tx/n278_s7/I1</td>
+<td>u_tx/n279_s6/I1</td>
 </tr>
 <tr>
 <td>7.361</td>
 <td>1.099</td>
 <td>tINS</td>
 <td>FF</td>
-<td>3</td>
-<td>u_tx/n278_s7/F</td>
+<td>5</td>
+<td>u_tx/n279_s6/F</td>
 </tr>
 <tr>
 <td>8.321</td>
@@ -1312,7 +1085,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>tNET</td>
 <td>FF</td>
 <td>1</td>
-<td>u_tx/n277_s5/I1</td>
+<td>u_tx/n278_s5/I1</td>
 </tr>
 <tr>
 <td>9.420</td>
@@ -1320,7 +1093,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>tINS</td>
 <td>FF</td>
 <td>1</td>
-<td>u_tx/n277_s5/F</td>
+<td>u_tx/n278_s5/F</td>
 </tr>
 <tr>
 <td>10.380</td>
@@ -1328,7 +1101,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>tNET</td>
 <td>FF</td>
 <td>1</td>
-<td>u_tx/clk_cnt_20_s0/D</td>
+<td>u_tx/clk_cnt_19_s0/D</td>
 </tr>
 </table>
 <b>Data Required Path:</b>
@@ -1362,7 +1135,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>0.000</td>
 <td>tINS</td>
 <td>RR</td>
-<td>137</td>
+<td>168</td>
 <td>clk_i_ibuf/O</td>
 </tr>
 <tr>
@@ -1371,7 +1144,7 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>tNET</td>
 <td>RR</td>
 <td>1</td>
-<td>u_tx/clk_cnt_20_s0/CLK</td>
+<td>u_tx/clk_cnt_19_s0/CLK</td>
 </tr>
 <tr>
 <td>20.326</td>
@@ -1379,7 +1152,235 @@ C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_proje
 <td>tSu</td>
 <td> </td>
 <td>1</td>
-<td>u_tx/clk_cnt_20_s0</td>
+<td>u_tx/clk_cnt_19_s0</td>
+</tr>
+</table>
+<b>Path Statistics:</b>
+<table class="summary_table">
+<tr>
+<td class="label">Clock Skew:</td>
+<td>0.000</td>
+</tr>
+<tr>
+<td class="label">Setup Relationship:</td>
+<td>20.000</td>
+</tr>
+<tr>
+<td class="label">Logic Level:</td>
+<td>5</td>
+</tr>
+<tr>
+<td class="label">Arrival Clock Path Delay:</td><td> cell: 0.000, 0.000%; route: 0.726, 100.000%</td></tr>
+<tr>
+<td class="label">Arrival Data Path Delay:</td><td> cell: 4.396, 45.534%; route: 4.800, 49.719%; tC2Q: 0.458, 4.747%</td></tr>
+<tr>
+<td class="label">Required Clock Path Delay:</td><td> cell: 0.000, 0.000%; route: 0.726, 100.000%</td></tr>
+</table>
+<br/>
+<h3>Path&nbsp5</h3>
+<b>Path Summary:</b></br>
+<table class="summary_table">
+<tr>
+<td class="label">Slack</td>
+<td>9.946</td>
+</tr>
+<tr>
+<td class="label">Data Arrival Time</td>
+<td>10.380</td>
+</tr>
+<tr>
+<td class="label">Data Required Time</td>
+<td>20.326</td>
+</tr>
+<tr>
+<td class="label">From</td>
+<td>u_rx/clk_cnt_29_s0</td>
+</tr>
+<tr>
+<td class="label">To</td>
+<td>u_rx/clk_cnt_0_s0</td>
+</tr>
+<tr>
+<td class="label">Launch Clk</td>
+<td>clk_i[R]</td>
+</tr>
+<tr>
+<td class="label">Latch Clk</td>
+<td>clk_i[R]</td>
+</tr>
+</table>
+<b>Data Arrival Path:</b>
+<table class="summary_table">
+<tr>
+<th>AT</th>
+<th>DELAY</th>
+<th>TYPE</th>
+<th>RF</th>
+<th>FANOUT</th>
+<th>NODE</th>
+</tr>
+<tr>
+<td>0.000</td>
+<td>0.000</td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td>clk_i</td>
+</tr>
+<tr>
+<td>0.000</td>
+<td>0.000</td>
+<td>tCL</td>
+<td>RR</td>
+<td>1</td>
+<td>clk_i_ibuf/I</td>
+</tr>
+<tr>
+<td>0.000</td>
+<td>0.000</td>
+<td>tINS</td>
+<td>RR</td>
+<td>168</td>
+<td>clk_i_ibuf/O</td>
+</tr>
+<tr>
+<td>0.726</td>
+<td>0.726</td>
+<td>tNET</td>
+<td>RR</td>
+<td>1</td>
+<td>u_rx/clk_cnt_29_s0/CLK</td>
+</tr>
+<tr>
+<td>1.184</td>
+<td>0.458</td>
+<td>tC2Q</td>
+<td>RF</td>
+<td>4</td>
+<td>u_rx/clk_cnt_29_s0/Q</td>
+</tr>
+<tr>
+<td>2.144</td>
+<td>0.960</td>
+<td>tNET</td>
+<td>FF</td>
+<td>1</td>
+<td>u_rx/n208_s9/I1</td>
+</tr>
+<tr>
+<td>3.243</td>
+<td>1.099</td>
+<td>tINS</td>
+<td>FF</td>
+<td>2</td>
+<td>u_rx/n208_s9/F</td>
+</tr>
+<tr>
+<td>4.203</td>
+<td>0.960</td>
+<td>tNET</td>
+<td>FF</td>
+<td>1</td>
+<td>u_rx/n208_s7/I1</td>
+</tr>
+<tr>
+<td>5.302</td>
+<td>1.099</td>
+<td>tINS</td>
+<td>FF</td>
+<td>2</td>
+<td>u_rx/n208_s7/F</td>
+</tr>
+<tr>
+<td>6.262</td>
+<td>0.960</td>
+<td>tNET</td>
+<td>FF</td>
+<td>1</td>
+<td>u_rx/n208_s18/I1</td>
+</tr>
+<tr>
+<td>7.361</td>
+<td>1.099</td>
+<td>tINS</td>
+<td>FF</td>
+<td>32</td>
+<td>u_rx/n208_s18/F</td>
+</tr>
+<tr>
+<td>8.321</td>
+<td>0.960</td>
+<td>tNET</td>
+<td>FF</td>
+<td>1</td>
+<td>u_rx/n320_s7/I1</td>
+</tr>
+<tr>
+<td>9.420</td>
+<td>1.099</td>
+<td>tINS</td>
+<td>FF</td>
+<td>1</td>
+<td>u_rx/n320_s7/F</td>
+</tr>
+<tr>
+<td>10.380</td>
+<td>0.960</td>
+<td>tNET</td>
+<td>FF</td>
+<td>1</td>
+<td>u_rx/clk_cnt_0_s0/D</td>
+</tr>
+</table>
+<b>Data Required Path:</b>
+<table class="summary_table">
+<tr>
+<th>AT</th>
+<th>DELAY</th>
+<th>TYPE</th>
+<th>RF</th>
+<th>FANOUT</th>
+<th>NODE</th>
+</tr>
+<tr>
+<td>20.000</td>
+<td>0.000</td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td>clk_i</td>
+</tr>
+<tr>
+<td>20.000</td>
+<td>0.000</td>
+<td>tCL</td>
+<td>RR</td>
+<td>1</td>
+<td>clk_i_ibuf/I</td>
+</tr>
+<tr>
+<td>20.000</td>
+<td>0.000</td>
+<td>tINS</td>
+<td>RR</td>
+<td>168</td>
+<td>clk_i_ibuf/O</td>
+</tr>
+<tr>
+<td>20.726</td>
+<td>0.726</td>
+<td>tNET</td>
+<td>RR</td>
+<td>1</td>
+<td>u_rx/clk_cnt_0_s0/CLK</td>
+</tr>
+<tr>
+<td>20.326</td>
+<td>-0.400</td>
+<td>tSu</td>
+<td> </td>
+<td>1</td>
+<td>u_rx/clk_cnt_0_s0</td>
 </tr>
 </table>
 <b>Path Statistics:</b>

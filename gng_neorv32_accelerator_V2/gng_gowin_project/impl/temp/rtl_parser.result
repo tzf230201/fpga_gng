@@ -9,7 +9,7 @@
   "SubInsts" : [
    {
     "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 50,
+    "InstLine" : 104,
     "InstName" : "u_rx",
     "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/uart_rx.vhd",
     "ModuleLine" : 5,
@@ -17,7 +17,7 @@
    },
    {
     "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 66,
+    "InstLine" : 122,
     "InstName" : "u_store",
     "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/rx_store.vhd",
     "ModuleLine" : 5,
@@ -25,15 +25,23 @@
    },
    {
     "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 84,
-    "InstName" : "u_cas",
-    "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/bram_copy_and_send.vhd",
+    "InstLine" : 142,
+    "InstName" : "u_copy",
+    "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/bram_copy.vhd",
     "ModuleLine" : 5,
-    "ModuleName" : "bram_copy_and_send"
+    "ModuleName" : "bram_copy"
    },
    {
     "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 104,
+    "InstLine" : 162,
+    "InstName" : "u_send",
+    "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/bram_send.vhd",
+    "ModuleLine" : 5,
+    "ModuleName" : "bram_send"
+   },
+   {
+    "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
+    "InstLine" : 183,
     "InstName" : "u_tx",
     "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/uart_tx.vhd",
     "ModuleLine" : 5,
