@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Module name="tang_nano_9k" Register="1" Lut="3" Bsram="1" T_Register="164(1)" T_Lut="289(3)" T_Bsram="2(1)">
- <SubModule name="u_rx" Register="48" Lut="115" T_Register="48(48)" T_Lut="115(115)"/>
- <SubModule name="u_store" Register="13" Lut="19" Bsram="1" T_Register="13(13)" T_Lut="19(19)" T_Bsram="1(1)"/>
+<Module name="tang_nano_9k" Register="2" Lut="3" Bsram="2" T_Register="183(2)" T_Lut="286(3)" T_Bsram="2(2)">
+ <SubModule name="u_rx" Register="48" Lut="116" T_Register="48(48)" T_Lut="116(116)"/>
+ <SubModule name="u_store" Register="31" Lut="18" T_Register="31(31)" T_Lut="18(18)"/>
  <SubModule name="u_copy" Register="36" Lut="27" T_Register="36(36)" T_Lut="27(27)"/>
  <SubModule name="u_send" Register="18" Lut="30" T_Register="18(18)" T_Lut="30(30)"/>
- <SubModule name="u_tx" Register="48" Lut="95" T_Register="48(48)" T_Lut="95(95)"/>
+ <SubModule name="u_tx" Register="48" Lut="92" T_Register="48(48)" T_Lut="92(92)"/>
 </Module>
