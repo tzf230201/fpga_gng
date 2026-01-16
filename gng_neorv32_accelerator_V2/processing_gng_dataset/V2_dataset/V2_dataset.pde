@@ -4,111 +4,246 @@ import processing.serial.*;
 // Serial config
 // ===============================
 Serial myPort;
-final String PORT_NAME = "COM1";   // <-- ganti sesuai Serial.list()
+final String PORT_NAME = "COM1";
 final int    BAUD      = 1_000_000;
 
 // ===============================
-// Two-moons dataset options
+// Dataset options (TX side)
 // ===============================
-final int     MOONS_N            = 100;     // 100 points -> 400 bytes (x,y int16)
+final int     MOONS_N            = 100;     // 100 points -> 400 bytes
 final boolean MOONS_RANDOM_ANGLE = false;
 final int     MOONS_SEED         = 1234;
 final float   MOONS_NOISE_STD    = 0.06;
 final boolean MOONS_SHUFFLE      = true;
 final boolean MOONS_NORMALIZE01  = true;
 
-// quantization scale (same as your earlier code)
 final float SCALE = 1000.0;
 
-// ===============================
-// TX/RX buffers
-// ===============================
-final int BYTES_PER_POINT = 4;              // int16 x + int16 y
-final int TX_BYTES = MOONS_N * BYTES_PER_POINT; // must be 400
+final int BYTES_PER_POINT = 4;
+final int TX_BYTES = MOONS_N * BYTES_PER_POINT; // 400
 
 byte[] txBuf = new byte[TX_BYTES];
-byte[] rxBuf = new byte[TX_BYTES];
 
-float[][] moonsTx; // points we sent
-float[][] moonsRx; // points decoded from echo
+// ===============================
+// Live packet RX (FF FF LEN SEQ PAYLOAD CHK)
+// ===============================
+final int MAX_PAYLOAD = 4096;
 
-int rxCount = 0;
-boolean waitingEcho = false;
+enum RxState { FIND_FF1, FIND_FF2, LEN0, LEN1, SEQ, PAYLOAD, CHK }
+RxState st = RxState.FIND_FF1;
 
-int tSendMs = 0;
+int expectLen = 0;
+int seqRx = 0;
+
+byte[] payload = new byte[MAX_PAYLOAD];
+int payIdx = 0;
+
+int chkCalc = 0; // SUM8
+int chkRx   = 0;
+
+float[][] moonsTx;
+float[][] moonsRx;
+
+int pktOK = 0, pktBad = 0, badLen = 0;
+int lastSeq = -1;
+int lost = 0;
+
+int lastPktMs = 0;
 String statusMsg = "idle";
 String verifyMsg = "";
+
+// ignore streaming right after sending TX (to avoid echo/garbage at start)
+final int IGNORE_AFTER_SEND_MS = 50;
+int tSendMs = 0;
+boolean ignoreRx = true;
 
 // ===============================
 // Setup / Draw
 // ===============================
 void setup() {
   size(1000, 600);
-  surface.setTitle("Two Moons -> Send 400 bytes -> Echo 400 bytes (1 Mbps)");
+  surface.setTitle("TX dataset -> FPGA streams packets live (FF FF LEN SEQ PAYLOAD CHK) @50Hz");
 
   println("Available ports:");
   println(Serial.list());
 
   if (TX_BYTES != 400) {
-    println("ERROR: TX_BYTES must be 400 for your FPGA buffer. Now = " + TX_BYTES);
+    println("ERROR: TX_BYTES must be 400. Now = " + TX_BYTES);
     exit();
   }
 
   myPort = new Serial(this, PORT_NAME, BAUD);
   myPort.clear();
+  myPort.buffer(65536); // help avoid overflow
   delay(200);
 
   buildTwoMoonsAndPack();
-  sendOnce();
+  sendDatasetOnce();
 
   textFont(createFont("Consolas", 14));
+  frameRate(60);
 }
 
 void draw() {
   background(25);
-
   drawPointsPanels();
   drawDebug();
 
-  // timeout (optional)
-  if (waitingEcho && (millis() - tSendMs) > 3000) {
-    waitingEcho = false;
-    statusMsg = "TIMEOUT (echo not complete)";
-    verifyMsg = "Try press 'r' to resend.";
+  if (ignoreRx && (millis() - tSendMs) > IGNORE_AFTER_SEND_MS) {
+    ignoreRx = false;
+    statusMsg = "listening live packets...";
   }
 }
 
 void keyPressed() {
   if (key == 'r' || key == 'R') {
-    myPort.clear();
-    rxCount = 0;
-    waitingEcho = false;
-    verifyMsg = "";
-    statusMsg = "rebuild & resend";
     buildTwoMoonsAndPack();
-    sendOnce();
+    sendDatasetOnce();
+  } else if (key == 'c' || key == 'C') {
+    // clear stats
+    pktOK=0; pktBad=0; badLen=0; lost=0; lastSeq=-1;
+    statusMsg = "stats cleared";
   }
 }
 
 // ===============================
-// Serial receive
+// TX
+// ===============================
+void sendDatasetOnce() {
+  myPort.clear();
+  resetParser();
+
+  tSendMs = millis();
+  ignoreRx = true;
+
+  statusMsg = "TX: sent 400 bytes (dataset). Waiting stream...";
+  myPort.write(txBuf);
+}
+
+// ===============================
+// Serial receive + parser
 // ===============================
 void serialEvent(Serial p) {
-  while (p.available() > 0 && rxCount < TX_BYTES) {
+  while (p.available() > 0) {
     int b = p.read();
     if (b < 0) break;
-    rxBuf[rxCount++] = (byte)(b & 0xFF);
-  }
+    int ub = b & 0xFF;
 
-  if (waitingEcho && rxCount >= TX_BYTES) {
-    waitingEcho = false;
-    statusMsg = "echo received: 400/400";
-    verifyAndDecode();
+    if (ignoreRx) continue;
+
+    switch(st) {
+      case FIND_FF1:
+        if (ub == 0xFF) st = RxState.FIND_FF2;
+        break;
+
+      case FIND_FF2:
+        if (ub == 0xFF) st = RxState.LEN0;
+        else st = RxState.FIND_FF1;
+        break;
+
+      case LEN0:
+        expectLen = ub;
+        st = RxState.LEN1;
+        break;
+
+      case LEN1:
+        expectLen |= (ub << 8);
+        // sanity
+        if (expectLen <= 0 || expectLen > MAX_PAYLOAD) {
+          badLen++;
+          pktBad++;
+          resetParser();
+        } else {
+          st = RxState.SEQ;
+        }
+        break;
+
+      case SEQ:
+        seqRx = ub;
+        payIdx = 0;
+        chkCalc = 0;
+        st = RxState.PAYLOAD;
+        break;
+
+      case PAYLOAD:
+        payload[payIdx++] = (byte)ub;
+        chkCalc = (chkCalc + ub) & 0xFF;
+
+        if (payIdx >= expectLen) {
+          st = RxState.CHK;
+        }
+        break;
+
+      case CHK:
+        chkRx = ub;
+
+        if (((chkCalc & 0xFF) == (chkRx & 0xFF))) {
+          pktOK++;
+          lastPktMs = millis();
+          onGoodPacket(seqRx, expectLen, payload);
+        } else {
+          pktBad++;
+        }
+
+        // next packet
+        resetParser();
+        break;
+    }
   }
 }
 
+void resetParser() {
+  st = RxState.FIND_FF1;
+  expectLen = 0;
+  payIdx = 0;
+  chkCalc = 0;
+  chkRx = 0;
+}
+
+// called only when checksum OK
+void onGoodPacket(int seq, int len, byte[] pay) {
+  // SEQ tracking
+  if (lastSeq >= 0) {
+    int diff = (seq - lastSeq) & 0xFF;
+    if (diff != 1) {
+      // packets skipped (approx)
+      int missed = (diff - 1) & 0xFF;
+      lost += missed;
+    }
+  }
+  lastSeq = seq;
+
+  // Only decode if expected len == 400 (your dataset)
+  if (len != TX_BYTES) {
+    badLen++;
+    return;
+  }
+
+  // decode payload -> moonsRx
+  moonsRx = new float[MOONS_N][2];
+  int p = 0;
+  for (int i = 0; i < MOONS_N; i++) {
+    int xL = pay[p++] & 0xFF;
+    int xH = pay[p++] & 0xFF;
+    int yL = pay[p++] & 0xFF;
+    int yH = pay[p++] & 0xFF;
+
+    int xi = xL | (xH << 8);
+    int yi = yL | (yH << 8);
+
+    if (xi >= 32768) xi -= 65536;
+    if (yi >= 32768) yi -= 65536;
+
+    moonsRx[i][0] = xi / SCALE;
+    moonsRx[i][1] = yi / SCALE;
+  }
+
+  verifyMsg = "CHK OK  seq=" + seq + "  len=" + len +
+              "  ok=" + pktOK + "  bad=" + pktBad + "  lost~=" + lost;
+}
+
 // ===============================
-// Build dataset + pack to 400 bytes
+// Build dataset + pack 400 bytes
 // ===============================
 void buildTwoMoonsAndPack() {
   moonsTx = generateMoons(
@@ -120,7 +255,6 @@ void buildTwoMoonsAndPack() {
     MOONS_NORMALIZE01
   );
 
-  // pack int16 LE: [x0L x0H y0L y0H x1L x1H y1L y1H ...]
   int p = 0;
   for (int i = 0; i < MOONS_N; i++) {
     short xi = (short)round(moonsTx[i][0] * SCALE);
@@ -133,69 +267,26 @@ void buildTwoMoonsAndPack() {
   }
 }
 
-void sendOnce() {
-  rxCount = 0;
-  waitingEcho = true;
-  tSendMs = millis();
-  statusMsg = "sent 400 bytes, waiting echo...";
-  myPort.write(txBuf);
-}
-
-// ===============================
-// Verify + decode echo -> moonsRx
-// ===============================
-void verifyAndDecode() {
-  int mism = 0;
-  for (int i = 0; i < TX_BYTES; i++) {
-    int a = txBuf[i] & 0xFF;
-    int b = rxBuf[i] & 0xFF;
-    if (a != b) mism++;
-  }
-
-  if (mism == 0) {
-    verifyMsg = "✅ VERIFY OK (400 bytes match)";
-  } else {
-    verifyMsg = "❌ VERIFY FAIL mismatches=" + mism;
-  }
-
-  // decode rx to float points
-  moonsRx = new float[MOONS_N][2];
-  int p = 0;
-  for (int i = 0; i < MOONS_N; i++) {
-    int xi = (rxBuf[p++] & 0xFF) | ((rxBuf[p++] & 0xFF) << 8);
-    int yi = (rxBuf[p++] & 0xFF) | ((rxBuf[p++] & 0xFF) << 8);
-    if (xi >= 32768) xi -= 65536;
-    if (yi >= 32768) yi -= 65536;
-
-    moonsRx[i][0] = xi / SCALE;
-    moonsRx[i][1] = yi / SCALE;
-  }
-}
-
 // ===============================
 // Drawing
 // ===============================
 void drawPointsPanels() {
-  // left panel = TX points
   fill(220);
-  text("TX (Two Moons sent)", 30, 30);
+  text("TX (dataset sent to FPGA)", 30, 30);
   drawScatter(moonsTx, 30, 50, 440, 500);
 
-  // right panel = RX decoded
   fill(220);
-  text("RX (Echo decoded)", 530, 30);
+  text("RX (FPGA stream decoded live)", 530, 30);
   drawScatter(moonsRx, 530, 50, 440, 500);
 }
 
 void drawScatter(float[][] pts, float x0, float y0, float w, float h) {
-  // panel bg
   noStroke();
   fill(0, 0, 0, 120);
   rect(x0, y0, w, h);
 
   if (pts == null) return;
 
-  // find bounds
   float minx=1e9, maxx=-1e9, miny=1e9, maxy=-1e9;
   for (int i = 0; i < pts.length; i++) {
     float x = pts[i][0], y = pts[i][1];
@@ -205,7 +296,6 @@ void drawScatter(float[][] pts, float x0, float y0, float w, float h) {
   float dx = max(1e-6, maxx - minx);
   float dy = max(1e-6, maxy - miny);
 
-  // points
   noStroke();
   fill(255);
   for (int i = 0; i < pts.length; i++) {
@@ -223,15 +313,18 @@ void drawDebug() {
 
   fill(220);
   text("PORT=" + PORT_NAME + "  BAUD=" + BAUD +
-       "  TX_BYTES=" + TX_BYTES + "  RX=" + rxCount + "/" + TX_BYTES, 20, height - 45);
-  text("Status: " + statusMsg, 20, height - 25);
+       "  expectLen=" + TX_BYTES + "  state=" + st +
+       "  payload(" + payIdx + "/" + expectLen + ")", 20, height - 45);
+
+  int ago = (lastPktMs == 0) ? -1 : (millis() - lastPktMs);
+  text("Status: " + statusMsg + "   lastPkt(ms ago)=" + ago, 20, height - 25);
 
   fill(180, 220, 255);
-  text(verifyMsg, 520, height - 25);
+  text(verifyMsg + "  badLen=" + badLen, 520, height - 25);
 }
 
 // ===============================
-// Two-moons generator (same style as yours)
+// Two-moons generator
 // ===============================
 float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed,
                         boolean shuffle, boolean normalize01) {

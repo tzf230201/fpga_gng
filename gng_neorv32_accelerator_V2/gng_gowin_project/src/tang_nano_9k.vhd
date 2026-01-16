@@ -48,7 +48,7 @@ architecture rtl of tang_nano_9k is
   signal full_p   : std_logic;
   signal locked   : std_logic;
 
-  -- delay start copy 1-cycle (last byte commits next edge)
+  -- delay full 1-cycle (last write commits next edge)
   signal full_p_dly : std_logic := '0';
 
   -- BRAM_B (buffer)
@@ -65,15 +65,19 @@ architecture rtl of tang_nano_9k is
   -- copy/send
   signal copying   : std_logic;
   signal sending   : std_logic;
-  signal cas_done  : std_logic;
   signal copy_done : std_logic;
 
-  -- debug
+  -- debug latch
   signal full_rx_store : std_logic := '0';
+
+  -- sender start latch
+  signal send_start_p   : std_logic := '0';
 
 begin
 
-  -- debug latch
+  ---------------------------------------------------------------------------
+  -- Debug latch: remember we reached "full"
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -81,13 +85,13 @@ begin
         full_rx_store <= '0';
       elsif full_p = '1' then
         full_rx_store <= '1';
---      elsif cas_done = '1' then
---        full_rx_store <= '0';
       end if;
     end if;
   end process;
 
-  -- delay full 1-cycle for copy start
+  ---------------------------------------------------------------------------
+  -- full_p delayed 1 cycle (avoid last byte not committed yet)
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -99,7 +103,9 @@ begin
     end if;
   end process;
 
+  ---------------------------------------------------------------------------
   -- BRAM_A (sync write + sync read)
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -110,7 +116,9 @@ begin
     end if;
   end process;
 
+  ---------------------------------------------------------------------------
   -- BRAM_B (sync write + sync read)
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -121,7 +129,9 @@ begin
     end if;
   end process;
 
+  ---------------------------------------------------------------------------
   -- UART RX
+  ---------------------------------------------------------------------------
   u_rx : entity work.uart_rx
     generic map (
       CLOCK_FREQUENCY => CLOCK_FREQUENCY,
@@ -137,7 +147,10 @@ begin
       err_o   => rx_err
     );
 
+  ---------------------------------------------------------------------------
   -- RX STORE controller (RAM outside)
+  -- IMPORTANT: clear_i set '0' for continuous streaming demo.
+  ---------------------------------------------------------------------------
   u_store : entity work.rx_store_ext
     generic map ( DEPTH => DEPTH )
     port map (
@@ -145,8 +158,8 @@ begin
       rstn_i       => rstn_i,
       rx_valid_i   => rx_valid,
       rx_data_i    => rx_data,
-      hold_i       => (copying or sending),
-      clear_i      => cas_done,
+      hold_i       => copying, -- safe
+      clear_i      => '0',                  -- <-- keep locked once full (stream uses mem_b)
       full_o       => full_p,
 
       mem_we_o     => a_we,
@@ -160,7 +173,9 @@ begin
       locked_o     => locked
     );
 
-  -- COPY (A -> B)
+  ---------------------------------------------------------------------------
+  -- COPY (A -> B) start when full_p_dly
+  ---------------------------------------------------------------------------
   u_copy : entity work.bram_copy
     generic map ( DEPTH => DEPTH )
     port map (
@@ -179,27 +194,55 @@ begin
       busy_o    => copying
     );
 
-  -- SEND (B -> UART)
-  u_send : entity work.bram_send
-    generic map ( DEPTH => DEPTH )
-    port map (
-      clk_i      => clk_i,
-      rstn_i     => rstn_i,
-      start_i    => copy_done,
+  ---------------------------------------------------------------------------
+  -- Latch send_start once copy_done happened
+  -- (so sender starts and then runs continuous forever)
+  ---------------------------------------------------------------------------
+  process(clk_i)
+  begin
+    if rising_edge(clk_i) then
+      if rstn_i = '0' then
+        send_start_p <= '0';
+      elsif copy_done = '1' then
+        send_start_p <= '1';
+      end if;
+    end if;
+  end process;
 
-      b_raddr_o  => b_raddr,
-      b_rdata_i  => b_rdata,
+  ---------------------------------------------------------------------------
+  -- SEND (B -> UART) packet: FF FF + LEN + SEQ + payload (NO checksum)
+  -- pause while copying to avoid read-during-write tearing
+  ---------------------------------------------------------------------------
+u_send : entity work.bram_send_packet_sumchk
+  generic map (
+    DEPTH     => DEPTH,
+    CLOCK_HZ  => CLOCK_FREQUENCY,
+    STREAM_HZ => 50
+  )
+  port map (
+    clk_i        => clk_i,
+    rstn_i       => rstn_i,
+    start_i      => '1',
+    continuous_i => '1',
+    pause_i      => copying,  -- freeze saat copy
 
-      tx_busy_i  => tx_busy,
-      tx_done_i  => tx_done,
-      tx_start_o => tx_start,
-      tx_data_o  => tx_data,
+    b_raddr_o    => b_raddr,
+    b_rdata_i    => b_rdata,
 
-      done_o     => cas_done,
-      busy_o     => sending
-    );
+    tx_busy_i    => tx_busy,
+    tx_done_i    => tx_done,
+    tx_start_o   => tx_start,
+    tx_data_o    => tx_data,
 
+    done_o       => open,
+    busy_o       => sending
+  );
+
+
+
+  ---------------------------------------------------------------------------
   -- UART TX
+  ---------------------------------------------------------------------------
   u_tx : entity work.uart_tx
     generic map (
       CLOCK_FREQUENCY => CLOCK_FREQUENCY,
@@ -217,7 +260,10 @@ begin
 
   uart_txd_o <= std_ulogic(txd);
 
+  ---------------------------------------------------------------------------
   -- LEDs active-low
+  -- LED0 = sending, LED1 = copying, LED2 = locked, LED3 = full seen
+  ---------------------------------------------------------------------------
   gpio_o <= (
     0 => std_ulogic(not sending),
     1 => std_ulogic(not copying),
