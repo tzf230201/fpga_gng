@@ -101,7 +101,7 @@ architecture rtl of tang_nano_9k is
   -----------------------------------------------------------------------------
   -- Scheduler: decay each N packets
   -----------------------------------------------------------------------------
-  constant DECAY_EVERY_PKTS : natural := 50; -- DEBUG: kecil biar sering decay (ubah bebas)
+  constant DECAY_EVERY_PKTS : natural := 5; -- DEBUG: kecil biar sering decay (ubah bebas)
 
   type sm_t is (WAIT_DATA, STREAMING, DO_DECAY, WAIT_DECAY);
   signal sm : sm_t := WAIT_DATA;

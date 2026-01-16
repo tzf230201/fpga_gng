@@ -1,16 +1,16 @@
 import processing.serial.*;
 
 // ======================================================
-// SERIAL CONFIG
+// Serial config
 // ======================================================
 Serial myPort;
-final String PORT_NAME = "COM1";
+final String PORT_NAME = "COM1";     // <-- GANTI sesuai Serial.list()
 final int    BAUD      = 1_000_000;
 
 // ======================================================
-// TWO MOONS SETTINGS (ASLI)
+// Dataset options (SAMA PERSIS seperti yang kamu kirim)
 // ======================================================
-final int     MOONS_N            = 100;
+final int     MOONS_N            = 100;     // 100 points -> 400 bytes
 final boolean MOONS_RANDOM_ANGLE = false;
 final int     MOONS_SEED         = 1234;
 final float   MOONS_NOISE_STD    = 0.06;
@@ -18,36 +18,22 @@ final boolean MOONS_SHUFFLE      = true;
 final boolean MOONS_NORMALIZE01  = true;
 
 final float SCALE = 1000.0;
-final int TX_BYTES = MOONS_N * 4; // 400
 
-// ======================================================
-// FIXED VIEW (NO AUTO NORMALIZE PER FRAME)
-// ======================================================
-final float VIEW_MIN_X = -0.3;
-final float VIEW_MAX_X =  1.3;
-final float VIEW_MIN_Y = -0.3;
-final float VIEW_MAX_Y =  1.3;
-
-// ======================================================
-// DATA BUFFERS
-// ======================================================
+final int BYTES_PER_POINT = 4;
+final int TX_BYTES = MOONS_N * BYTES_PER_POINT; // 400
 byte[] txBuf = new byte[TX_BYTES];
 
-float[][] moonsTx;                   // static (TX)
-float[][] moonsRx = new float[MOONS_N][2]; // RX from FPGA (reuse)
-
 // ======================================================
-// RX PACKET FORMAT
-// FF FF | LEN_L LEN_H | SEQ | PAYLOAD | CHK
+// Live packet RX (FF FF LEN(2) SEQ(1) PAYLOAD LEN bytes CHK(1))
+// CHK = SUM8(payload bytes) & 0xFF
 // ======================================================
-final int MAX_PAYLOAD = 1024;
+final int MAX_PAYLOAD = 4096;
 
 enum RxState { FIND_FF1, FIND_FF2, LEN0, LEN1, SEQ, PAYLOAD, CHK }
 RxState st = RxState.FIND_FF1;
 
 int expectLen = 0;
 int seqRx = 0;
-int lastSeq = -1;
 
 byte[] payload = new byte[MAX_PAYLOAD];
 int payIdx = 0;
@@ -55,89 +41,115 @@ int payIdx = 0;
 int chkCalc = 0;
 int chkRx   = 0;
 
-// ======================================================
-// STATS
-// ======================================================
-int pktOK = 0;
-int pktBad = 0;
+int pktOK = 0, pktBad = 0, badLen = 0;
+int lastSeq = -1;
 int lost = 0;
+
 int lastPktMs = 0;
+String statusMsg = "idle";
+String verifyMsg = "";
+
+// ignore RX right after sending TX (avoid garbage/echo)
+final int IGNORE_AFTER_SEND_MS = 120;
+int tSendMs = 0;
+boolean ignoreRx = true;
+
+// faster serial reading
+byte[] inBuf = new byte[8192];
 int lastByteMs = 0;
 
-final int PARSER_TIMEOUT_MS = 150;
-
-// ignore RX shortly after TX
-boolean ignoreRx = true;
-int tSendMs = 0;
-final int IGNORE_AFTER_SEND_MS = 100;
-
-// fast serial buffer
-byte[] inBuf = new byte[8192];
+// timeout to auto reset parser if stuck
+final int PARSER_TIMEOUT_MS = 120;
 
 // ======================================================
-// SETUP
+// Data arrays (REUSE, no new each packet)
 // ======================================================
+float[][] moonsTx;
+float[][] moonsRx = new float[MOONS_N][2];
+
+// ======================================================
+// FIXED AXIS range (computed once from TX + margin)
+// ======================================================
+float viewMinX, viewMaxX, viewMinY, viewMaxY;
+
+// ======================================================
+// UI layout
+// ======================================================
+float panelY = 80;
+float panelW = 600;
+float panelH = 600;
+
 void setup() {
-  size(1200, 650);
+  size(1400, 780);
+  surface.setTitle("TX -> FPGA -> RX (Two Moons, FIXED AXIS, Y normal)");
+
+  textFont(createFont("Consolas", 14));
   frameRate(60);
-  surface.setTitle("TX → FPGA → RX (Two Moons, Fixed Axis)");
 
   println("Available ports:");
   println(Serial.list());
 
+  if (TX_BYTES != 400) {
+    println("ERROR: TX_BYTES must be 400. Now = " + TX_BYTES);
+    exit();
+  }
+
+  // Build dataset + pack
+  buildTwoMoonsAndPack();
+
+  // Compute fixed view from TX.
+  // Jika LIMIT shift di FPGA besar (misal 0.8), naikkan marginX.
+  computeFixedViewFromTx(0.35, 0.35);
+
+  // Open serial
   myPort = new Serial(this, PORT_NAME, BAUD);
   myPort.clear();
   delay(200);
 
-  // build dataset (ASLI)
-  moonsTx = generateMoons(
-    MOONS_N,
-    MOONS_RANDOM_ANGLE,
-    MOONS_NOISE_STD,
-    MOONS_SEED,
-    MOONS_SHUFFLE,
-    MOONS_NORMALIZE01
-  );
-
-  packDataset();
+  // Send once
   sendDatasetOnce();
 }
 
-// ======================================================
-// DRAW
-// ======================================================
 void draw() {
-  background(20);
+  background(18);
 
-  // LEFT: TX static
-  drawPanel(moonsTx, 50, 50, "TX DATASET (static)", 0.0);
+  drawPointsPanelsFixedAxis();
+  drawDebugBar();
 
-  // RIGHT: RX from FPGA
-  drawPanel(moonsRx, 650, 50, "RX FROM FPGA", 0.0);
-
-  drawDebug();
-
-  // enable RX after TX settle
-  if (ignoreRx && millis() - tSendMs > IGNORE_AFTER_SEND_MS) {
+  // after sending dataset, wait a bit before parsing stream
+  if (ignoreRx && (millis() - tSendMs) > IGNORE_AFTER_SEND_MS) {
     ignoreRx = false;
+    statusMsg = "listening live packets...";
   }
 
   // parser timeout rescue
   if (!ignoreRx && st != RxState.FIND_FF1) {
-    if (millis() - lastByteMs > PARSER_TIMEOUT_MS) {
+    if ((millis() - lastByteMs) > PARSER_TIMEOUT_MS) {
       resetParser();
-      println("Parser timeout → reset");
+      statusMsg = "Parser reset (timeout) -> resync";
     }
   }
 }
 
-// ======================================================
-// KEY
-// ======================================================
 void keyPressed() {
   if (key == 'r' || key == 'R') {
-    packDataset();
+    buildTwoMoonsAndPack();
+    computeFixedViewFromTx(0.35, 0.35);
     sendDatasetOnce();
+  } else if (key == 's' || key == 'S') {
+    sendDatasetOnce();
+  } else if (key == 'c' || key == 'C') {
+    pktOK=0; pktBad=0; badLen=0; lost=0; lastSeq=-1;
+    statusMsg = "stats cleared";
+  } else if (key == '+' || key == '=') {
+    // enlarge X margin quickly for big shift tests
+    float mx = (viewMaxX - viewMinX) * 0.1;
+    viewMinX -= mx; viewMaxX += mx;
+    statusMsg = "view marginX increased";
+  } else if (key == '-') {
+    float mx = (viewMaxX - viewMinX) * 0.08;
+    viewMinX += mx; viewMaxX -= mx;
+    statusMsg = "view marginX decreased";
   }
 }
 
@@ -147,15 +159,16 @@ void keyPressed() {
 void sendDatasetOnce() {
   myPort.clear();
   resetParser();
-  ignoreRx = true;
-  tSendMs = millis();
 
+  tSendMs = millis();
+  ignoreRx = true;
+
+  statusMsg = "TX: sent 400 bytes (dataset). Waiting stream...";
   myPort.write(txBuf);
-  println("TX dataset sent (400 bytes)");
 }
 
 // ======================================================
-// SERIAL EVENT (FAST)
+// Serial receive (FAST chunk read)
 // ======================================================
 void serialEvent(Serial p) {
   int n = p.readBytes(inBuf);
@@ -170,26 +183,28 @@ void serialEvent(Serial p) {
 }
 
 // ======================================================
-// PARSER
+// Packet parser
 // ======================================================
-void feedParser(int b) {
+void feedParser(int ub) {
   switch(st) {
     case FIND_FF1:
-      if (b == 0xFF) st = RxState.FIND_FF2;
+      if (ub == 0xFF) st = RxState.FIND_FF2;
       break;
 
     case FIND_FF2:
-      st = (b == 0xFF) ? RxState.LEN0 : RxState.FIND_FF1;
+      if (ub == 0xFF) st = RxState.LEN0;
+      else st = RxState.FIND_FF1;
       break;
 
     case LEN0:
-      expectLen = b;
+      expectLen = ub;
       st = RxState.LEN1;
       break;
 
     case LEN1:
-      expectLen |= (b << 8);
+      expectLen |= (ub << 8);
       if (expectLen <= 0 || expectLen > MAX_PAYLOAD) {
+        badLen++;
         pktBad++;
         resetParser();
       } else {
@@ -198,23 +213,24 @@ void feedParser(int b) {
       break;
 
     case SEQ:
-      seqRx = b;
+      seqRx = ub;
       payIdx = 0;
       chkCalc = 0;
       st = RxState.PAYLOAD;
       break;
 
     case PAYLOAD:
-      payload[payIdx++] = (byte)b;
-      chkCalc = (chkCalc + b) & 0xFF;
+      payload[payIdx++] = (byte)ub;
+      chkCalc = (chkCalc + ub) & 0xFF;
       if (payIdx >= expectLen) st = RxState.CHK;
       break;
 
     case CHK:
-      chkRx = b;
+      chkRx = ub;
       if ((chkCalc & 0xFF) == (chkRx & 0xFF)) {
-        onGoodPacket(seqRx, expectLen);
         pktOK++;
+        lastPktMs = millis();
+        onGoodPacket(seqRx, expectLen);
       } else {
         pktBad++;
       }
@@ -228,22 +244,31 @@ void resetParser() {
   expectLen = 0;
   payIdx = 0;
   chkCalc = 0;
+  chkRx = 0;
 }
 
 // ======================================================
-// GOOD PACKET
+// called only when checksum OK
 // ======================================================
 void onGoodPacket(int seq, int len) {
-  lastPktMs = millis();
-
+  // SEQ tracking
   if (lastSeq >= 0) {
     int diff = (seq - lastSeq) & 0xFF;
-    if (diff != 1) lost += (diff - 1) & 0xFF;
+    if (diff != 1) {
+      int missed = (diff - 1) & 0xFF;
+      lost += missed;
+    }
   }
   lastSeq = seq;
 
-  if (len != TX_BYTES) return;
+  // decode only if len == 400
+  if (len != TX_BYTES) {
+    badLen++;
+    verifyMsg = "CHK OK but LEN!=" + TX_BYTES + " (len=" + len + ")";
+    return;
+  }
 
+  // decode payload -> moonsRx
   int p = 0;
   for (int i = 0; i < MOONS_N; i++) {
     int xL = payload[p++] & 0xFF;
@@ -260,66 +285,33 @@ void onGoodPacket(int seq, int len) {
     moonsRx[i][0] = xi / SCALE;
     moonsRx[i][1] = yi / SCALE;
   }
+
+  // centroid delta (helps confirm shift)
+  float[] cTx = centroid(moonsTx);
+  float[] cRx = centroid(moonsRx);
+
+  verifyMsg = "OK seq=" + seq +
+              " len=" + len +
+              " ok=" + pktOK +
+              " bad=" + pktBad +
+              " lost~=" + lost +
+              " badLen=" + badLen +
+              "  dC=(" + nf(cRx[0]-cTx[0],1,3) + "," + nf(cRx[1]-cTx[1],1,3) + ")";
 }
 
 // ======================================================
-// DRAW PANEL
+// Build dataset + pack 400 bytes (SAMA PERSIS DENGAN KODE KAMU)
 // ======================================================
-void drawPanel(float[][] pts, float x0, float y0, String title, float shiftX) {
-  float w = 500;
-  float h = 500;
-
-  fill(30);
-  rect(x0, y0, w, h);
-
-  fill(220);
-  text(title, x0, y0 - 10);
-
-  stroke(80);
-  float xZero = map(0, VIEW_MIN_X, VIEW_MAX_X, x0, x0 + w);
-  float yZero = map(0, VIEW_MIN_Y, VIEW_MAX_Y, y0 + h, y0);
-  line(x0, yZero, x0 + w, yZero);
-  line(xZero, y0, xZero, y0 + h);
-
-  noStroke();
-  fill(255);
-
-  for (int i = 0; i < pts.length; i++) {
-    float x = pts[i][0] + shiftX;
-    float y = pts[i][1];
-
-    float xn = (x - VIEW_MIN_X) / (VIEW_MAX_X - VIEW_MIN_X);
-    float yn = (y - VIEW_MIN_Y) / (VIEW_MAX_Y - VIEW_MIN_Y);
-
-    float px = x0 + 10 + xn * (w - 20);
-    float py = y0 + h - (10 + yn * (h - 20));
-
-    ellipse(px, py, 5, 5);
-  }
-}
-
-// ======================================================
-// DEBUG
-// ======================================================
-void drawDebug() {
-  fill(0, 180);
-  rect(0, height - 80, width, 80);
-
-  fill(220);
-  textSize(14);
-  text(
-    "PKT_OK=" + pktOK +
-    "  BAD=" + pktBad +
-    "  LOST~=" + lost +
-    "  RX_age(ms)=" + (lastPktMs == 0 ? -1 : millis() - lastPktMs),
-    30, height - 35
+void buildTwoMoonsAndPack() {
+  moonsTx = generateMoons(
+    MOONS_N,
+    MOONS_RANDOM_ANGLE,
+    MOONS_NOISE_STD,
+    MOONS_SEED,
+    MOONS_SHUFFLE,
+    MOONS_NORMALIZE01
   );
-}
 
-// ======================================================
-// PACK DATASET
-// ======================================================
-void packDataset() {
   int p = 0;
   for (int i = 0; i < MOONS_N; i++) {
     short xi = (short)round(moonsTx[i][0] * SCALE);
@@ -333,7 +325,110 @@ void packDataset() {
 }
 
 // ======================================================
-// Two-Moons generator (ASLI, TIDAK DIUBAH)
+// FIXED VIEW range from TX + margin
+// ======================================================
+void computeFixedViewFromTx(float marginX, float marginY) {
+  float minx=1e9, maxx=-1e9, miny=1e9, maxy=-1e9;
+  for (int i=0; i<moonsTx.length; i++) {
+    float x=moonsTx[i][0], y=moonsTx[i][1];
+    if (x<minx) minx=x;
+    if (x>maxx) maxx=x;
+    if (y<miny) miny=y;
+    if (y>maxy) maxy=y;
+  }
+  viewMinX = minx - marginX;
+  viewMaxX = maxx + marginX;
+  viewMinY = miny - marginY;
+  viewMaxY = maxy + marginY;
+}
+
+// ======================================================
+// Drawing (FIXED AXIS, Y normal / tidak dibalik)
+// ======================================================
+void drawPointsPanelsFixedAxis() {
+  float leftX  = 60;
+  float rightX = 740;
+
+  fill(230);
+  text("TX DATASET (static)", leftX, 55);
+  drawScatterFixed(moonsTx, leftX, panelY, panelW, panelH);
+
+  fill(230);
+  text("RX FROM FPGA", rightX, 55);
+  drawScatterFixed(moonsRx, rightX, panelY, panelW, panelH);
+
+  // border
+  noFill();
+  stroke(60);
+  rect(leftX, panelY, panelW, panelH);
+  rect(rightX, panelY, panelW, panelH);
+}
+
+void drawScatterFixed(float[][] pts, float x0, float y0, float w, float h) {
+  noStroke();
+  fill(0, 0, 0, 110);
+  rect(x0, y0, w, h);
+
+  // axis cross at x=0,y=0 (Y normal: top-down)
+  stroke(70);
+
+  float xZero = map(0, viewMinX, viewMaxX, x0, x0 + w);
+  float yZero = map(0, viewMinY, viewMaxY, y0, y0 + h);
+
+  line(x0, yZero, x0 + w, yZero);
+  line(xZero, y0, xZero, y0 + h);
+
+  if (pts == null) return;
+
+  noStroke();
+  fill(255);
+  for (int i = 0; i < pts.length; i++) {
+    float xn = (pts[i][0] - viewMinX) / (viewMaxX - viewMinX);
+    float yn = (pts[i][1] - viewMinY) / (viewMaxY - viewMinY);
+
+    float px = x0 + 10 + xn * (w - 20);
+    float py = y0 + 10 + yn * (h - 20);  // ✅ Y tidak dibalik
+
+    ellipse(px, py, 5, 5);
+  }
+}
+
+// ======================================================
+// Debug bar
+// ======================================================
+void drawDebugBar() {
+  fill(0, 180);
+  rect(0, height - 90, width, 90);
+
+  fill(220);
+  text("PORT=" + PORT_NAME + "  BAUD=" + BAUD +
+       "  state=" + st +
+       "  payload(" + payIdx + "/" + expectLen + ")", 30, height - 60);
+
+  int ago = (lastPktMs == 0) ? -1 : (millis() - lastPktMs);
+  text("PKT_OK=" + pktOK + "  BAD=" + pktBad + "  LOST~=" + lost +
+       "  RX_age(ms)=" + ago + "   " + statusMsg, 30, height - 40);
+
+  fill(180, 220, 255);
+  text(verifyMsg, 30, height - 20);
+
+  fill(180);
+  text("Keys: [R]=rebuild+send  [S]=send  [C]=clear stats  [+/-]=adjust view X margin",
+       740, height - 20);
+}
+
+// ======================================================
+// Helpers
+// ======================================================
+float[] centroid(float[][] pts) {
+  float sx=0, sy=0;
+  int n=pts.length;
+  for (int i=0;i<n;i++) { sx += pts[i][0]; sy += pts[i][1]; }
+  return new float[]{ sx/n, sy/n };
+}
+
+// ======================================================
+// Two-moons generator (SAMA PERSIS DENGAN KODE KAMU)
 // ======================================================
 float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed,
                         boolean shuffle, boolean normalize01) {
@@ -383,10 +478,8 @@ float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed,
     for (int i = N - 1; i > 0; i--) {
       int j = (int)random(i + 1);
       float tx = arr[i][0], ty = arr[i][1];
-      arr[i][0] = arr[j][0];
-      arr[i][1] = arr[j][1];
-      arr[j][0] = tx;
-      arr[j][1] = ty;
+      arr[i][0] = arr[j][0]; arr[i][1] = arr[j][1];
+      arr[j][0] = tx;        arr[j][1] = ty;
     }
   }
 
