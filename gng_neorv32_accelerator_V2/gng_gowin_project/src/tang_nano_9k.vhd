@@ -101,16 +101,17 @@ architecture rtl of tang_nano_9k is
   -----------------------------------------------------------------------------
   -- Scheduler: decay each N packets
   -----------------------------------------------------------------------------
-  constant DECAY_EVERY_PKTS : natural := 50;
+  constant DECAY_EVERY_PKTS : natural := 50; -- DEBUG: kecil biar sering decay (ubah bebas)
 
-  type sm_t is (WAIT_DATA, STREAMING, DO_DECAY);
+  type sm_t is (WAIT_DATA, STREAMING, DO_DECAY, WAIT_DECAY);
   signal sm : sm_t := WAIT_DATA;
 
-  signal pkt_cnt : unsigned(7 downto 0) := (others => '0'); -- enough for 0..255
+  signal pkt_cnt           : unsigned(7 downto 0) := (others => '0');
   signal decay_start_pulse : std_logic := '0';
 
-  -- pause sender during copy/decay
+  -- pause sender during copy/decay/scheduling
   signal pause_send : std_logic;
+  signal pause_sm   : std_logic; -- FIX: convert boolean (sm=...) to std_logic
 
 begin
 
@@ -258,12 +259,13 @@ begin
   end process;
 
   -----------------------------------------------------------------------------
-  -- PAUSE sender during copy or decay
+  -- PAUSE sender (FIX: boolean -> std_logic)
   -----------------------------------------------------------------------------
-  pause_send <= copying or decaying;
+  pause_sm  <= '1' when ((sm = DO_DECAY) or (sm = WAIT_DECAY)) else '0';
+  pause_send <= copying or decaying or pause_sm;
 
   -----------------------------------------------------------------------------
-  -- STATE MACHINE: decay every 50 packets
+  -- STATE MACHINE: decay every N packets (FIXED)
   -----------------------------------------------------------------------------
   process(clk_i)
   begin
@@ -273,7 +275,7 @@ begin
         pkt_cnt <= (others => '0');
         decay_start_pulse <= '0';
       else
-        decay_start_pulse <= '0'; -- default (1-cycle pulse)
+        decay_start_pulse <= '0'; -- default
 
         case sm is
           when WAIT_DATA =>
@@ -283,22 +285,20 @@ begin
             end if;
 
           when STREAMING =>
-            -- count only when a packet fully done (done pulse)
             if send_done_p = '1' then
               if pkt_cnt = to_unsigned(DECAY_EVERY_PKTS-1, pkt_cnt'length) then
                 pkt_cnt <= (others => '0');
-                sm <= DO_DECAY;
+                sm <= DO_DECAY; -- next: emit 1-cycle start pulse
               else
                 pkt_cnt <= pkt_cnt + 1;
               end if;
             end if;
 
           when DO_DECAY =>
-            -- start decay only when sender is idle and no copy
-            if (pause_send = '0') and (sending = '0') and (decaying = '0') then
-              decay_start_pulse <= '1';
-            end if;
+            decay_start_pulse <= '1'; -- 1 cycle
+            sm <= WAIT_DECAY;
 
+          when WAIT_DECAY =>
             if decay_done = '1' then
               sm <= STREAMING;
             end if;
@@ -317,9 +317,9 @@ begin
   u_decay : entity work.bram_decay_int16
     generic map (
       DEPTH_BYTES => DEPTH,
-      STEP_X      => 10,   -- 0.01 if SCALE=1000
+      STEP_X      => 10,  -- DEBUG: besar biar kelihatan jelas (ubah bebas)
       STEP_Y      => 0,
-      LIMIT_X     => 300,  -- ping-pong range
+      LIMIT_X     => 300,  -- DEBUG: range besar
       LIMIT_Y     => 0
     )
     port map (
@@ -339,7 +339,7 @@ begin
     );
 
   -----------------------------------------------------------------------------
-  -- SEND (B -> UART) packet module (sender tidak diubah)
+  -- SEND (B -> UART) packet module
   -----------------------------------------------------------------------------
   u_send : entity work.bram_send_packet_sumchk
     generic map (
@@ -362,7 +362,7 @@ begin
       tx_start_o   => tx_start,
       tx_data_o    => tx_data,
 
-      done_o       => send_done_p,   -- <-- IMPORTANT: pulse per packet
+      done_o       => send_done_p,   -- pulse per packet
       busy_o       => sending
     );
 

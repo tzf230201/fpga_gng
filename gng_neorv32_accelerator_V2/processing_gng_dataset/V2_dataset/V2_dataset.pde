@@ -1,16 +1,16 @@
 import processing.serial.*;
 
-// ===============================
-// Serial config
-// ===============================
+// ======================================================
+// SERIAL CONFIG
+// ======================================================
 Serial myPort;
 final String PORT_NAME = "COM1";
 final int    BAUD      = 1_000_000;
 
-// ===============================
-// Dataset options (TX side)
-// ===============================
-final int     MOONS_N            = 100;     // 100 points -> 400 bytes
+// ======================================================
+// TWO MOONS SETTINGS (ASLI)
+// ======================================================
+final int     MOONS_N            = 100;
 final boolean MOONS_RANDOM_ANGLE = false;
 final int     MOONS_SEED         = 1234;
 final float   MOONS_NOISE_STD    = 0.06;
@@ -18,138 +18,150 @@ final boolean MOONS_SHUFFLE      = true;
 final boolean MOONS_NORMALIZE01  = true;
 
 final float SCALE = 1000.0;
+final int TX_BYTES = MOONS_N * 4; // 400
 
-final int BYTES_PER_POINT = 4;
-final int TX_BYTES = MOONS_N * BYTES_PER_POINT; // 400
+// ======================================================
+// FIXED VIEW (NO AUTO NORMALIZE PER FRAME)
+// ======================================================
+final float VIEW_MIN_X = -0.3;
+final float VIEW_MAX_X =  1.3;
+final float VIEW_MIN_Y = -0.3;
+final float VIEW_MAX_Y =  1.3;
 
+// ======================================================
+// DATA BUFFERS
+// ======================================================
 byte[] txBuf = new byte[TX_BYTES];
 
-// ===============================
-// Live packet RX (FF FF LEN SEQ PAYLOAD CHK)
-// ===============================
-final int MAX_PAYLOAD = 4096;
+float[][] moonsTx;                   // static (TX)
+float[][] moonsRx = new float[MOONS_N][2]; // RX from FPGA (reuse)
+
+// ======================================================
+// RX PACKET FORMAT
+// FF FF | LEN_L LEN_H | SEQ | PAYLOAD | CHK
+// ======================================================
+final int MAX_PAYLOAD = 1024;
 
 enum RxState { FIND_FF1, FIND_FF2, LEN0, LEN1, SEQ, PAYLOAD, CHK }
 RxState st = RxState.FIND_FF1;
 
 int expectLen = 0;
 int seqRx = 0;
+int lastSeq = -1;
 
 byte[] payload = new byte[MAX_PAYLOAD];
 int payIdx = 0;
 
-int chkCalc = 0; // SUM8 over payload bytes
+int chkCalc = 0;
 int chkRx   = 0;
 
-float[][] moonsTx;
-float[][] moonsRx = new float[MOONS_N][2]; // <-- REUSE, no new per packet
-
-int pktOK = 0, pktBad = 0, badLen = 0;
-int lastSeq = -1;
+// ======================================================
+// STATS
+// ======================================================
+int pktOK = 0;
+int pktBad = 0;
 int lost = 0;
-
 int lastPktMs = 0;
-String statusMsg = "idle";
-String verifyMsg = "";
-
-// ignore streaming right after sending TX (to avoid echo/garbage at start)
-final int IGNORE_AFTER_SEND_MS = 80;
-int tSendMs = 0;
-boolean ignoreRx = true;
-
-// ===============================
-// Faster serial reading
-// ===============================
-byte[] inBuf = new byte[8192];
 int lastByteMs = 0;
 
-// timeout to auto reset parser if stuck
-final int PARSER_TIMEOUT_MS = 120;
+final int PARSER_TIMEOUT_MS = 150;
 
-// ===============================
-// Setup / Draw
-// ===============================
+// ignore RX shortly after TX
+boolean ignoreRx = true;
+int tSendMs = 0;
+final int IGNORE_AFTER_SEND_MS = 100;
+
+// fast serial buffer
+byte[] inBuf = new byte[8192];
+
+// ======================================================
+// SETUP
+// ======================================================
 void setup() {
-  size(1000, 600);
-  surface.setTitle("TX dataset -> FPGA streams packets live (FAST + timeout + no-GC)");
+  size(1200, 650);
+  frameRate(60);
+  surface.setTitle("TX → FPGA → RX (Two Moons, Fixed Axis)");
 
   println("Available ports:");
   println(Serial.list());
 
-  if (TX_BYTES != 400) {
-    println("ERROR: TX_BYTES must be 400. Now = " + TX_BYTES);
-    exit();
-  }
-
   myPort = new Serial(this, PORT_NAME, BAUD);
   myPort.clear();
-  // NOTE: some Processing versions don't support huge OS buffer reliably,
-  // but keeping it is fine if available.
-  // myPort.buffer(65536);
   delay(200);
 
-  buildTwoMoonsAndPack();
-  sendDatasetOnce();
+  // build dataset (ASLI)
+  moonsTx = generateMoons(
+    MOONS_N,
+    MOONS_RANDOM_ANGLE,
+    MOONS_NOISE_STD,
+    MOONS_SEED,
+    MOONS_SHUFFLE,
+    MOONS_NORMALIZE01
+  );
 
-  textFont(createFont("Consolas", 14));
-  frameRate(60);
+  packDataset();
+  sendDatasetOnce();
 }
 
+// ======================================================
+// DRAW
+// ======================================================
 void draw() {
-  background(25);
-  drawPointsPanels();
+  background(20);
+
+  // LEFT: TX static
+  drawPanel(moonsTx, 50, 50, "TX DATASET (static)", 0.0);
+
+  // RIGHT: RX from FPGA
+  drawPanel(moonsRx, 650, 50, "RX FROM FPGA", 0.0);
+
   drawDebug();
 
-  // after sending dataset, wait a bit before parsing stream
-  if (ignoreRx && (millis() - tSendMs) > IGNORE_AFTER_SEND_MS) {
+  // enable RX after TX settle
+  if (ignoreRx && millis() - tSendMs > IGNORE_AFTER_SEND_MS) {
     ignoreRx = false;
-    statusMsg = "listening live packets...";
   }
 
-  // ---- Parser timeout rescue ----
+  // parser timeout rescue
   if (!ignoreRx && st != RxState.FIND_FF1) {
-    if ((millis() - lastByteMs) > PARSER_TIMEOUT_MS) {
+    if (millis() - lastByteMs > PARSER_TIMEOUT_MS) {
       resetParser();
-      statusMsg = "Parser reset (timeout) -> resync";
+      println("Parser timeout → reset");
     }
   }
 }
 
+// ======================================================
+// KEY
+// ======================================================
 void keyPressed() {
   if (key == 'r' || key == 'R') {
-    buildTwoMoonsAndPack();
+    packDataset();
     sendDatasetOnce();
-  } else if (key == 's' || key == 'S') {
-    sendDatasetOnce();
-  } else if (key == 'c' || key == 'C') {
-    pktOK=0; pktBad=0; badLen=0; lost=0; lastSeq=-1;
-    statusMsg = "stats cleared";
   }
 }
 
-// ===============================
+// ======================================================
 // TX
-// ===============================
+// ======================================================
 void sendDatasetOnce() {
   myPort.clear();
   resetParser();
-
-  tSendMs = millis();
   ignoreRx = true;
+  tSendMs = millis();
 
-  statusMsg = "TX: sent 400 bytes (dataset). Waiting stream...";
   myPort.write(txBuf);
+  println("TX dataset sent (400 bytes)");
 }
 
-// ===============================
-// Serial receive (FAST chunk read)
-// ===============================
+// ======================================================
+// SERIAL EVENT (FAST)
+// ======================================================
 void serialEvent(Serial p) {
-  int n = p.readBytes(inBuf); // <-- FAST
+  int n = p.readBytes(inBuf);
   if (n <= 0) return;
 
   lastByteMs = millis();
-
   if (ignoreRx) return;
 
   for (int i = 0; i < n; i++) {
@@ -157,29 +169,27 @@ void serialEvent(Serial p) {
   }
 }
 
-// ===============================
-// Packet parser (byte by byte feed)
-// ===============================
-void feedParser(int ub) {
+// ======================================================
+// PARSER
+// ======================================================
+void feedParser(int b) {
   switch(st) {
     case FIND_FF1:
-      if (ub == 0xFF) st = RxState.FIND_FF2;
+      if (b == 0xFF) st = RxState.FIND_FF2;
       break;
 
     case FIND_FF2:
-      if (ub == 0xFF) st = RxState.LEN0;
-      else st = RxState.FIND_FF1;
+      st = (b == 0xFF) ? RxState.LEN0 : RxState.FIND_FF1;
       break;
 
     case LEN0:
-      expectLen = ub;
+      expectLen = b;
       st = RxState.LEN1;
       break;
 
     case LEN1:
-      expectLen |= (ub << 8);
+      expectLen |= (b << 8);
       if (expectLen <= 0 || expectLen > MAX_PAYLOAD) {
-        badLen++;
         pktBad++;
         resetParser();
       } else {
@@ -188,24 +198,23 @@ void feedParser(int ub) {
       break;
 
     case SEQ:
-      seqRx = ub;
+      seqRx = b;
       payIdx = 0;
       chkCalc = 0;
       st = RxState.PAYLOAD;
       break;
 
     case PAYLOAD:
-      payload[payIdx++] = (byte)ub;
-      chkCalc = (chkCalc + ub) & 0xFF;
+      payload[payIdx++] = (byte)b;
+      chkCalc = (chkCalc + b) & 0xFF;
       if (payIdx >= expectLen) st = RxState.CHK;
       break;
 
     case CHK:
-      chkRx = ub;
+      chkRx = b;
       if ((chkCalc & 0xFF) == (chkRx & 0xFF)) {
-        pktOK++;
-        lastPktMs = millis();
         onGoodPacket(seqRx, expectLen);
+        pktOK++;
       } else {
         pktBad++;
       }
@@ -219,31 +228,22 @@ void resetParser() {
   expectLen = 0;
   payIdx = 0;
   chkCalc = 0;
-  chkRx = 0;
 }
 
-// ===============================
-// called only when checksum OK
-// ===============================
+// ======================================================
+// GOOD PACKET
+// ======================================================
 void onGoodPacket(int seq, int len) {
-  // SEQ tracking
+  lastPktMs = millis();
+
   if (lastSeq >= 0) {
     int diff = (seq - lastSeq) & 0xFF;
-    if (diff != 1) {
-      int missed = (diff - 1) & 0xFF;
-      lost += missed;
-    }
+    if (diff != 1) lost += (diff - 1) & 0xFF;
   }
   lastSeq = seq;
 
-  // decode only if len == 400 (dataset)
-  if (len != TX_BYTES) {
-    badLen++;
-    verifyMsg = "CHK OK but LEN!=" + TX_BYTES + " (len=" + len + ")";
-    return;
-  }
+  if (len != TX_BYTES) return;
 
-  // decode payload -> moonsRx (REUSE array)
   int p = 0;
   for (int i = 0; i < MOONS_N; i++) {
     int xL = payload[p++] & 0xFF;
@@ -260,28 +260,66 @@ void onGoodPacket(int seq, int len) {
     moonsRx[i][0] = xi / SCALE;
     moonsRx[i][1] = yi / SCALE;
   }
-
-  verifyMsg = "CHK OK  seq=" + seq +
-              "  len=" + len +
-              "  ok=" + pktOK +
-              "  bad=" + pktBad +
-              "  lost~=" + lost +
-              "  badLen=" + badLen;
 }
 
-// ===============================
-// Build dataset + pack 400 bytes
-// ===============================
-void buildTwoMoonsAndPack() {
-  moonsTx = generateMoons(
-    MOONS_N,
-    MOONS_RANDOM_ANGLE,
-    MOONS_NOISE_STD,
-    MOONS_SEED,
-    MOONS_SHUFFLE,
-    MOONS_NORMALIZE01
-  );
+// ======================================================
+// DRAW PANEL
+// ======================================================
+void drawPanel(float[][] pts, float x0, float y0, String title, float shiftX) {
+  float w = 500;
+  float h = 500;
 
+  fill(30);
+  rect(x0, y0, w, h);
+
+  fill(220);
+  text(title, x0, y0 - 10);
+
+  stroke(80);
+  float xZero = map(0, VIEW_MIN_X, VIEW_MAX_X, x0, x0 + w);
+  float yZero = map(0, VIEW_MIN_Y, VIEW_MAX_Y, y0 + h, y0);
+  line(x0, yZero, x0 + w, yZero);
+  line(xZero, y0, xZero, y0 + h);
+
+  noStroke();
+  fill(255);
+
+  for (int i = 0; i < pts.length; i++) {
+    float x = pts[i][0] + shiftX;
+    float y = pts[i][1];
+
+    float xn = (x - VIEW_MIN_X) / (VIEW_MAX_X - VIEW_MIN_X);
+    float yn = (y - VIEW_MIN_Y) / (VIEW_MAX_Y - VIEW_MIN_Y);
+
+    float px = x0 + 10 + xn * (w - 20);
+    float py = y0 + h - (10 + yn * (h - 20));
+
+    ellipse(px, py, 5, 5);
+  }
+}
+
+// ======================================================
+// DEBUG
+// ======================================================
+void drawDebug() {
+  fill(0, 180);
+  rect(0, height - 80, width, 80);
+
+  fill(220);
+  textSize(14);
+  text(
+    "PKT_OK=" + pktOK +
+    "  BAD=" + pktBad +
+    "  LOST~=" + lost +
+    "  RX_age(ms)=" + (lastPktMs == 0 ? -1 : millis() - lastPktMs),
+    30, height - 35
+  );
+}
+
+// ======================================================
+// PACK DATASET
+// ======================================================
+void packDataset() {
   int p = 0;
   for (int i = 0; i < MOONS_N; i++) {
     short xi = (short)round(moonsTx[i][0] * SCALE);
@@ -294,67 +332,9 @@ void buildTwoMoonsAndPack() {
   }
 }
 
-// ===============================
-// Drawing
-// ===============================
-void drawPointsPanels() {
-  fill(220);
-  text("TX (dataset sent to FPGA)", 30, 30);
-  drawScatter(moonsTx, 30, 50, 440, 500);
-
-  fill(220);
-  text("RX (FPGA stream decoded live)", 530, 30);
-  drawScatter(moonsRx, 530, 50, 440, 500);
-}
-
-void drawScatter(float[][] pts, float x0, float y0, float w, float h) {
-  noStroke();
-  fill(0, 0, 0, 120);
-  rect(x0, y0, w, h);
-
-  if (pts == null) return;
-
-  float minx=1e9, maxx=-1e9, miny=1e9, maxy=-1e9;
-  for (int i = 0; i < pts.length; i++) {
-    float x = pts[i][0], y = pts[i][1];
-    if (x < minx) minx = x;
-    if (x > maxx) maxx = x;
-    if (y < miny) miny = y;
-    if (y > maxy) maxy = y;
-  }
-  float dx = max(1e-6, maxx - minx);
-  float dy = max(1e-6, maxy - miny);
-
-  noStroke();
-  fill(255);
-  for (int i = 0; i < pts.length; i++) {
-    float xn = (pts[i][0] - minx) / dx;
-    float yn = (pts[i][1] - miny) / dy;
-    float px = x0 + 10 + xn * (w - 20);
-    float py = y0 + 10 + yn * (h - 20);
-    ellipse(px, py, 5, 5);
-  }
-}
-
-void drawDebug() {
-  fill(0, 0, 0, 160);
-  rect(0, height - 70, width, 70);
-
-  fill(220);
-  text("PORT=" + PORT_NAME + "  BAUD=" + BAUD +
-       "  state=" + st +
-       "  payload(" + payIdx + "/" + expectLen + ")", 20, height - 45);
-
-  int ago = (lastPktMs == 0) ? -1 : (millis() - lastPktMs);
-  text("Status: " + statusMsg + "   lastPkt(ms ago)=" + ago, 20, height - 25);
-
-  fill(180, 220, 255);
-  text(verifyMsg, 520, height - 25);
-}
-
-// ===============================
-// Two-moons generator
-// ===============================
+// ======================================================
+// Two-Moons generator (ASLI, TIDAK DIUBAH)
+// ======================================================
 float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed,
                         boolean shuffle, boolean normalize01) {
   float[][] arr = new float[N][2];
@@ -403,8 +383,10 @@ float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed,
     for (int i = N - 1; i > 0; i--) {
       int j = (int)random(i + 1);
       float tx = arr[i][0], ty = arr[i][1];
-      arr[i][0] = arr[j][0]; arr[i][1] = arr[j][1];
-      arr[j][0] = tx;        arr[j][1] = ty;
+      arr[i][0] = arr[j][0];
+      arr[i][1] = arr[j][1];
+      arr[j][0] = tx;
+      arr[j][1] = ty;
     }
   }
 
