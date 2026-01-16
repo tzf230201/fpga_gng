@@ -20,20 +20,26 @@ end entity;
 architecture rtl of tang_nano_9k is
   constant DEPTH : natural := 400;
 
+  -----------------------------------------------------------------------------
   -- UART RX
+  -----------------------------------------------------------------------------
   signal rx_data  : std_logic_vector(7 downto 0);
   signal rx_valid : std_logic;
   signal rx_busy  : std_logic;
   signal rx_err   : std_logic;
 
+  -----------------------------------------------------------------------------
   -- UART TX
+  -----------------------------------------------------------------------------
   signal tx_start : std_logic;
   signal tx_data  : std_logic_vector(7 downto 0);
   signal tx_busy  : std_logic;
   signal tx_done  : std_logic;
   signal txd      : std_logic;
 
-  -- BRAM_A (external)
+  -----------------------------------------------------------------------------
+  -- BRAM_A (RX store)
+  -----------------------------------------------------------------------------
   type mem_a_t is array (0 to DEPTH-1) of std_logic_vector(7 downto 0);
   signal mem_a : mem_a_t;
 
@@ -45,39 +51,72 @@ architecture rtl of tang_nano_9k is
   signal a_rdata : std_logic_vector(7 downto 0);
 
   -- RX store control
-  signal full_p   : std_logic;
-  signal locked   : std_logic;
-
-  -- delay full 1-cycle (last write commits next edge)
+  signal full_p     : std_logic;
+  signal locked     : std_logic;
   signal full_p_dly : std_logic := '0';
 
-  -- BRAM_B (buffer)
+  -----------------------------------------------------------------------------
+  -- BRAM_B (stream buffer)
+  -----------------------------------------------------------------------------
   type mem_b_t is array (0 to DEPTH-1) of std_logic_vector(7 downto 0);
   signal mem_b : mem_b_t;
 
-  signal b_we    : std_logic;
-  signal b_waddr : unsigned(8 downto 0);
-  signal b_wdata : std_logic_vector(7 downto 0);
+  -- BRAM_B read mux (decay vs sender)
+  signal b_raddr_mem  : unsigned(8 downto 0);
+  signal b_rdata      : std_logic_vector(7 downto 0);
+  signal b_raddr_send : unsigned(8 downto 0);
+  signal b_raddr_dec  : unsigned(8 downto 0);
 
-  signal b_raddr : unsigned(8 downto 0);
-  signal b_rdata : std_logic_vector(7 downto 0);
+  -- BRAM_B write mux (decay wins over copy)
+  signal b_we_mem     : std_logic;
+  signal b_waddr_mem  : unsigned(8 downto 0);
+  signal b_wdata_mem  : std_logic_vector(7 downto 0);
 
-  -- copy/send
+  signal b_we_copy    : std_logic;
+  signal b_waddr_copy : unsigned(8 downto 0);
+  signal b_wdata_copy : std_logic_vector(7 downto 0);
+
+  signal b_we_dec     : std_logic;
+  signal b_waddr_dec  : unsigned(8 downto 0);
+  signal b_wdata_dec  : std_logic_vector(7 downto 0);
+
+  -----------------------------------------------------------------------------
+  -- copy / send / decay flags
+  -----------------------------------------------------------------------------
   signal copying   : std_logic;
-  signal sending   : std_logic;
   signal copy_done : std_logic;
 
-  -- debug latch
-  signal full_rx_store : std_logic := '0';
+  signal sending     : std_logic;
+  signal send_done_p : std_logic;
 
-  -- sender start latch
-  signal send_start_p   : std_logic := '0';
+  signal decaying   : std_logic;
+  signal decay_done : std_logic;
+
+  -----------------------------------------------------------------------------
+  -- debug latches
+  -----------------------------------------------------------------------------
+  signal full_rx_store : std_logic := '0';
+  signal data_ready_p  : std_logic := '0';
+
+  -----------------------------------------------------------------------------
+  -- Scheduler: decay each N packets
+  -----------------------------------------------------------------------------
+  constant DECAY_EVERY_PKTS : natural := 50;
+
+  type sm_t is (WAIT_DATA, STREAMING, DO_DECAY);
+  signal sm : sm_t := WAIT_DATA;
+
+  signal pkt_cnt : unsigned(7 downto 0) := (others => '0'); -- enough for 0..255
+  signal decay_start_pulse : std_logic := '0';
+
+  -- pause sender during copy/decay
+  signal pause_send : std_logic;
 
 begin
 
-  ---------------------------------------------------------------------------
-  -- Debug latch: remember we reached "full"
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
+  -- Debug latch: remember full
+  -----------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -89,9 +128,9 @@ begin
     end if;
   end process;
 
-  ---------------------------------------------------------------------------
-  -- full_p delayed 1 cycle (avoid last byte not committed yet)
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
+  -- full_p delayed 1 cycle
+  -----------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -103,9 +142,9 @@ begin
     end if;
   end process;
 
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   -- BRAM_A (sync write + sync read)
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -116,22 +155,33 @@ begin
     end if;
   end process;
 
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
+  -- BRAM_B muxes
+  -- Read: decay when decaying else sender
+  -----------------------------------------------------------------------------
+  b_raddr_mem <= b_raddr_dec when (decaying = '1') else b_raddr_send;
+
+  -- Write: decay wins over copy
+  b_we_mem    <= b_we_dec or b_we_copy;
+  b_waddr_mem <= b_waddr_dec when (b_we_dec = '1') else b_waddr_copy;
+  b_wdata_mem <= b_wdata_dec when (b_we_dec = '1') else b_wdata_copy;
+
+  -----------------------------------------------------------------------------
   -- BRAM_B (sync write + sync read)
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
-      if b_we = '1' then
-        mem_b(to_integer(b_waddr)) <= b_wdata;
+      if b_we_mem = '1' then
+        mem_b(to_integer(b_waddr_mem)) <= b_wdata_mem;
       end if;
-      b_rdata <= mem_b(to_integer(b_raddr));
+      b_rdata <= mem_b(to_integer(b_raddr_mem));
     end if;
   end process;
 
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   -- UART RX
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   u_rx : entity work.uart_rx
     generic map (
       CLOCK_FREQUENCY => CLOCK_FREQUENCY,
@@ -147,10 +197,9 @@ begin
       err_o   => rx_err
     );
 
-  ---------------------------------------------------------------------------
-  -- RX STORE controller (RAM outside)
-  -- IMPORTANT: clear_i set '0' for continuous streaming demo.
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
+  -- RX STORE (lock after full)
+  -----------------------------------------------------------------------------
   u_store : entity work.rx_store_ext
     generic map ( DEPTH => DEPTH )
     port map (
@@ -158,8 +207,8 @@ begin
       rstn_i       => rstn_i,
       rx_valid_i   => rx_valid,
       rx_data_i    => rx_data,
-      hold_i       => copying, -- safe
-      clear_i      => '0',                  -- <-- keep locked once full (stream uses mem_b)
+      hold_i       => copying,
+      clear_i      => '0',
       full_o       => full_p,
 
       mem_we_o     => a_we,
@@ -173,9 +222,9 @@ begin
       locked_o     => locked
     );
 
-  ---------------------------------------------------------------------------
-  -- COPY (A -> B) start when full_p_dly
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
+  -- COPY (A -> B)
+  -----------------------------------------------------------------------------
   u_copy : entity work.bram_copy
     generic map ( DEPTH => DEPTH )
     port map (
@@ -186,63 +235,140 @@ begin
       a_raddr_o => a_raddr,
       a_rdata_i => a_rdata,
 
-      b_waddr_o => b_waddr,
-      b_wdata_o => b_wdata,
-      b_we_o    => b_we,
+      b_waddr_o => b_waddr_copy,
+      b_wdata_o => b_wdata_copy,
+      b_we_o    => b_we_copy,
 
       done_o    => copy_done,
       busy_o    => copying
     );
 
-  ---------------------------------------------------------------------------
-  -- Latch send_start once copy_done happened
-  -- (so sender starts and then runs continuous forever)
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
+  -- data_ready latch
+  -----------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
       if rstn_i = '0' then
-        send_start_p <= '0';
+        data_ready_p <= '0';
       elsif copy_done = '1' then
-        send_start_p <= '1';
+        data_ready_p <= '1';
       end if;
     end if;
   end process;
 
-  ---------------------------------------------------------------------------
-  -- SEND (B -> UART) packet: FF FF + LEN + SEQ + payload (NO checksum)
-  -- pause while copying to avoid read-during-write tearing
-  ---------------------------------------------------------------------------
-u_send : entity work.bram_send_packet_sumchk
-  generic map (
-    DEPTH     => DEPTH,
-    CLOCK_HZ  => CLOCK_FREQUENCY,
-    STREAM_HZ => 50
-  )
-  port map (
-    clk_i        => clk_i,
-    rstn_i       => rstn_i,
-    start_i      => '1',
-    continuous_i => '1',
-    pause_i      => copying,  -- freeze saat copy
+  -----------------------------------------------------------------------------
+  -- PAUSE sender during copy or decay
+  -----------------------------------------------------------------------------
+  pause_send <= copying or decaying;
 
-    b_raddr_o    => b_raddr,
-    b_rdata_i    => b_rdata,
+  -----------------------------------------------------------------------------
+  -- STATE MACHINE: decay every 50 packets
+  -----------------------------------------------------------------------------
+  process(clk_i)
+  begin
+    if rising_edge(clk_i) then
+      if rstn_i = '0' then
+        sm <= WAIT_DATA;
+        pkt_cnt <= (others => '0');
+        decay_start_pulse <= '0';
+      else
+        decay_start_pulse <= '0'; -- default (1-cycle pulse)
 
-    tx_busy_i    => tx_busy,
-    tx_done_i    => tx_done,
-    tx_start_o   => tx_start,
-    tx_data_o    => tx_data,
+        case sm is
+          when WAIT_DATA =>
+            pkt_cnt <= (others => '0');
+            if data_ready_p = '1' then
+              sm <= STREAMING;
+            end if;
 
-    done_o       => open,
-    busy_o       => sending
-  );
+          when STREAMING =>
+            -- count only when a packet fully done (done pulse)
+            if send_done_p = '1' then
+              if pkt_cnt = to_unsigned(DECAY_EVERY_PKTS-1, pkt_cnt'length) then
+                pkt_cnt <= (others => '0');
+                sm <= DO_DECAY;
+              else
+                pkt_cnt <= pkt_cnt + 1;
+              end if;
+            end if;
 
+          when DO_DECAY =>
+            -- start decay only when sender is idle and no copy
+            if (pause_send = '0') and (sending = '0') and (decaying = '0') then
+              decay_start_pulse <= '1';
+            end if;
 
+            if decay_done = '1' then
+              sm <= STREAMING;
+            end if;
 
-  ---------------------------------------------------------------------------
+          when others =>
+            sm <= WAIT_DATA;
+        end case;
+
+      end if;
+    end if;
+  end process;
+
+  -----------------------------------------------------------------------------
+  -- DECAY/SHIFT module (ubah isi BRAM_B)
+  -----------------------------------------------------------------------------
+  u_decay : entity work.bram_decay_int16
+    generic map (
+      DEPTH_BYTES => DEPTH,
+      STEP_X      => 10,   -- 0.01 if SCALE=1000
+      STEP_Y      => 0,
+      LIMIT_X     => 300,  -- ping-pong range
+      LIMIT_Y     => 0
+    )
+    port map (
+      clk_i      => clk_i,
+      rstn_i     => rstn_i,
+      start_i    => decay_start_pulse,
+
+      b_raddr_o  => b_raddr_dec,
+      b_rdata_i  => b_rdata,
+
+      b_we_o     => b_we_dec,
+      b_waddr_o  => b_waddr_dec,
+      b_wdata_o  => b_wdata_dec,
+
+      done_o     => decay_done,
+      busy_o     => decaying
+    );
+
+  -----------------------------------------------------------------------------
+  -- SEND (B -> UART) packet module (sender tidak diubah)
+  -----------------------------------------------------------------------------
+  u_send : entity work.bram_send_packet_sumchk
+    generic map (
+      DEPTH     => DEPTH,
+      CLOCK_HZ  => CLOCK_FREQUENCY,
+      STREAM_HZ => 50
+    )
+    port map (
+      clk_i        => clk_i,
+      rstn_i       => rstn_i,
+      start_i      => '1',
+      continuous_i => '1',
+      pause_i      => pause_send,
+
+      b_raddr_o    => b_raddr_send,
+      b_rdata_i    => b_rdata,
+
+      tx_busy_i    => tx_busy,
+      tx_done_i    => tx_done,
+      tx_start_o   => tx_start,
+      tx_data_o    => tx_data,
+
+      done_o       => send_done_p,   -- <-- IMPORTANT: pulse per packet
+      busy_o       => sending
+    );
+
+  -----------------------------------------------------------------------------
   -- UART TX
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   u_tx : entity work.uart_tx
     generic map (
       CLOCK_FREQUENCY => CLOCK_FREQUENCY,
@@ -260,16 +386,17 @@ u_send : entity work.bram_send_packet_sumchk
 
   uart_txd_o <= std_ulogic(txd);
 
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   -- LEDs active-low
-  -- LED0 = sending, LED1 = copying, LED2 = locked, LED3 = full seen
-  ---------------------------------------------------------------------------
+  -- 0=sending, 1=copying, 2=locked, 3=full_seen, 4=decaying, 5=data_ready
+  -----------------------------------------------------------------------------
   gpio_o <= (
     0 => std_ulogic(not sending),
     1 => std_ulogic(not copying),
     2 => std_ulogic(not locked),
     3 => std_ulogic(not full_rx_store),
-    others => '1'
+    4 => std_ulogic(not decaying),
+    5 => std_ulogic(not data_ready_p)
   );
 
 end architecture;

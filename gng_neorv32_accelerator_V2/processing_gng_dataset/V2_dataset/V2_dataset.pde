@@ -38,11 +38,11 @@ int seqRx = 0;
 byte[] payload = new byte[MAX_PAYLOAD];
 int payIdx = 0;
 
-int chkCalc = 0; // SUM8
+int chkCalc = 0; // SUM8 over payload bytes
 int chkRx   = 0;
 
 float[][] moonsTx;
-float[][] moonsRx;
+float[][] moonsRx = new float[MOONS_N][2]; // <-- REUSE, no new per packet
 
 int pktOK = 0, pktBad = 0, badLen = 0;
 int lastSeq = -1;
@@ -53,16 +53,25 @@ String statusMsg = "idle";
 String verifyMsg = "";
 
 // ignore streaming right after sending TX (to avoid echo/garbage at start)
-final int IGNORE_AFTER_SEND_MS = 50;
+final int IGNORE_AFTER_SEND_MS = 80;
 int tSendMs = 0;
 boolean ignoreRx = true;
+
+// ===============================
+// Faster serial reading
+// ===============================
+byte[] inBuf = new byte[8192];
+int lastByteMs = 0;
+
+// timeout to auto reset parser if stuck
+final int PARSER_TIMEOUT_MS = 120;
 
 // ===============================
 // Setup / Draw
 // ===============================
 void setup() {
   size(1000, 600);
-  surface.setTitle("TX dataset -> FPGA streams packets live (FF FF LEN SEQ PAYLOAD CHK) @50Hz");
+  surface.setTitle("TX dataset -> FPGA streams packets live (FAST + timeout + no-GC)");
 
   println("Available ports:");
   println(Serial.list());
@@ -74,7 +83,9 @@ void setup() {
 
   myPort = new Serial(this, PORT_NAME, BAUD);
   myPort.clear();
-  myPort.buffer(65536); // help avoid overflow
+  // NOTE: some Processing versions don't support huge OS buffer reliably,
+  // but keeping it is fine if available.
+  // myPort.buffer(65536);
   delay(200);
 
   buildTwoMoonsAndPack();
@@ -89,9 +100,18 @@ void draw() {
   drawPointsPanels();
   drawDebug();
 
+  // after sending dataset, wait a bit before parsing stream
   if (ignoreRx && (millis() - tSendMs) > IGNORE_AFTER_SEND_MS) {
     ignoreRx = false;
     statusMsg = "listening live packets...";
+  }
+
+  // ---- Parser timeout rescue ----
+  if (!ignoreRx && st != RxState.FIND_FF1) {
+    if ((millis() - lastByteMs) > PARSER_TIMEOUT_MS) {
+      resetParser();
+      statusMsg = "Parser reset (timeout) -> resync";
+    }
   }
 }
 
@@ -99,8 +119,9 @@ void keyPressed() {
   if (key == 'r' || key == 'R') {
     buildTwoMoonsAndPack();
     sendDatasetOnce();
+  } else if (key == 's' || key == 'S') {
+    sendDatasetOnce();
   } else if (key == 'c' || key == 'C') {
-    // clear stats
     pktOK=0; pktBad=0; badLen=0; lost=0; lastSeq=-1;
     statusMsg = "stats cleared";
   }
@@ -121,74 +142,75 @@ void sendDatasetOnce() {
 }
 
 // ===============================
-// Serial receive + parser
+// Serial receive (FAST chunk read)
 // ===============================
 void serialEvent(Serial p) {
-  while (p.available() > 0) {
-    int b = p.read();
-    if (b < 0) break;
-    int ub = b & 0xFF;
+  int n = p.readBytes(inBuf); // <-- FAST
+  if (n <= 0) return;
 
-    if (ignoreRx) continue;
+  lastByteMs = millis();
 
-    switch(st) {
-      case FIND_FF1:
-        if (ub == 0xFF) st = RxState.FIND_FF2;
-        break;
+  if (ignoreRx) return;
 
-      case FIND_FF2:
-        if (ub == 0xFF) st = RxState.LEN0;
-        else st = RxState.FIND_FF1;
-        break;
+  for (int i = 0; i < n; i++) {
+    feedParser(inBuf[i] & 0xFF);
+  }
+}
 
-      case LEN0:
-        expectLen = ub;
-        st = RxState.LEN1;
-        break;
+// ===============================
+// Packet parser (byte by byte feed)
+// ===============================
+void feedParser(int ub) {
+  switch(st) {
+    case FIND_FF1:
+      if (ub == 0xFF) st = RxState.FIND_FF2;
+      break;
 
-      case LEN1:
-        expectLen |= (ub << 8);
-        // sanity
-        if (expectLen <= 0 || expectLen > MAX_PAYLOAD) {
-          badLen++;
-          pktBad++;
-          resetParser();
-        } else {
-          st = RxState.SEQ;
-        }
-        break;
+    case FIND_FF2:
+      if (ub == 0xFF) st = RxState.LEN0;
+      else st = RxState.FIND_FF1;
+      break;
 
-      case SEQ:
-        seqRx = ub;
-        payIdx = 0;
-        chkCalc = 0;
-        st = RxState.PAYLOAD;
-        break;
+    case LEN0:
+      expectLen = ub;
+      st = RxState.LEN1;
+      break;
 
-      case PAYLOAD:
-        payload[payIdx++] = (byte)ub;
-        chkCalc = (chkCalc + ub) & 0xFF;
-
-        if (payIdx >= expectLen) {
-          st = RxState.CHK;
-        }
-        break;
-
-      case CHK:
-        chkRx = ub;
-
-        if (((chkCalc & 0xFF) == (chkRx & 0xFF))) {
-          pktOK++;
-          lastPktMs = millis();
-          onGoodPacket(seqRx, expectLen, payload);
-        } else {
-          pktBad++;
-        }
-
-        // next packet
+    case LEN1:
+      expectLen |= (ub << 8);
+      if (expectLen <= 0 || expectLen > MAX_PAYLOAD) {
+        badLen++;
+        pktBad++;
         resetParser();
-        break;
-    }
+      } else {
+        st = RxState.SEQ;
+      }
+      break;
+
+    case SEQ:
+      seqRx = ub;
+      payIdx = 0;
+      chkCalc = 0;
+      st = RxState.PAYLOAD;
+      break;
+
+    case PAYLOAD:
+      payload[payIdx++] = (byte)ub;
+      chkCalc = (chkCalc + ub) & 0xFF;
+      if (payIdx >= expectLen) st = RxState.CHK;
+      break;
+
+    case CHK:
+      chkRx = ub;
+      if ((chkCalc & 0xFF) == (chkRx & 0xFF)) {
+        pktOK++;
+        lastPktMs = millis();
+        onGoodPacket(seqRx, expectLen);
+      } else {
+        pktBad++;
+      }
+      resetParser();
+      break;
   }
 }
 
@@ -200,33 +222,34 @@ void resetParser() {
   chkRx = 0;
 }
 
+// ===============================
 // called only when checksum OK
-void onGoodPacket(int seq, int len, byte[] pay) {
+// ===============================
+void onGoodPacket(int seq, int len) {
   // SEQ tracking
   if (lastSeq >= 0) {
     int diff = (seq - lastSeq) & 0xFF;
     if (diff != 1) {
-      // packets skipped (approx)
       int missed = (diff - 1) & 0xFF;
       lost += missed;
     }
   }
   lastSeq = seq;
 
-  // Only decode if expected len == 400 (your dataset)
+  // decode only if len == 400 (dataset)
   if (len != TX_BYTES) {
     badLen++;
+    verifyMsg = "CHK OK but LEN!=" + TX_BYTES + " (len=" + len + ")";
     return;
   }
 
-  // decode payload -> moonsRx
-  moonsRx = new float[MOONS_N][2];
+  // decode payload -> moonsRx (REUSE array)
   int p = 0;
   for (int i = 0; i < MOONS_N; i++) {
-    int xL = pay[p++] & 0xFF;
-    int xH = pay[p++] & 0xFF;
-    int yL = pay[p++] & 0xFF;
-    int yH = pay[p++] & 0xFF;
+    int xL = payload[p++] & 0xFF;
+    int xH = payload[p++] & 0xFF;
+    int yL = payload[p++] & 0xFF;
+    int yH = payload[p++] & 0xFF;
 
     int xi = xL | (xH << 8);
     int yi = yL | (yH << 8);
@@ -238,8 +261,12 @@ void onGoodPacket(int seq, int len, byte[] pay) {
     moonsRx[i][1] = yi / SCALE;
   }
 
-  verifyMsg = "CHK OK  seq=" + seq + "  len=" + len +
-              "  ok=" + pktOK + "  bad=" + pktBad + "  lost~=" + lost;
+  verifyMsg = "CHK OK  seq=" + seq +
+              "  len=" + len +
+              "  ok=" + pktOK +
+              "  bad=" + pktBad +
+              "  lost~=" + lost +
+              "  badLen=" + badLen;
 }
 
 // ===============================
@@ -290,8 +317,10 @@ void drawScatter(float[][] pts, float x0, float y0, float w, float h) {
   float minx=1e9, maxx=-1e9, miny=1e9, maxy=-1e9;
   for (int i = 0; i < pts.length; i++) {
     float x = pts[i][0], y = pts[i][1];
-    minx = min(minx, x); maxx = max(maxx, x);
-    miny = min(miny, y); maxy = max(maxy, y);
+    if (x < minx) minx = x;
+    if (x > maxx) maxx = x;
+    if (y < miny) miny = y;
+    if (y > maxy) maxy = y;
   }
   float dx = max(1e-6, maxx - minx);
   float dy = max(1e-6, maxy - miny);
@@ -313,14 +342,14 @@ void drawDebug() {
 
   fill(220);
   text("PORT=" + PORT_NAME + "  BAUD=" + BAUD +
-       "  expectLen=" + TX_BYTES + "  state=" + st +
+       "  state=" + st +
        "  payload(" + payIdx + "/" + expectLen + ")", 20, height - 45);
 
   int ago = (lastPktMs == 0) ? -1 : (millis() - lastPktMs);
   text("Status: " + statusMsg + "   lastPkt(ms ago)=" + ago, 20, height - 25);
 
   fill(180, 220, 255);
-  text(verifyMsg + "  badLen=" + badLen, 520, height - 25);
+  text(verifyMsg, 520, height - 25);
 }
 
 // ===============================
