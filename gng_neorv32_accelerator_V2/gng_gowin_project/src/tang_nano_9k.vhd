@@ -18,28 +18,35 @@ entity tang_nano_9k is
 end entity;
 
 architecture rtl of tang_nano_9k is
-  constant DEPTH : natural := 400;
+  constant DEPTH   : natural := 400;
+  constant WORDS_C : natural := DEPTH/4; -- 100 word32
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
+  -- adjustable scheduler
+  ---------------------------------------------------------------------------
+  constant SHIFT_EVERY_PKTS : natural := 5;   -- shift tiap N packet
+  constant TRAIN_EVERY_PKTS : natural := 10;  -- 1 train step tiap N packet (ubah bebas)
+
+  ---------------------------------------------------------------------------
   -- UART RX
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   signal rx_data  : std_logic_vector(7 downto 0);
   signal rx_valid : std_logic;
   signal rx_busy  : std_logic;
   signal rx_err   : std_logic;
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- UART TX
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   signal tx_start : std_logic;
   signal tx_data  : std_logic_vector(7 downto 0);
   signal tx_busy  : std_logic;
   signal tx_done  : std_logic;
   signal txd      : std_logic;
 
-  -----------------------------------------------------------------------------
-  -- BRAM_A (RX store)
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
+  -- BRAM_A (RX store) byte
+  ---------------------------------------------------------------------------
   type mem_a_t is array (0 to DEPTH-1) of std_logic_vector(7 downto 0);
   signal mem_a : mem_a_t;
 
@@ -50,74 +57,87 @@ architecture rtl of tang_nano_9k is
   signal a_raddr : unsigned(8 downto 0);
   signal a_rdata : std_logic_vector(7 downto 0);
 
-  -- RX store control
   signal full_p     : std_logic;
   signal locked     : std_logic;
   signal full_p_dly : std_logic := '0';
 
-  -----------------------------------------------------------------------------
-  -- BRAM_B (stream buffer)
-  -----------------------------------------------------------------------------
-  type mem_b_t is array (0 to DEPTH-1) of std_logic_vector(7 downto 0);
-  signal mem_b : mem_b_t;
+  ---------------------------------------------------------------------------
+  -- BRAM_C (word32): [15:0]=X int16, [31:16]=Y int16
+  ---------------------------------------------------------------------------
+  type mem_c_t is array (0 to WORDS_C-1) of std_logic_vector(31 downto 0);
+  signal mem_c : mem_c_t;
 
-  -- BRAM_B read mux (decay vs sender)
-  signal b_raddr_mem  : unsigned(8 downto 0);
-  signal b_rdata      : std_logic_vector(7 downto 0);
-  signal b_raddr_send : unsigned(8 downto 0);
-  signal b_raddr_dec  : unsigned(8 downto 0);
+  -- COPY write
+  signal c_we_copy    : std_logic;
+  signal c_waddr_copy : unsigned(6 downto 0);
+  signal c_wdata_copy : std_logic_vector(31 downto 0);
 
-  -- BRAM_B write mux (decay wins over copy)
-  signal b_we_mem     : std_logic;
-  signal b_waddr_mem  : unsigned(8 downto 0);
-  signal b_wdata_mem  : std_logic_vector(7 downto 0);
+  -- SHIFT write (wins)
+  signal c_we_shift    : std_logic;
+  signal c_waddr_shift : unsigned(6 downto 0);
+  signal c_wdata_shift : std_logic_vector(31 downto 0);
 
-  signal b_we_copy    : std_logic;
-  signal b_waddr_copy : unsigned(8 downto 0);
-  signal b_wdata_copy : std_logic_vector(7 downto 0);
+  -- write mux -> mem_c
+  signal c_we_mem    : std_logic;
+  signal c_waddr_mem : unsigned(6 downto 0);
+  signal c_wdata_mem : std_logic_vector(31 downto 0);
 
-  signal b_we_dec     : std_logic;
-  signal b_waddr_dec  : unsigned(8 downto 0);
-  signal b_wdata_dec  : std_logic_vector(7 downto 0);
+  -- read mux -> mem_c (GNG > SHIFT > SEND)
+  signal c_raddr_mem   : unsigned(6 downto 0);
+  signal c_raddr_send  : unsigned(6 downto 0);
+  signal c_raddr_shift : unsigned(6 downto 0);
+  signal c_raddr_gng   : unsigned(6 downto 0);
 
-  -----------------------------------------------------------------------------
-  -- copy / send / decay flags
-  -----------------------------------------------------------------------------
+  signal c_rdata : std_logic_vector(31 downto 0);
+
+  ---------------------------------------------------------------------------
+  -- flags
+  ---------------------------------------------------------------------------
   signal copying   : std_logic;
   signal copy_done : std_logic;
 
   signal sending     : std_logic;
   signal send_done_p : std_logic;
 
-  signal decaying   : std_logic;
-  signal decay_done : std_logic;
+  signal shifting   : std_logic;
+  signal shift_done : std_logic;
 
-  -----------------------------------------------------------------------------
+  signal gng_busy  : std_logic;
+  signal gng_done  : std_logic;
+  signal gng_term  : std_logic;
+
+  ---------------------------------------------------------------------------
   -- debug latches
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   signal full_rx_store : std_logic := '0';
   signal data_ready_p  : std_logic := '0';
 
-  -----------------------------------------------------------------------------
-  -- Scheduler: decay each N packets
-  -----------------------------------------------------------------------------
-  constant DECAY_EVERY_PKTS : natural := 5; -- DEBUG: kecil biar sering decay (ubah bebas)
-
-  type sm_t is (WAIT_DATA, STREAMING, DO_DECAY, WAIT_DECAY);
+  ---------------------------------------------------------------------------
+  -- scheduler FSM
+  ---------------------------------------------------------------------------
+  type sm_t is (
+    WAIT_DATA,
+    DO_GNG_INIT, WAIT_GNG_INIT,
+    STREAMING,
+    DO_GNG_STEP, WAIT_GNG_STEP,
+    DO_SHIFT, WAIT_SHIFT
+  );
   signal sm : sm_t := WAIT_DATA;
 
-  signal pkt_cnt           : unsigned(7 downto 0) := (others => '0');
-  signal decay_start_pulse : std_logic := '0';
+  signal shift_cnt : unsigned(7 downto 0) := (others => '0');
+  signal train_cnt : unsigned(7 downto 0) := (others => '0');
 
-  -- pause sender during copy/decay/scheduling
+  signal shift_start_pulse : std_logic := '0';
+  signal gng_init_pulse    : std_logic := '0';
+  signal gng_step_pulse    : std_logic := '0';
+
   signal pause_send : std_logic;
-  signal pause_sm   : std_logic; -- FIX: convert boolean (sm=...) to std_logic
 
 begin
 
-  -----------------------------------------------------------------------------
-  -- Debug latch: remember full
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
+  -- debug latch: remember full
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -129,9 +149,9 @@ begin
     end if;
   end process;
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- full_p delayed 1 cycle
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -143,9 +163,9 @@ begin
     end if;
   end process;
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- BRAM_A (sync write + sync read)
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -156,33 +176,33 @@ begin
     end if;
   end process;
 
-  -----------------------------------------------------------------------------
-  -- BRAM_B muxes
-  -- Read: decay when decaying else sender
-  -----------------------------------------------------------------------------
-  b_raddr_mem <= b_raddr_dec when (decaying = '1') else b_raddr_send;
+  ---------------------------------------------------------------------------
+  -- BRAM_C mux
+  ---------------------------------------------------------------------------
+  c_raddr_mem <= c_raddr_gng   when (gng_busy  = '1') else
+                 c_raddr_shift when (shifting = '1') else
+                 c_raddr_send;
 
-  -- Write: decay wins over copy
-  b_we_mem    <= b_we_dec or b_we_copy;
-  b_waddr_mem <= b_waddr_dec when (b_we_dec = '1') else b_waddr_copy;
-  b_wdata_mem <= b_wdata_dec when (b_we_dec = '1') else b_wdata_copy;
+  c_we_mem    <= c_we_shift or c_we_copy;
+  c_waddr_mem <= c_waddr_shift when (c_we_shift = '1') else c_waddr_copy;
+  c_wdata_mem <= c_wdata_shift when (c_we_shift = '1') else c_wdata_copy;
 
-  -----------------------------------------------------------------------------
-  -- BRAM_B (sync write + sync read)
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
+  -- BRAM_C (sync write + sync read)
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
-      if b_we_mem = '1' then
-        mem_b(to_integer(b_waddr_mem)) <= b_wdata_mem;
+      if c_we_mem = '1' then
+        mem_c(to_integer(c_waddr_mem)) <= c_wdata_mem;
       end if;
-      b_rdata <= mem_b(to_integer(b_raddr_mem));
+      c_rdata <= mem_c(to_integer(c_raddr_mem));
     end if;
   end process;
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- UART RX
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   u_rx : entity work.uart_rx
     generic map (
       CLOCK_FREQUENCY => CLOCK_FREQUENCY,
@@ -198,9 +218,9 @@ begin
       err_o   => rx_err
     );
 
-  -----------------------------------------------------------------------------
-  -- RX STORE (lock after full)
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
+  -- RX STORE
+  ---------------------------------------------------------------------------
   u_store : entity work.rx_store_ext
     generic map ( DEPTH => DEPTH )
     port map (
@@ -208,7 +228,7 @@ begin
       rstn_i       => rstn_i,
       rx_valid_i   => rx_valid,
       rx_data_i    => rx_data,
-      hold_i       => copying,
+      hold_i       => copying, -- hold during copy
       clear_i      => '0',
       full_o       => full_p,
 
@@ -223,11 +243,13 @@ begin
       locked_o     => locked
     );
 
-  -----------------------------------------------------------------------------
-  -- COPY (A -> B)
-  -----------------------------------------------------------------------------
-  u_copy : entity work.bram_copy
-    generic map ( DEPTH => DEPTH )
+  ---------------------------------------------------------------------------
+  -- COPY 8-bit -> 32-bit (A -> C)
+  ---------------------------------------------------------------------------
+  u_copy_8to32 : entity work.bram_copy_8to32
+    generic map (
+      DEPTH_BYTES => DEPTH
+    )
     port map (
       clk_i     => clk_i,
       rstn_i    => rstn_i,
@@ -236,17 +258,17 @@ begin
       a_raddr_o => a_raddr,
       a_rdata_i => a_rdata,
 
-      b_waddr_o => b_waddr_copy,
-      b_wdata_o => b_wdata_copy,
-      b_we_o    => b_we_copy,
+      c_we_o    => c_we_copy,
+      c_waddr_o => c_waddr_copy,
+      c_wdata_o => c_wdata_copy,
 
       done_o    => copy_done,
       busy_o    => copying
     );
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- data_ready latch
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -258,92 +280,153 @@ begin
     end if;
   end process;
 
-  -----------------------------------------------------------------------------
-  -- PAUSE sender (FIX: boolean -> std_logic)
-  -----------------------------------------------------------------------------
-  pause_sm  <= '1' when ((sm = DO_DECAY) or (sm = WAIT_DECAY)) else '0';
-  pause_send <= copying or decaying or pause_sm;
+  ---------------------------------------------------------------------------
+  -- pause sender during copy/gng/shift or non-streaming states
+  ---------------------------------------------------------------------------
+  pause_send <= copying or gng_busy or shifting or
+                '1' when (sm /= STREAMING) else '0';
 
-  -----------------------------------------------------------------------------
-  -- STATE MACHINE: decay every N packets (FIXED)
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
+  -- Scheduler FSM
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
       if rstn_i = '0' then
         sm <= WAIT_DATA;
-        pkt_cnt <= (others => '0');
-        decay_start_pulse <= '0';
+        shift_cnt <= (others => '0');
+        train_cnt <= (others => '0');
+        shift_start_pulse <= '0';
+        gng_init_pulse <= '0';
+        gng_step_pulse <= '0';
       else
-        decay_start_pulse <= '0'; -- default
+        shift_start_pulse <= '0';
+        gng_init_pulse <= '0';
+        gng_step_pulse <= '0';
 
         case sm is
           when WAIT_DATA =>
-            pkt_cnt <= (others => '0');
+            shift_cnt <= (others => '0');
+            train_cnt <= (others => '0');
             if data_ready_p = '1' then
+              sm <= DO_GNG_INIT;
+            end if;
+
+          when DO_GNG_INIT =>
+            gng_init_pulse <= '1';  -- 1 cycle
+            sm <= WAIT_GNG_INIT;
+
+          when WAIT_GNG_INIT =>
+            if gng_done = '1' then
               sm <= STREAMING;
             end if;
 
           when STREAMING =>
             if send_done_p = '1' then
-              if pkt_cnt = to_unsigned(DECAY_EVERY_PKTS-1, pkt_cnt'length) then
-                pkt_cnt <= (others => '0');
-                sm <= DO_DECAY; -- next: emit 1-cycle start pulse
+              -- SHIFT schedule first
+              if SHIFT_EVERY_PKTS /= 0 and shift_cnt = to_unsigned(SHIFT_EVERY_PKTS-1, shift_cnt'length) then
+                shift_cnt <= (others => '0');
+                sm <= DO_SHIFT;
               else
-                pkt_cnt <= pkt_cnt + 1;
+                if SHIFT_EVERY_PKTS /= 0 then
+                  shift_cnt <= shift_cnt + 1;
+                end if;
+
+                -- TRAIN schedule (skip if terminated)
+                if (TRAIN_EVERY_PKTS /= 0) and (gng_term = '0') then
+                  if train_cnt = to_unsigned(TRAIN_EVERY_PKTS-1, train_cnt'length) then
+                    train_cnt <= (others => '0');
+                    sm <= DO_GNG_STEP;
+                  else
+                    train_cnt <= train_cnt + 1;
+                  end if;
+                end if;
               end if;
             end if;
 
-          when DO_DECAY =>
-            decay_start_pulse <= '1'; -- 1 cycle
-            sm <= WAIT_DECAY;
+          when DO_GNG_STEP =>
+            gng_step_pulse <= '1';
+            sm <= WAIT_GNG_STEP;
 
-          when WAIT_DECAY =>
-            if decay_done = '1' then
+          when WAIT_GNG_STEP =>
+            if gng_done = '1' then
+              sm <= STREAMING;
+            end if;
+
+          when DO_SHIFT =>
+            shift_start_pulse <= '1';
+            sm <= WAIT_SHIFT;
+
+          when WAIT_SHIFT =>
+            if shift_done = '1' then
               sm <= STREAMING;
             end if;
 
           when others =>
             sm <= WAIT_DATA;
         end case;
-
       end if;
     end if;
   end process;
 
-  -----------------------------------------------------------------------------
-  -- DECAY/SHIFT module (ubah isi BRAM_B)
-  -----------------------------------------------------------------------------
-  u_decay : entity work.bram_decay_int16
+  ---------------------------------------------------------------------------
+  -- GNG (init + 1-step)
+  ---------------------------------------------------------------------------
+  u_gng : entity work.gng
     generic map (
-      DEPTH_BYTES => DEPTH,
-      STEP_X      => 10,  -- DEBUG: besar biar kelihatan jelas (ubah bebas)
-      STEP_Y      => 0,
-      LIMIT_X     => 300,  -- DEBUG: range besar
-      LIMIT_Y     => 0
+      WORDS      => WORDS_C,
+      MAX_NODES  => 32,
+      LEARN_SHIFT=> 4,
+      MAX_STEPS  => 10000
     )
     port map (
-      clk_i      => clk_i,
-      rstn_i     => rstn_i,
-      start_i    => decay_start_pulse,
+      clk_i     => clk_i,
+      rstn_i    => rstn_i,
 
-      b_raddr_o  => b_raddr_dec,
-      b_rdata_i  => b_rdata,
+      init_i    => gng_init_pulse,
+      step_i    => gng_step_pulse,
 
-      b_we_o     => b_we_dec,
-      b_waddr_o  => b_waddr_dec,
-      b_wdata_o  => b_wdata_dec,
+      c_raddr_o => c_raddr_gng,
+      c_rdata_i => c_rdata,
 
-      done_o     => decay_done,
-      busy_o     => decaying
+      done_o    => gng_done,
+      busy_o    => gng_busy,
+      term_o    => gng_term
     );
 
-  -----------------------------------------------------------------------------
-  -- SEND (B -> UART) packet module
-  -----------------------------------------------------------------------------
-  u_send : entity work.bram_send_packet_sumchk
+  ---------------------------------------------------------------------------
+  -- SHIFT word32 in BRAM_C
+  ---------------------------------------------------------------------------
+  u_shift32 : entity work.bram_shift_word32_xy
     generic map (
-      DEPTH     => DEPTH,
+      WORDS   => WORDS_C,
+      STEP_X  => 10,
+      STEP_Y  => 0,
+      LIMIT_X => 300,
+      LIMIT_Y => 0
+    )
+    port map (
+      clk_i         => clk_i,
+      rstn_i        => rstn_i,
+      shift_start_i => shift_start_pulse,
+
+      c_raddr_o     => c_raddr_shift,
+      c_rdata_i     => c_rdata,
+
+      c_we_o        => c_we_shift,
+      c_waddr_o     => c_waddr_shift,
+      c_wdata_o     => c_wdata_shift,
+
+      shift_done_o  => shift_done,
+      shifting_o    => shifting
+    );
+
+  ---------------------------------------------------------------------------
+  -- SEND word32 (C -> UART)
+  ---------------------------------------------------------------------------
+  u_send32 : entity work.bram_send_word32_sumchk
+    generic map (
+      WORDS     => WORDS_C,
       CLOCK_HZ  => CLOCK_FREQUENCY,
       STREAM_HZ => 50
     )
@@ -354,21 +437,21 @@ begin
       continuous_i => '1',
       pause_i      => pause_send,
 
-      b_raddr_o    => b_raddr_send,
-      b_rdata_i    => b_rdata,
+      c_raddr_o    => c_raddr_send,
+      c_rdata_i    => c_rdata,
 
       tx_busy_i    => tx_busy,
       tx_done_i    => tx_done,
       tx_start_o   => tx_start,
       tx_data_o    => tx_data,
 
-      done_o       => send_done_p,   -- pulse per packet
+      done_o       => send_done_p,
       busy_o       => sending
     );
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- UART TX
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   u_tx : entity work.uart_tx
     generic map (
       CLOCK_FREQUENCY => CLOCK_FREQUENCY,
@@ -386,16 +469,16 @@ begin
 
   uart_txd_o <= std_ulogic(txd);
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- LEDs active-low
-  -- 0=sending, 1=copying, 2=locked, 3=full_seen, 4=decaying, 5=data_ready
-  -----------------------------------------------------------------------------
+  -- 0=sending, 1=copying, 2=locked, 3=full_seen, 4=shifting, 5=data_ready
+  ---------------------------------------------------------------------------
   gpio_o <= (
     0 => std_ulogic(not sending),
     1 => std_ulogic(not copying),
     2 => std_ulogic(not locked),
     3 => std_ulogic(not full_rx_store),
-    4 => std_ulogic(not decaying),
+    4 => std_ulogic(not shifting),
     5 => std_ulogic(not data_ready_p)
   );
 
