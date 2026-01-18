@@ -18,36 +18,30 @@ entity tang_nano_9k is
 end entity;
 
 architecture rtl of tang_nano_9k is
-  constant DEPTH   : natural := 400;
-  constant WORDS_C : natural := DEPTH/4; -- 100 word32
+  constant DEPTH_BYTES : natural := 400;
+  constant WORDS_C     : natural := DEPTH_BYTES/4; -- 100
 
-  ---------------------------------------------------------------------------
-  -- adjustable scheduler
-  ---------------------------------------------------------------------------
-  constant SHIFT_EVERY_PKTS : natural := 5;   -- shift tiap N packet
-  constant TRAIN_EVERY_PKTS : natural := 10;  -- 1 train step tiap N packet (ubah bebas)
-
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   -- UART RX
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   signal rx_data  : std_logic_vector(7 downto 0);
   signal rx_valid : std_logic;
   signal rx_busy  : std_logic;
   signal rx_err   : std_logic;
 
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   -- UART TX
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   signal tx_start : std_logic;
   signal tx_data  : std_logic_vector(7 downto 0);
   signal tx_busy  : std_logic;
   signal tx_done  : std_logic;
   signal txd      : std_logic;
 
-  ---------------------------------------------------------------------------
-  -- BRAM_A (RX store) byte
-  ---------------------------------------------------------------------------
-  type mem_a_t is array (0 to DEPTH-1) of std_logic_vector(7 downto 0);
+  -----------------------------------------------------------------------------
+  -- BRAM_A (RX store 8-bit)
+  -----------------------------------------------------------------------------
+  type mem_a_t is array (0 to DEPTH_BYTES-1) of std_logic_vector(7 downto 0);
   signal mem_a : mem_a_t;
 
   signal a_we    : std_logic;
@@ -61,83 +55,89 @@ architecture rtl of tang_nano_9k is
   signal locked     : std_logic;
   signal full_p_dly : std_logic := '0';
 
-  ---------------------------------------------------------------------------
-  -- BRAM_C (word32): [15:0]=X int16, [31:16]=Y int16
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
+  -- BRAM_C (word32)
+  -----------------------------------------------------------------------------
   type mem_c_t is array (0 to WORDS_C-1) of std_logic_vector(31 downto 0);
   signal mem_c : mem_c_t;
 
-  -- COPY write
+  -- write from copy
   signal c_we_copy    : std_logic;
   signal c_waddr_copy : unsigned(6 downto 0);
   signal c_wdata_copy : std_logic_vector(31 downto 0);
 
-  -- SHIFT write (wins)
+  -- write from shift
   signal c_we_shift    : std_logic;
   signal c_waddr_shift : unsigned(6 downto 0);
   signal c_wdata_shift : std_logic_vector(31 downto 0);
 
-  -- write mux -> mem_c
+  -- merged write
   signal c_we_mem    : std_logic;
   signal c_waddr_mem : unsigned(6 downto 0);
   signal c_wdata_mem : std_logic_vector(31 downto 0);
 
-  -- read mux -> mem_c (GNG > SHIFT > SEND)
-  signal c_raddr_mem   : unsigned(6 downto 0);
-  signal c_raddr_send  : unsigned(6 downto 0);
-  signal c_raddr_shift : unsigned(6 downto 0);
-  signal c_raddr_gng   : unsigned(6 downto 0);
+  -- shared sync read (mux: shift > gng > sender)
+  signal c_raddr_mem  : unsigned(6 downto 0) := (others => '0');
+  signal c_rdata_mem  : std_logic_vector(31 downto 0) := (others => '0');
 
-  signal c_rdata : std_logic_vector(31 downto 0);
+  signal c_raddr_send : unsigned(6 downto 0);
+  signal c_raddr_shift: unsigned(6 downto 0);
+  signal c_raddr_gng  : unsigned(6 downto 0);
 
-  ---------------------------------------------------------------------------
-  -- flags
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
+  -- copy flags
+  -----------------------------------------------------------------------------
   signal copying   : std_logic;
   signal copy_done : std_logic;
 
+  -----------------------------------------------------------------------------
+  -- shift flags
+  -----------------------------------------------------------------------------
+  signal shifting   : std_logic;
+  signal shift_done : std_logic;
+  signal shift_start_p : std_logic := '0';
+
+  -----------------------------------------------------------------------------
+  -- send flags
+  -----------------------------------------------------------------------------
   signal sending     : std_logic;
   signal send_done_p : std_logic;
 
-  signal shifting   : std_logic;
-  signal shift_done : std_logic;
+  -----------------------------------------------------------------------------
+  -- GNG flags
+  -----------------------------------------------------------------------------
+  signal gng_start_p : std_logic := '0';
+  signal gng_done_p  : std_logic;
+  signal gng_busy    : std_logic;
 
-  signal gng_busy  : std_logic;
-  signal gng_done  : std_logic;
-  signal gng_term  : std_logic;
-
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   -- debug latches
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   signal full_rx_store : std_logic := '0';
   signal data_ready_p  : std_logic := '0';
 
-  ---------------------------------------------------------------------------
-  -- scheduler FSM
-  ---------------------------------------------------------------------------
-  type sm_t is (
-    WAIT_DATA,
-    DO_GNG_INIT, WAIT_GNG_INIT,
-    STREAMING,
-    DO_GNG_STEP, WAIT_GNG_STEP,
-    DO_SHIFT, WAIT_SHIFT
-  );
+  -----------------------------------------------------------------------------
+  -- Scheduler
+  -----------------------------------------------------------------------------
+  constant SHIFT_EVERY_PKTS : natural := 5;  -- boleh ubah
+  constant GNG_EVERY_PKTS   : natural := 10; -- boleh ubah
+
+  type sm_t is (WAIT_DATA, RUN_GNG, WAIT_GNG, STREAMING, DO_SHIFT, WAIT_SHIFT);
   signal sm : sm_t := WAIT_DATA;
 
-  signal shift_cnt : unsigned(7 downto 0) := (others => '0');
-  signal train_cnt : unsigned(7 downto 0) := (others => '0');
-
-  signal shift_start_pulse : std_logic := '0';
-  signal gng_init_pulse    : std_logic := '0';
-  signal gng_step_pulse    : std_logic := '0';
+  signal pkt_cnt_shift : unsigned(7 downto 0) := (others => '0');
+  signal pkt_cnt_gng   : unsigned(7 downto 0) := (others => '0');
 
   signal pause_send : std_logic;
 
+  -- helper
+  signal sm_busy : std_logic;
+
 begin
 
-  ---------------------------------------------------------------------------
-  -- debug latch: remember full
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
+  -- Debug latch: remember full
+  -----------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -149,9 +149,9 @@ begin
     end if;
   end process;
 
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   -- full_p delayed 1 cycle
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -163,9 +163,9 @@ begin
     end if;
   end process;
 
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   -- BRAM_A (sync write + sync read)
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -176,33 +176,36 @@ begin
     end if;
   end process;
 
-  ---------------------------------------------------------------------------
-  -- BRAM_C mux
-  ---------------------------------------------------------------------------
-  c_raddr_mem <= c_raddr_gng   when (gng_busy  = '1') else
-                 c_raddr_shift when (shifting = '1') else
-                 c_raddr_send;
-
+  -----------------------------------------------------------------------------
+  -- BRAM_C write mux (shift wins over copy)
+  -----------------------------------------------------------------------------
   c_we_mem    <= c_we_shift or c_we_copy;
   c_waddr_mem <= c_waddr_shift when (c_we_shift = '1') else c_waddr_copy;
   c_wdata_mem <= c_wdata_shift when (c_we_shift = '1') else c_wdata_copy;
 
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
+  -- BRAM_C read addr mux (shift > gng > sender)
+  -----------------------------------------------------------------------------
+  c_raddr_mem <= c_raddr_shift when (shifting = '1') else
+                 c_raddr_gng   when (gng_busy = '1') else
+                 c_raddr_send;
+
+  -----------------------------------------------------------------------------
   -- BRAM_C (sync write + sync read)
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
       if c_we_mem = '1' then
         mem_c(to_integer(c_waddr_mem)) <= c_wdata_mem;
       end if;
-      c_rdata <= mem_c(to_integer(c_raddr_mem));
+      c_rdata_mem <= mem_c(to_integer(c_raddr_mem));
     end if;
   end process;
 
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   -- UART RX
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   u_rx : entity work.uart_rx
     generic map (
       CLOCK_FREQUENCY => CLOCK_FREQUENCY,
@@ -218,17 +221,17 @@ begin
       err_o   => rx_err
     );
 
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   -- RX STORE
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   u_store : entity work.rx_store_ext
-    generic map ( DEPTH => DEPTH )
+    generic map ( DEPTH => DEPTH_BYTES )
     port map (
       clk_i        => clk_i,
       rstn_i       => rstn_i,
       rx_valid_i   => rx_valid,
       rx_data_i    => rx_data,
-      hold_i       => copying, -- hold during copy
+      hold_i       => copying, -- stop write while copying
       clear_i      => '0',
       full_o       => full_p,
 
@@ -243,13 +246,11 @@ begin
       locked_o     => locked
     );
 
-  ---------------------------------------------------------------------------
-  -- COPY 8-bit -> 32-bit (A -> C)
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
+  -- COPY 8->32 (A -> C)
+  -----------------------------------------------------------------------------
   u_copy_8to32 : entity work.bram_copy_8to32
-    generic map (
-      DEPTH_BYTES => DEPTH
-    )
+    generic map ( DEPTH_BYTES => DEPTH_BYTES )
     port map (
       clk_i     => clk_i,
       rstn_i    => rstn_i,
@@ -266,9 +267,9 @@ begin
       busy_o    => copying
     );
 
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   -- data_ready latch
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -280,81 +281,68 @@ begin
     end if;
   end process;
 
-  ---------------------------------------------------------------------------
-  -- pause sender during copy/gng/shift or non-streaming states
-  ---------------------------------------------------------------------------
-  pause_send <= copying or gng_busy or shifting or
-                '1' when (sm /= STREAMING) else '0';
+  -----------------------------------------------------------------------------
+  -- PAUSE sender during copy/gng/shift/scheduler
+  -----------------------------------------------------------------------------
+  sm_busy   <= '1' when ((sm = RUN_GNG) or (sm = WAIT_GNG) or (sm = DO_SHIFT) or (sm = WAIT_SHIFT)) else '0';
+  pause_send <= copying or gng_busy or shifting or sm_busy;
 
-  ---------------------------------------------------------------------------
-  -- Scheduler FSM
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
+  -- Scheduler:
+  -- 1) after data_ready -> run gng once
+  -- 2) then stream, every N packet run shift
+  -----------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
       if rstn_i = '0' then
         sm <= WAIT_DATA;
-        shift_cnt <= (others => '0');
-        train_cnt <= (others => '0');
-        shift_start_pulse <= '0';
-        gng_init_pulse <= '0';
-        gng_step_pulse <= '0';
+        pkt_cnt_shift <= (others => '0');
+        pkt_cnt_gng   <= (others => '0');
+        gng_start_p   <= '0';
+        shift_start_p <= '0';
       else
-        shift_start_pulse <= '0';
-        gng_init_pulse <= '0';
-        gng_step_pulse <= '0';
+        gng_start_p   <= '0';
+        shift_start_p <= '0';
 
         case sm is
           when WAIT_DATA =>
-            shift_cnt <= (others => '0');
-            train_cnt <= (others => '0');
+            pkt_cnt_shift <= (others => '0');
+            pkt_cnt_gng   <= (others => '0');
             if data_ready_p = '1' then
-              sm <= DO_GNG_INIT;
+              sm <= RUN_GNG;
             end if;
 
-          when DO_GNG_INIT =>
-            gng_init_pulse <= '1';  -- 1 cycle
-            sm <= WAIT_GNG_INIT;
+          when RUN_GNG =>
+            gng_start_p <= '1'; -- 1-cycle
+            sm <= WAIT_GNG;
 
-          when WAIT_GNG_INIT =>
-            if gng_done = '1' then
+          when WAIT_GNG =>
+            if gng_done_p = '1' then
               sm <= STREAMING;
             end if;
 
           when STREAMING =>
             if send_done_p = '1' then
-              -- SHIFT schedule first
-              if SHIFT_EVERY_PKTS /= 0 and shift_cnt = to_unsigned(SHIFT_EVERY_PKTS-1, shift_cnt'length) then
-                shift_cnt <= (others => '0');
+              -- count for shift
+              if pkt_cnt_shift = to_unsigned(SHIFT_EVERY_PKTS-1, pkt_cnt_shift'length) then
+                pkt_cnt_shift <= (others => '0');
                 sm <= DO_SHIFT;
               else
-                if SHIFT_EVERY_PKTS /= 0 then
-                  shift_cnt <= shift_cnt + 1;
-                end if;
+                pkt_cnt_shift <= pkt_cnt_shift + 1;
+              end if;
 
-                -- TRAIN schedule (skip if terminated)
-                if (TRAIN_EVERY_PKTS /= 0) and (gng_term = '0') then
-                  if train_cnt = to_unsigned(TRAIN_EVERY_PKTS-1, train_cnt'length) then
-                    train_cnt <= (others => '0');
-                    sm <= DO_GNG_STEP;
-                  else
-                    train_cnt <= train_cnt + 1;
-                  end if;
-                end if;
+              -- (optional) trigger gng periodically too
+              if pkt_cnt_gng = to_unsigned(GNG_EVERY_PKTS-1, pkt_cnt_gng'length) then
+                pkt_cnt_gng <= (others => '0');
+                sm <= RUN_GNG; -- will run gng again
+              else
+                pkt_cnt_gng <= pkt_cnt_gng + 1;
               end if;
             end if;
 
-          when DO_GNG_STEP =>
-            gng_step_pulse <= '1';
-            sm <= WAIT_GNG_STEP;
-
-          when WAIT_GNG_STEP =>
-            if gng_done = '1' then
-              sm <= STREAMING;
-            end if;
-
           when DO_SHIFT =>
-            shift_start_pulse <= '1';
+            shift_start_p <= '1';
             sm <= WAIT_SHIFT;
 
           when WAIT_SHIFT =>
@@ -369,35 +357,37 @@ begin
     end if;
   end process;
 
-  ---------------------------------------------------------------------------
-  -- GNG (init + 1-step)
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
+  -- GNG (reads dataset from mem_c)
+  -----------------------------------------------------------------------------
   u_gng : entity work.gng
     generic map (
-      WORDS      => WORDS_C,
-      MAX_NODES  => 32,
-      LEARN_SHIFT=> 4,
-      MAX_STEPS  => 10000
+      MAX_NODES        => 40,
+      DATA_WORDS       => WORDS_C,
+      DONE_EVERY_STEPS => 10,  -- adjustable
+      LR_SHIFT         => 4,
+      INIT_X0          => 200, INIT_Y0 => 200,
+      INIT_X1          => 800, INIT_Y1 => 800
     )
     port map (
-      clk_i     => clk_i,
-      rstn_i    => rstn_i,
+      clk_i  => clk_i,
+      rstn_i => rstn_i,
+      start_i => gng_start_p,
 
-      init_i    => gng_init_pulse,
-      step_i    => gng_step_pulse,
+      data_raddr_o => c_raddr_gng,
+      data_rdata_i => c_rdata_mem,
 
-      c_raddr_o => c_raddr_gng,
-      c_rdata_i => c_rdata,
+      gng_done_o => gng_done_p,
+      gng_busy_o => gng_busy,
 
-      done_o    => gng_done,
-      busy_o    => gng_busy,
-      term_o    => gng_term
+      s1_id_o => open,
+      s2_id_o => open
     );
 
-  ---------------------------------------------------------------------------
-  -- SHIFT word32 in BRAM_C
-  ---------------------------------------------------------------------------
-  u_shift32 : entity work.bram_shift_word32_xy
+  -----------------------------------------------------------------------------
+  -- SHIFT word32 (update mem_c in-place)
+  -----------------------------------------------------------------------------
+  u_shift : entity work.bram_shift_word32_xy16
     generic map (
       WORDS   => WORDS_C,
       STEP_X  => 10,
@@ -406,24 +396,24 @@ begin
       LIMIT_Y => 0
     )
     port map (
-      clk_i         => clk_i,
-      rstn_i        => rstn_i,
-      shift_start_i => shift_start_pulse,
+      clk_i   => clk_i,
+      rstn_i  => rstn_i,
+      start_i => shift_start_p,
 
-      c_raddr_o     => c_raddr_shift,
-      c_rdata_i     => c_rdata,
+      c_raddr_o => c_raddr_shift,
+      c_rdata_i => c_rdata_mem,
 
-      c_we_o        => c_we_shift,
-      c_waddr_o     => c_waddr_shift,
-      c_wdata_o     => c_wdata_shift,
+      c_we_o    => c_we_shift,
+      c_waddr_o => c_waddr_shift,
+      c_wdata_o => c_wdata_shift,
 
-      shift_done_o  => shift_done,
-      shifting_o    => shifting
+      done_o => shift_done,
+      busy_o => shifting
     );
 
-  ---------------------------------------------------------------------------
-  -- SEND word32 (C -> UART)
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
+  -- SEND32 (mem_c -> UART packet)
+  -----------------------------------------------------------------------------
   u_send32 : entity work.bram_send_word32_sumchk
     generic map (
       WORDS     => WORDS_C,
@@ -438,7 +428,7 @@ begin
       pause_i      => pause_send,
 
       c_raddr_o    => c_raddr_send,
-      c_rdata_i    => c_rdata,
+      c_rdata_i    => c_rdata_mem,
 
       tx_busy_i    => tx_busy,
       tx_done_i    => tx_done,
@@ -449,9 +439,9 @@ begin
       busy_o       => sending
     );
 
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   -- UART TX
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
   u_tx : entity work.uart_tx
     generic map (
       CLOCK_FREQUENCY => CLOCK_FREQUENCY,
@@ -469,17 +459,17 @@ begin
 
   uart_txd_o <= std_ulogic(txd);
 
-  ---------------------------------------------------------------------------
-  -- LEDs active-low
-  -- 0=sending, 1=copying, 2=locked, 3=full_seen, 4=shifting, 5=data_ready
-  ---------------------------------------------------------------------------
+  -----------------------------------------------------------------------------
+  -- LEDs active-low (biar gampang debug)
+  -- 0=sending, 1=copying, 2=locked, 3=full_seen, 4=gng_busy, 5=shifting
+  -----------------------------------------------------------------------------
   gpio_o <= (
     0 => std_ulogic(not sending),
     1 => std_ulogic(not copying),
     2 => std_ulogic(not locked),
     3 => std_ulogic(not full_rx_store),
-    4 => std_ulogic(not shifting),
-    5 => std_ulogic(not data_ready_p)
+    4 => std_ulogic(not gng_busy),
+    5 => std_ulogic(not shifting)
   );
 
 end architecture;
