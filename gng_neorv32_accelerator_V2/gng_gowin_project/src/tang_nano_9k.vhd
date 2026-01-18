@@ -365,7 +365,7 @@ begin
       MAX_NODES        => 40,
       DATA_WORDS       => WORDS_C,
       DONE_EVERY_STEPS => 10,  -- adjustable
-      LR_SHIFT         => 4,
+--      LR_SHIFT         => 4,
       INIT_X0          => 200, INIT_Y0 => 200,
       INIT_X1          => 800, INIT_Y1 => 800
     )

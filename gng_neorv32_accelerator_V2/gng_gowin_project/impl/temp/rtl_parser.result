@@ -35,7 +35,7 @@
     "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
     "InstLine" : 363,
     "InstName" : "u_gng",
-    "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd.vhd",
+    "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd",
     "ModuleLine" : 5,
     "ModuleName" : "gng"
    },
