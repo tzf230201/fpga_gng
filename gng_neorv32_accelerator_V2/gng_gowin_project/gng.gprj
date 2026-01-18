@@ -14,9 +14,6 @@
         <File path="src/bram_send_word32_sumchk.vhd" type="file.vhdl" enable="1"/>
         <File path="src/bram_shift.vhd" type="file.vhdl" enable="1"/>
         <File path="src/gng.vhd" type="file.vhdl" enable="1"/>
-        <File path="src/gng.vhd.vhd" type="file.vhdl" enable="0"/>
-        <File path="src/gng_find_winner_and_update_error.vhd" type="file.vhdl" enable="0"/>
-        <File path="src/gng_train_one_step.vhd" type="file.vhdl" enable="0"/>
         <File path="src/gowin_user_flash.vhd" type="file.vhdl" enable="0"/>
         <File path="src/rx_store.vhd" type="file.vhdl" enable="1"/>
         <File path="src/tang_nano_9k.vhd" type="file.vhdl" enable="1"/>

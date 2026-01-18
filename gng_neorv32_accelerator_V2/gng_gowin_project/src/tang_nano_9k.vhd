@@ -71,18 +71,20 @@ architecture rtl of tang_nano_9k is
   signal c_waddr_shift : unsigned(6 downto 0);
   signal c_wdata_shift : std_logic_vector(31 downto 0);
 
-  -- merged write
+  -- merged write (shift wins over copy)
   signal c_we_mem    : std_logic;
   signal c_waddr_mem : unsigned(6 downto 0);
   signal c_wdata_mem : std_logic_vector(31 downto 0);
 
-  -- shared sync read (mux: shift > gng > sender)
-  signal c_raddr_mem  : unsigned(6 downto 0) := (others => '0');
-  signal c_rdata_mem  : std_logic_vector(31 downto 0) := (others => '0');
+  -- read addresses (SEPARATE, no mux)
+  signal c_raddr_send  : unsigned(6 downto 0);
+  signal c_raddr_shift : unsigned(6 downto 0);
+  signal c_raddr_gng   : unsigned(6 downto 0);
 
-  signal c_raddr_send : unsigned(6 downto 0);
-  signal c_raddr_shift: unsigned(6 downto 0);
-  signal c_raddr_gng  : unsigned(6 downto 0);
+  -- read datas (SEPARATE)
+  signal c_rdata_send  : std_logic_vector(31 downto 0) := (others => '0');
+  signal c_rdata_shift : std_logic_vector(31 downto 0) := (others => '0');
+  signal c_rdata_gng   : std_logic_vector(31 downto 0) := (others => '0');
 
   -----------------------------------------------------------------------------
   -- copy flags
@@ -93,8 +95,8 @@ architecture rtl of tang_nano_9k is
   -----------------------------------------------------------------------------
   -- shift flags
   -----------------------------------------------------------------------------
-  signal shifting   : std_logic;
-  signal shift_done : std_logic;
+  signal shifting      : std_logic;
+  signal shift_done    : std_logic;
   signal shift_start_p : std_logic := '0';
 
   -----------------------------------------------------------------------------
@@ -119,8 +121,8 @@ architecture rtl of tang_nano_9k is
   -----------------------------------------------------------------------------
   -- Scheduler
   -----------------------------------------------------------------------------
-  constant SHIFT_EVERY_PKTS : natural := 5;  -- boleh ubah
-  constant GNG_EVERY_PKTS   : natural := 10; -- boleh ubah
+  constant SHIFT_EVERY_PKTS : natural := 5;
+  constant GNG_EVERY_PKTS   : natural := 10;
 
   type sm_t is (WAIT_DATA, RUN_GNG, WAIT_GNG, STREAMING, DO_SHIFT, WAIT_SHIFT);
   signal sm : sm_t := WAIT_DATA;
@@ -130,7 +132,6 @@ architecture rtl of tang_nano_9k is
 
   signal pause_send : std_logic;
 
-  -- helper
   signal sm_busy : std_logic;
 
 begin
@@ -184,14 +185,8 @@ begin
   c_wdata_mem <= c_wdata_shift when (c_we_shift = '1') else c_wdata_copy;
 
   -----------------------------------------------------------------------------
-  -- BRAM_C read addr mux (shift > gng > sender)
-  -----------------------------------------------------------------------------
-  c_raddr_mem <= c_raddr_shift when (shifting = '1') else
-                 c_raddr_gng   when (gng_busy = '1') else
-                 c_raddr_send;
-
-  -----------------------------------------------------------------------------
-  -- BRAM_C (sync write + sync read)
+  -- BRAM_C (sync write + MULTI sync read)
+  -- NOTE: ini yang bikin sender tidak ke-block oleh gng.
   -----------------------------------------------------------------------------
   process(clk_i)
   begin
@@ -199,7 +194,11 @@ begin
       if c_we_mem = '1' then
         mem_c(to_integer(c_waddr_mem)) <= c_wdata_mem;
       end if;
-      c_rdata_mem <= mem_c(to_integer(c_raddr_mem));
+
+      -- 3 read taps (untuk WORDS_C kecil, ini aman untuk synth)
+      c_rdata_send  <= mem_c(to_integer(c_raddr_send));
+      c_rdata_gng   <= mem_c(to_integer(c_raddr_gng));
+      c_rdata_shift <= mem_c(to_integer(c_raddr_shift));
     end if;
   end process;
 
@@ -231,7 +230,7 @@ begin
       rstn_i       => rstn_i,
       rx_valid_i   => rx_valid,
       rx_data_i    => rx_data,
-      hold_i       => copying, -- stop write while copying
+      hold_i       => copying,
       clear_i      => '0',
       full_o       => full_p,
 
@@ -282,15 +281,14 @@ begin
   end process;
 
   -----------------------------------------------------------------------------
-  -- PAUSE sender during copy/gng/shift/scheduler
+  -- PAUSE sender: HANYA saat ada WRITE besar ke mem_c
+  -- (copying/shift). GNG TIDAK mem-pause sender lagi.
   -----------------------------------------------------------------------------
-  sm_busy   <= '1' when ((sm = RUN_GNG) or (sm = WAIT_GNG) or (sm = DO_SHIFT) or (sm = WAIT_SHIFT)) else '0';
-  pause_send <= copying or gng_busy or shifting or sm_busy;
+  sm_busy    <= '1' when ((sm = RUN_GNG) or (sm = WAIT_GNG) or (sm = DO_SHIFT) or (sm = WAIT_SHIFT)) else '0';
+  pause_send <= copying or shifting;  -- <<<<<< INI FIX UTAMA
 
   -----------------------------------------------------------------------------
-  -- Scheduler:
-  -- 1) after data_ready -> run gng once
-  -- 2) then stream, every N packet run shift
+  -- Scheduler (tetap kamu pakai)
   -----------------------------------------------------------------------------
   process(clk_i)
   begin
@@ -314,7 +312,7 @@ begin
             end if;
 
           when RUN_GNG =>
-            gng_start_p <= '1'; -- 1-cycle
+            gng_start_p <= '1';
             sm <= WAIT_GNG;
 
           when WAIT_GNG =>
@@ -324,7 +322,6 @@ begin
 
           when STREAMING =>
             if send_done_p = '1' then
-              -- count for shift
               if pkt_cnt_shift = to_unsigned(SHIFT_EVERY_PKTS-1, pkt_cnt_shift'length) then
                 pkt_cnt_shift <= (others => '0');
                 sm <= DO_SHIFT;
@@ -332,10 +329,9 @@ begin
                 pkt_cnt_shift <= pkt_cnt_shift + 1;
               end if;
 
-              -- (optional) trigger gng periodically too
               if pkt_cnt_gng = to_unsigned(GNG_EVERY_PKTS-1, pkt_cnt_gng'length) then
                 pkt_cnt_gng <= (others => '0');
-                sm <= RUN_GNG; -- will run gng again
+                sm <= RUN_GNG;
               else
                 pkt_cnt_gng <= pkt_cnt_gng + 1;
               end if;
@@ -364,8 +360,7 @@ begin
     generic map (
       MAX_NODES        => 40,
       DATA_WORDS       => WORDS_C,
-      DONE_EVERY_STEPS => 10,  -- adjustable
---      LR_SHIFT         => 4,
+      DONE_EVERY_STEPS => 10,
       INIT_X0          => 200, INIT_Y0 => 200,
       INIT_X1          => 800, INIT_Y1 => 800
     )
@@ -375,7 +370,7 @@ begin
       start_i => gng_start_p,
 
       data_raddr_o => c_raddr_gng,
-      data_rdata_i => c_rdata_mem,
+      data_rdata_i => c_rdata_gng,
 
       gng_done_o => gng_done_p,
       gng_busy_o => gng_busy,
@@ -401,7 +396,7 @@ begin
       start_i => shift_start_p,
 
       c_raddr_o => c_raddr_shift,
-      c_rdata_i => c_rdata_mem,
+      c_rdata_i => c_rdata_shift,
 
       c_we_o    => c_we_shift,
       c_waddr_o => c_waddr_shift,
@@ -428,7 +423,7 @@ begin
       pause_i      => pause_send,
 
       c_raddr_o    => c_raddr_send,
-      c_rdata_i    => c_rdata_mem,
+      c_rdata_i    => c_rdata_send,
 
       tx_busy_i    => tx_busy,
       tx_done_i    => tx_done,
@@ -460,8 +455,7 @@ begin
   uart_txd_o <= std_ulogic(txd);
 
   -----------------------------------------------------------------------------
-  -- LEDs active-low (biar gampang debug)
-  -- 0=sending, 1=copying, 2=locked, 3=full_seen, 4=gng_busy, 5=shifting
+  -- LEDs active-low (balik ke mapping kamu)
   -----------------------------------------------------------------------------
   gpio_o <= (
     0 => std_ulogic(not sending),

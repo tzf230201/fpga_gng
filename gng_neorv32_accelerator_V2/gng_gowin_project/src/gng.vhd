@@ -4,31 +4,41 @@ use ieee.numeric_std.all;
 
 entity gng is
   generic (
-    MAX_NODES        : natural := 40;  -- <= 64 (karena neighbor id 6-bit)
+    MAX_NODES        : natural := 40;  -- <= 64
     MAX_DEG          : natural := 6;
     A_MAX            : natural := 50;
-    DATA_WORDS       : natural := 100; -- jumlah word32 dataset
-    DONE_EVERY_STEPS : natural := 10;
 
+    DATA_WORDS       : natural := 100; -- dataset size (word32)
+    DONE_EVERY_STEPS : natural := 10;  -- pulse gng_done tiap N step
+
+    LAMBDA_STEPS     : natural := 50;  -- INSERT setiap 50 step
+    ALPHA_SHIFT      : natural := 1;   -- q,f error *= 1/2^ALPHA_SHIFT saat insert
+
+    -- Fritzke global error decay: E <- E - (E >> BETA_SHIFT)
+    -- beta ~= 1 - 2^-BETA_SHIFT (BETA_SHIFT=8 => ~0.996)
+    BETA_SHIFT       : natural := 8;
+
+    -- init nodes (x,y) integer
     INIT_X0          : integer := 200;
     INIT_Y0          : integer := 200;
     INIT_X1          : integer := 800;
     INIT_Y1          : integer := 800;
 
-    LEARN_SHIFT      : natural := 4;   -- eps_b = 1/16
-    NB_LEARN_SHIFT   : natural := 6    -- eps_n = 1/64 (lebih kecil)
+    -- learning rates = 1/2^shift
+    LEARN_SHIFT      : natural := 4;   -- winner update
+    NB_LEARN_SHIFT   : natural := 6    -- neighbor update
   );
   port (
     clk_i  : in  std_logic;
     rstn_i : in  std_logic;
 
-    start_i : in  std_logic; -- pulse untuk mulai batch step
+    start_i : in  std_logic;
 
-    -- dataset word32 sync read 1-cycle (dari mem_c top)
-    data_raddr_o : out unsigned(6 downto 0); -- 0..127
+    -- dataset word32, sync read 1-cycle
+    data_raddr_o : out unsigned(6 downto 0);
     data_rdata_i : in  std_logic_vector(31 downto 0);
 
-    gng_done_o : out std_logic; -- 1-cycle pulse tiap DONE_EVERY_STEPS step
+    gng_done_o : out std_logic;
     gng_busy_o : out std_logic;
 
     s1_id_o : out unsigned(5 downto 0);
@@ -48,9 +58,12 @@ architecture rtl of gng is
 
   function sat16(v : integer) return integer is
   begin
-    if v > 32767 then return 32767;
-    elsif v < -32768 then return -32768;
-    else return v;
+    if v > 32767 then
+      return 32767;
+    elsif v < -32768 then
+      return -32768;
+    else
+      return v;
     end if;
   end function;
 
@@ -66,12 +79,18 @@ architecture rtl of gng is
   end function;
 
   constant EDGE_DEPTH : natural := MAX_NODES * MAX_DEG;
-  constant EDGE_AW    : natural := clog2(EDGE_DEPTH); -- e.g. 240 -> 8
+  constant EDGE_AW    : natural := clog2(EDGE_DEPTH);
+
+  function edge_addr(node_id : unsigned(5 downto 0); slot : integer) return unsigned is
+    variable base : integer;
+  begin
+    base := to_integer(node_id) * integer(MAX_DEG);
+    return to_unsigned(base + slot, EDGE_AW);
+  end function;
 
   -- ============================================================
   -- BRAM-style memories
   -- ============================================================
-
   -- node_mem[i] : [31:16]=y(s16), [15:0]=x(s16)
   type node_mem_t is array (0 to MAX_NODES-1) of std_logic_vector(31 downto 0);
   signal node_mem : node_mem_t := (others => (others => '0'));
@@ -90,7 +109,7 @@ architecture rtl of gng is
   signal err_waddr : unsigned(5 downto 0) := (others => '0');
   signal err_wdata : std_logic_vector(31 downto 0) := (others => '0');
 
-  -- edge_mem[ node*MAX_DEG + slot ] : 16-bit
+  -- edge_mem slot: 16-bit
   -- [15]=valid, [14:7]=age(8), [6:1]=nb_id(6), [0]=0
   type edge_mem_t is array (0 to EDGE_DEPTH-1) of std_logic_vector(15 downto 0);
   signal edge_mem : edge_mem_t := (others => (others => '0'));
@@ -99,6 +118,11 @@ architecture rtl of gng is
   signal edge_we    : std_logic := '0';
   signal edge_waddr : unsigned(EDGE_AW-1 downto 0) := (others => '0');
   signal edge_wdata : std_logic_vector(15 downto 0) := (others => '0');
+
+  attribute ram_style : string;
+  attribute ram_style of node_mem : signal is "block";
+  attribute ram_style of err_mem  : signal is "block";
+  attribute ram_style of edge_mem : signal is "block";
 
   function edge_valid(w : std_logic_vector(15 downto 0)) return std_logic is
   begin
@@ -143,55 +167,98 @@ architecture rtl of gng is
     return r;
   end function;
 
+  constant ZERO31 : unsigned(30 downto 0) := (others => '0');
+  constant SLOT_NONE : integer := 255;
+
   -- ============================================================
   -- FSM
   -- ============================================================
   type st_t is (
     ST_IDLE,
 
-    ST_INIT_NODES_SET, ST_INIT_NODES_WAIT,
-    ST_INIT_EDGES_SET, ST_INIT_EDGES_WAIT,
+    -- init nodes + clear edges
+    ST_INIT_N_SET, ST_INIT_N_WAIT,
+    ST_INIT_E_SET, ST_INIT_E_WAIT,
 
-    ST_SET_DATA, ST_WAIT_DATA, ST_LATCH_DATA,
+    -- read dataset word32
+    ST_DATA_SET, ST_DATA_WAIT, ST_DATA_LATCH,
 
+    -- find winners (s1,s2)
     ST_FIND_SET, ST_FIND_WAIT, ST_FIND_EVAL,
 
+    -- age/prune edges of s1
     ST_AGE_SET, ST_AGE_WAIT, ST_AGE_LATCH,
-    ST_RM_SCAN_SET, ST_RM_SCAN_WAIT, ST_RM_SCAN_LATCH,
 
+    -- remove reciprocal edge in rm_nb
+    ST_RM_SET, ST_RM_WAIT, ST_RM_LATCH,
+
+    -- connect s1<->s2
     ST_CONN_S1_SET, ST_CONN_S1_WAIT, ST_CONN_S1_LATCH,
     ST_CONN_S2_SET, ST_CONN_S2_WAIT, ST_CONN_S2_LATCH,
-    ST_CONN_WRITE1, ST_CONN_WRITE2,
+    ST_CONN_W1, ST_CONN_W2,
 
+    -- update s1 node + error
     ST_UPD_S1_SET, ST_UPD_S1_WAIT, ST_UPD_S1_LATCH,
-    ST_UPD_S1_WR,
 
-    -- NEW: neighbor update
+    -- update neighbors of s1
     ST_NB_EDGE_SET, ST_NB_EDGE_WAIT, ST_NB_EDGE_LATCH,
-    ST_NB_NODE_SET, ST_NB_NODE_WAIT, ST_NB_NODE_LATCH,
+    ST_NB_NODE_WAIT, ST_NB_NODE_LATCH,
     ST_NB_NODE_WR,
 
-    ST_STEP_NEXT,
+    -- check isolated s1
+    ST_ISO_S1_SET, ST_ISO_S1_WAIT, ST_ISO_S1_LATCH,
+
+    -- common disable+clear edges
+    ST_DISABLE_ERR,
+    ST_DISABLE_CLR,
+
+    -- maybe insert
+    ST_MAY_INSERT,
+
+    -- INSERT pipeline (lambda)
+    ST_INS_Q_SET, ST_INS_Q_WAIT, ST_INS_Q_EVAL,
+    ST_INS_F_EDGE_SET, ST_INS_F_EDGE_WAIT, ST_INS_F_EDGE_LATCH,
+    ST_INS_F_ERR_WAIT,  ST_INS_F_ERR_LATCH,
+    ST_INS_FREE_SET, ST_INS_FREE_WAIT, ST_INS_FREE_EVAL,
+    ST_INS_RDQ_SET, ST_INS_RDQ_WAIT, ST_INS_RDQ_LATCH,
+    ST_INS_RDF_SET, ST_INS_RDF_WAIT, ST_INS_RDF_LATCH,
+    ST_INS_WR_R,
+    ST_INS_WR_QERR,
+    ST_INS_WR_FERR,
+    ST_INS_WR_QEDGE,
+    ST_INS_FIND_FQ_SET, ST_INS_FIND_FQ_WAIT, ST_INS_FIND_FQ_LATCH,
+    ST_INS_WR_FEDGE,
+    ST_INS_WR_REDGE0,
+    ST_INS_WR_REDGE1,
+
+    -- Fritzke error decay for all nodes
+    ST_EDEC_SET, ST_EDEC_WAIT, ST_EDEC_LATCH,
+
+    -- next / done
+    ST_NEXT,
     ST_DONE
   );
   signal st : st_t := ST_IDLE;
+  signal ret_st : st_t := ST_IDLE;
 
   -- start pulse
   signal start_d : std_logic := '0';
   signal start_p : std_logic := '0';
 
-  -- init sweep counters
-  signal init_i      : unsigned(5 downto 0) := (others => '0'); -- node index
+  -- init counters
+  signal inited      : std_logic := '0';
+  signal init_i      : unsigned(5 downto 0) := (others => '0');
   signal init_edge_i : unsigned(EDGE_AW-1 downto 0) := (others => '0');
-
-  signal inited : std_logic := '0';
 
   -- dataset
   signal sample_idx : unsigned(6 downto 0) := (others => '0');
   signal sx_i, sy_i : integer := 0;
 
-  -- batch step counter
+  -- batch step counter for done pulse
   signal steps_left : integer := 0;
+
+  -- lambda counter (mod LAMBDA_STEPS)
+  signal lambda_cnt : integer range 0 to integer(LAMBDA_STEPS-1) := 0;
 
   -- find winners
   signal node_idx : unsigned(5 downto 0) := (others => '0');
@@ -200,10 +267,15 @@ architecture rtl of gng is
   signal s1_id    : unsigned(5 downto 0) := (others => '0');
   signal s2_id    : unsigned(5 downto 0) := (others => '0');
 
-  -- edge scan/aging/connect
-  signal k_slot : integer range 0 to 255 := 0;
-  signal rm_k   : integer range 0 to 255 := 0;
-  signal rm_nb  : unsigned(5 downto 0) := (others => '0');
+  -- loops
+  signal k_slot    : integer range 0 to 255 := 0;
+  signal rm_k      : integer range 0 to 255 := 0;
+  signal nb_slot   : integer range 0 to 255 := 0;
+  signal iso_slot  : integer range 0 to 255 := 0;
+
+  signal rm_nb : unsigned(5 downto 0) := (others => '0');
+  signal rm_has_edge : std_logic := '0';
+  signal iso_has_edge : std_logic := '0';
 
   -- connect bookkeeping
   signal c_found1 : std_logic := '0';
@@ -213,9 +285,36 @@ architecture rtl of gng is
   signal c_empty1 : integer range 0 to 255 := 0;
   signal c_empty2 : integer range 0 to 255 := 0;
 
-  -- NEW: neighbor update slot counter
-  signal nb_slot : integer range 0 to 255 := 0;
-  signal nb_id   : unsigned(5 downto 0) := (others => '0');
+  -- neighbor temp
+  signal nb_id : unsigned(5 downto 0) := (others => '0');
+
+  -- disable target
+  signal dis_id   : unsigned(5 downto 0) := (others => '0');
+  signal dis_slot : integer range 0 to 255 := 0;
+
+  -- INSERT temp
+  signal ins_scan_id : unsigned(5 downto 0) := (others => '0');
+
+  signal q_id    : unsigned(5 downto 0) := (others => '0');
+  signal f_id    : unsigned(5 downto 0) := (others => '0');
+  signal r_id    : unsigned(5 downto 0) := (others => '0');
+
+  signal q_err_max : unsigned(30 downto 0) := (others => '0');
+  signal f_err_max : unsigned(30 downto 0) := (others => '0');
+
+  signal f_slot_q : integer range 0 to 255 := 0; -- slot in q that points to f
+  signal f_found  : std_logic := '0';
+
+  signal free_found : std_logic := '0';
+
+  signal qx_i, qy_i : integer := 0;
+  signal fx_i, fy_i : integer := 0;
+
+  signal fq_slot_f : integer range 0 to 255 := 0; -- slot in f that points to q
+  signal fq_found  : std_logic := '0';
+
+  -- error decay scan id
+  signal edec_id : unsigned(5 downto 0) := (others => '0');
 
   signal done_pulse : std_logic := '0';
 
@@ -242,7 +341,7 @@ begin
   end process;
 
   -- ============================================================
-  -- RAMs: sync write + sync read
+  -- RAMs sync write + sync read
   -- ============================================================
   process(clk_i)
   begin
@@ -273,23 +372,29 @@ begin
     variable dx, dy : integer;
     variable dist   : integer;
 
-    variable nword  : std_logic_vector(31 downto 0);
-    variable eword  : std_logic_vector(31 downto 0);
-
     variable ew     : std_logic_vector(15 downto 0);
     variable vld    : std_logic;
     variable age    : unsigned(7 downto 0);
     variable nb     : unsigned(5 downto 0);
-
-    variable base_s1 : integer;
-    variable base_s2 : integer;
 
     variable err_u : unsigned(30 downto 0);
     variable err_n : unsigned(30 downto 0);
 
     variable upd   : integer;
 
-    constant SLOT_NONE : integer := 255;
+    variable rm_has_edge_now  : std_logic;
+    variable iso_has_edge_now : std_logic;
+
+    variable qx, qy, fx, fy : integer;
+    variable rx, ry : integer;
+
+    variable old_q_err : unsigned(30 downto 0);
+    variable new_q_err : unsigned(30 downto 0);
+    variable new_f_err : unsigned(30 downto 0);
+
+    variable found_slot_local : std_logic;
+
+    variable dec_tmp : unsigned(30 downto 0);
   begin
     if rising_edge(clk_i) then
       done_pulse <= '0';
@@ -300,14 +405,16 @@ begin
 
       if rstn_i = '0' then
         st <= ST_IDLE;
+
         inited <= '0';
         init_i <= (others => '0');
         init_edge_i <= (others => '0');
 
         sample_idx <= (others => '0');
         sx_i <= 0; sy_i <= 0;
-
         steps_left <= 0;
+
+        lambda_cnt <= 0;
 
         node_idx <= (others => '0');
         best1 <= 2147483647;
@@ -315,85 +422,121 @@ begin
         s1_id <= (others => '0');
         s2_id <= (others => '0');
 
-        k_slot <= 0; rm_k <= 0;
+        k_slot <= 0;
+        rm_k <= 0;
         rm_nb <= (others => '0');
+        rm_has_edge <= '0';
 
         nb_slot <= 0;
         nb_id <= (others => '0');
 
+        iso_slot <= 0;
+        iso_has_edge <= '0';
+
+        dis_id <= (others => '0');
+        dis_slot <= 0;
+        ret_st <= ST_IDLE;
+
+        c_found1 <= '0'; c_found2 <= '0';
+        c_empty1 <= SLOT_NONE; c_empty2 <= SLOT_NONE;
+        c_slot1  <= SLOT_NONE; c_slot2  <= SLOT_NONE;
+
+        -- insert
+        ins_scan_id <= (others => '0');
+        q_id <= (others => '0');
+        f_id <= (others => '0');
+        r_id <= (others => '0');
+        q_err_max <= (others => '0');
+        f_err_max <= (others => '0');
+        f_slot_q <= 0;
+        f_found <= '0';
+        free_found <= '0';
+        qx_i <= 0; qy_i <= 0;
+        fx_i <= 0; fy_i <= 0;
+        fq_slot_f <= 0;
+        fq_found <= '0';
+
+        edec_id <= (others => '0');
+
       else
         case st is
 
+          -- ======================================================
+          -- IDLE / START
+          -- ======================================================
           when ST_IDLE =>
             if start_p = '1' then
               steps_left <= integer(DONE_EVERY_STEPS);
 
               if inited = '0' then
                 init_i <= (others => '0');
-                st <= ST_INIT_NODES_SET;
+                st <= ST_INIT_N_SET;
               else
-                st <= ST_SET_DATA;
+                st <= ST_DATA_SET;
               end if;
             end if;
 
           -- ======================================================
-          -- INIT (multi-cycle, BRAM style)
+          -- INIT NODES
           -- ======================================================
-          when ST_INIT_NODES_SET =>
-            -- write node_mem & err_mem for node init_i
+          when ST_INIT_N_SET =>
             node_waddr <= init_i;
             err_waddr  <= init_i;
 
             if init_i = to_unsigned(0, 6) then
               node_wdata <= std_logic_vector(to_signed(INIT_Y0,16)) & std_logic_vector(to_signed(INIT_X0,16));
-              err_wdata  <= pack_err('1', (others => '0'));
+              err_wdata  <= pack_err('1', ZERO31);
             elsif init_i = to_unsigned(1, 6) then
               node_wdata <= std_logic_vector(to_signed(INIT_Y1,16)) & std_logic_vector(to_signed(INIT_X1,16));
-              err_wdata  <= pack_err('1', (others => '0'));
+              err_wdata  <= pack_err('1', ZERO31);
             else
               node_wdata <= (others => '0');
-              err_wdata  <= pack_err('0', (others => '0'));
+              err_wdata  <= pack_err('0', ZERO31);
             end if;
 
             node_we <= '1';
             err_we  <= '1';
-            st <= ST_INIT_NODES_WAIT;
+            st <= ST_INIT_N_WAIT;
 
-          when ST_INIT_NODES_WAIT =>
+          when ST_INIT_N_WAIT =>
             if init_i = to_unsigned(MAX_NODES-1, 6) then
               init_edge_i <= (others => '0');
-              st <= ST_INIT_EDGES_SET;
+              st <= ST_INIT_E_SET;
             else
               init_i <= init_i + 1;
-              st <= ST_INIT_NODES_SET;
+              st <= ST_INIT_N_SET;
             end if;
 
-          when ST_INIT_EDGES_SET =>
+          -- ======================================================
+          -- INIT EDGES (clear all)
+          -- ======================================================
+          when ST_INIT_E_SET =>
             edge_waddr <= init_edge_i;
             edge_wdata <= make_edge('0', (others => '0'), (others => '0'));
             edge_we <= '1';
-            st <= ST_INIT_EDGES_WAIT;
+            st <= ST_INIT_E_WAIT;
 
-          when ST_INIT_EDGES_WAIT =>
+          when ST_INIT_E_WAIT =>
             if init_edge_i = to_unsigned(EDGE_DEPTH-1, EDGE_AW) then
               inited <= '1';
               sample_idx <= (others => '0');
-              st <= ST_SET_DATA;
+              lambda_cnt <= 0;
+              st <= ST_DATA_SET;
             else
               init_edge_i <= init_edge_i + 1;
-              st <= ST_INIT_EDGES_SET;
+              st <= ST_INIT_E_SET;
             end if;
 
           -- ======================================================
-          -- READ dataset word32 (sync 1-cycle from top)
+          -- READ dataset word32 (sync)
           -- ======================================================
-          when ST_SET_DATA =>
-            st <= ST_WAIT_DATA;
+          when ST_DATA_SET =>
+            st <= ST_DATA_WAIT;
 
-          when ST_WAIT_DATA =>
-            st <= ST_LATCH_DATA;
+          when ST_DATA_WAIT =>
+            st <= ST_DATA_LATCH;
 
-          when ST_LATCH_DATA =>
+          when ST_DATA_LATCH =>
             xi := to_integer(signed(data_rdata_i(15 downto 0)));
             yi := to_integer(signed(data_rdata_i(31 downto 16)));
             sx_i <= xi;
@@ -408,7 +551,7 @@ begin
             st <= ST_FIND_SET;
 
           -- ======================================================
-          -- FIND WINNERS (scan 1 node per 3 cycles)
+          -- FIND WINNERS
           -- ======================================================
           when ST_FIND_SET =>
             node_raddr <= node_idx;
@@ -424,7 +567,7 @@ begin
               wy := to_integer(signed(node_rdata(31 downto 16)));
               dx := sx_i - wx;
               dy := sy_i - wy;
-              dist := abs_i(dx) + abs_i(dy); -- L1 (hemat LUT)
+              dist := abs_i(dx) + abs_i(dy);
 
               if dist < best1 then
                 best2 <= best1;
@@ -448,11 +591,10 @@ begin
             end if;
 
           -- ======================================================
-          -- EDGE AGING for edges from s1
+          -- EDGE AGING / PRUNE for s1
           -- ======================================================
           when ST_AGE_SET =>
-            base_s1 := to_integer(s1_id) * integer(MAX_DEG);
-            edge_raddr <= to_unsigned(base_s1 + k_slot, EDGE_AW);
+            edge_raddr <= edge_addr(s1_id, k_slot);
             st <= ST_AGE_WAIT;
 
           when ST_AGE_WAIT =>
@@ -465,31 +607,26 @@ begin
             nb  := edge_nb(ew);
 
             if vld = '1' then
-              -- age++
               if age /= to_unsigned(255, 8) then
                 age := age + 1;
               end if;
 
               if to_integer(age) > integer(A_MAX) then
-                -- remove from s1
-                base_s1 := to_integer(s1_id) * integer(MAX_DEG);
-                edge_waddr <= to_unsigned(base_s1 + k_slot, EDGE_AW);
+                edge_waddr <= edge_addr(s1_id, k_slot);
                 edge_wdata <= make_edge('0', (others => '0'), (others => '0'));
                 edge_we <= '1';
 
-                -- remove reciprocal in neighbor nb
                 rm_nb <= nb;
                 rm_k  <= 0;
-                st <= ST_RM_SCAN_SET;
+                rm_has_edge <= '0';
+                st <= ST_RM_SET;
+
               else
-                -- write back aged
-                base_s1 := to_integer(s1_id) * integer(MAX_DEG);
-                edge_waddr <= to_unsigned(base_s1 + k_slot, EDGE_AW);
+                edge_waddr <= edge_addr(s1_id, k_slot);
                 edge_wdata <= make_edge('1', age, nb);
                 edge_we <= '1';
 
                 if k_slot = integer(MAX_DEG-1) then
-                  -- go connect
                   c_found1 <= '0'; c_found2 <= '0';
                   c_empty1 <= SLOT_NONE; c_empty2 <= SLOT_NONE;
                   c_slot1  <= SLOT_NONE; c_slot2  <= SLOT_NONE;
@@ -514,50 +651,63 @@ begin
               end if;
             end if;
 
-          -- remove reciprocal: scan neighbor slots (rm_nb)
-          when ST_RM_SCAN_SET =>
-            base_s2 := to_integer(rm_nb) * integer(MAX_DEG);
-            edge_raddr <= to_unsigned(base_s2 + rm_k, EDGE_AW);
-            st <= ST_RM_SCAN_WAIT;
+          -- ======================================================
+          -- REMOVE reciprocal in rm_nb, disable if isolated
+          -- ======================================================
+          when ST_RM_SET =>
+            edge_raddr <= edge_addr(rm_nb, rm_k);
+            st <= ST_RM_WAIT;
 
-          when ST_RM_SCAN_WAIT =>
-            st <= ST_RM_SCAN_LATCH;
+          when ST_RM_WAIT =>
+            st <= ST_RM_LATCH;
 
-          when ST_RM_SCAN_LATCH =>
+          when ST_RM_LATCH =>
             ew  := edge_rdata;
             vld := edge_valid(ew);
             nb  := edge_nb(ew);
 
-            if vld = '1' and nb = s1_id then
-              base_s2 := to_integer(rm_nb) * integer(MAX_DEG);
-              edge_waddr <= to_unsigned(base_s2 + rm_k, EDGE_AW);
+            rm_has_edge_now := rm_has_edge;
+
+            if (vld = '1') and (nb /= s1_id) then
+              rm_has_edge_now := '1';
+            end if;
+
+            if (vld = '1') and (nb = s1_id) then
+              edge_waddr <= edge_addr(rm_nb, rm_k);
               edge_wdata <= make_edge('0', (others => '0'), (others => '0'));
               edge_we <= '1';
             end if;
 
+            rm_has_edge <= rm_has_edge_now;
+
             if rm_k = integer(MAX_DEG-1) then
-              -- resume aging next slot
-              if k_slot = integer(MAX_DEG-1) then
-                c_found1 <= '0'; c_found2 <= '0';
-                c_empty1 <= SLOT_NONE; c_empty2 <= SLOT_NONE;
-                c_slot1  <= SLOT_NONE; c_slot2  <= SLOT_NONE;
-                k_slot   <= 0;
-                st <= ST_CONN_S1_SET;
+              if rm_has_edge_now = '0' then
+                dis_id   <= rm_nb;
+                dis_slot <= 0;
+                ret_st   <= ST_AGE_SET;
+                st <= ST_DISABLE_ERR;
               else
-                k_slot <= k_slot + 1;
-                st <= ST_AGE_SET;
+                if k_slot = integer(MAX_DEG-1) then
+                  c_found1 <= '0'; c_found2 <= '0';
+                  c_empty1 <= SLOT_NONE; c_empty2 <= SLOT_NONE;
+                  c_slot1  <= SLOT_NONE; c_slot2  <= SLOT_NONE;
+                  k_slot   <= 0;
+                  st <= ST_CONN_S1_SET;
+                else
+                  k_slot <= k_slot + 1;
+                  st <= ST_AGE_SET;
+                end if;
               end if;
             else
               rm_k <= rm_k + 1;
-              st <= ST_RM_SCAN_SET;
+              st <= ST_RM_SET;
             end if;
 
           -- ======================================================
-          -- CONNECT s1-s2 (scan BRAM-style)
+          -- CONNECT scan s1
           -- ======================================================
           when ST_CONN_S1_SET =>
-            base_s1 := to_integer(s1_id) * integer(MAX_DEG);
-            edge_raddr <= to_unsigned(base_s1 + k_slot, EDGE_AW);
+            edge_raddr <= edge_addr(s1_id, k_slot);
             st <= ST_CONN_S1_WAIT;
 
           when ST_CONN_S1_WAIT =>
@@ -568,10 +718,10 @@ begin
             vld := edge_valid(ew);
             nb  := edge_nb(ew);
 
-            if vld = '1' and nb = s2_id then
+            if (vld = '1') and (nb = s2_id) then
               c_found1 <= '1';
               c_slot1  <= k_slot;
-            elsif vld = '0' and c_empty1 = SLOT_NONE then
+            elsif (vld = '0') and (c_empty1 = SLOT_NONE) then
               c_empty1 <= k_slot;
             end if;
 
@@ -583,9 +733,11 @@ begin
               st <= ST_CONN_S1_SET;
             end if;
 
+          -- ======================================================
+          -- CONNECT scan s2
+          -- ======================================================
           when ST_CONN_S2_SET =>
-            base_s2 := to_integer(s2_id) * integer(MAX_DEG);
-            edge_raddr <= to_unsigned(base_s2 + k_slot, EDGE_AW);
+            edge_raddr <= edge_addr(s2_id, k_slot);
             st <= ST_CONN_S2_WAIT;
 
           when ST_CONN_S2_WAIT =>
@@ -596,60 +748,46 @@ begin
             vld := edge_valid(ew);
             nb  := edge_nb(ew);
 
-            if vld = '1' and nb = s1_id then
+            if (vld = '1') and (nb = s1_id) then
               c_found2 <= '1';
               c_slot2  <= k_slot;
-            elsif vld = '0' and c_empty2 = SLOT_NONE then
+            elsif (vld = '0') and (c_empty2 = SLOT_NONE) then
               c_empty2 <= k_slot;
             end if;
 
             if k_slot = integer(MAX_DEG-1) then
-              st <= ST_CONN_WRITE1;
+              st <= ST_CONN_W1;
             else
               k_slot <= k_slot + 1;
               st <= ST_CONN_S2_SET;
             end if;
 
-          -- write/reset age in two cycles (two entries)
-          when ST_CONN_WRITE1 =>
-            base_s1 := to_integer(s1_id) * integer(MAX_DEG);
-            base_s2 := to_integer(s2_id) * integer(MAX_DEG);
-
+          when ST_CONN_W1 =>
             if c_found1 = '1' then
-              edge_waddr <= to_unsigned(base_s1 + c_slot1, EDGE_AW);
+              edge_waddr <= edge_addr(s1_id, c_slot1);
               edge_wdata <= make_edge('1', (others => '0'), s2_id);
               edge_we <= '1';
             elsif (c_empty1 /= SLOT_NONE) and (c_empty2 /= SLOT_NONE) then
-              edge_waddr <= to_unsigned(base_s1 + c_empty1, EDGE_AW);
+              edge_waddr <= edge_addr(s1_id, c_empty1);
               edge_wdata <= make_edge('1', (others => '0'), s2_id);
               edge_we <= '1';
-            else
-              null;
             end if;
+            st <= ST_CONN_W2;
 
-            st <= ST_CONN_WRITE2;
-
-          when ST_CONN_WRITE2 =>
-            base_s1 := to_integer(s1_id) * integer(MAX_DEG);
-            base_s2 := to_integer(s2_id) * integer(MAX_DEG);
-
+          when ST_CONN_W2 =>
             if c_found2 = '1' then
-              edge_waddr <= to_unsigned(base_s2 + c_slot2, EDGE_AW);
+              edge_waddr <= edge_addr(s2_id, c_slot2);
               edge_wdata <= make_edge('1', (others => '0'), s1_id);
               edge_we <= '1';
             elsif (c_empty1 /= SLOT_NONE) and (c_empty2 /= SLOT_NONE) then
-              edge_waddr <= to_unsigned(base_s2 + c_empty2, EDGE_AW);
+              edge_waddr <= edge_addr(s2_id, c_empty2);
               edge_wdata <= make_edge('1', (others => '0'), s1_id);
               edge_we <= '1';
-            else
-              null;
             end if;
-
-            -- proceed update s1
             st <= ST_UPD_S1_SET;
 
           -- ======================================================
-          -- UPDATE s1 node + error
+          -- UPDATE S1 node + error
           -- ======================================================
           when ST_UPD_S1_SET =>
             node_raddr <= s1_id;
@@ -676,7 +814,7 @@ begin
             node_wdata <= std_logic_vector(to_signed(wy,16)) & std_logic_vector(to_signed(wx,16));
             node_we <= '1';
 
-            -- error += best1 (L1)
+            -- accumulate error s1
             err_u := get_err(err_rdata);
             if (err_u + to_unsigned(best1, 31)) > to_unsigned(2**31-1, 31) then
               err_n := (others => '1');
@@ -688,24 +826,19 @@ begin
             err_wdata <= pack_err('1', err_n);
             err_we <= '1';
 
-            -- NEW: neighbor update start
             nb_slot <= 0;
             st <= ST_NB_EDGE_SET;
 
-          when ST_UPD_S1_WR =>
-            st <= ST_NB_EDGE_SET;
-
           -- ======================================================
-          -- NEW: UPDATE NEIGHBORS of s1
-          -- Scan slot 0..MAX_DEG-1:
-          -- if valid -> read neighbor node -> update toward (sx,sy) using NB_LEARN_SHIFT
+          -- UPDATE NEIGHBORS of s1
           -- ======================================================
           when ST_NB_EDGE_SET =>
             if nb_slot >= integer(MAX_DEG) then
-              st <= ST_STEP_NEXT;
+              iso_slot <= 0;
+              iso_has_edge <= '0';
+              st <= ST_ISO_S1_SET;
             else
-              base_s1 := to_integer(s1_id) * integer(MAX_DEG);
-              edge_raddr <= to_unsigned(base_s1 + nb_slot, EDGE_AW);
+              edge_raddr <= edge_addr(s1_id, nb_slot);
               st <= ST_NB_EDGE_WAIT;
             end if;
 
@@ -719,7 +852,7 @@ begin
 
             if vld = '1' then
               nb_id <= nb;
-              node_raddr <= nb;  -- read neighbor node
+              node_raddr <= nb;
               st <= ST_NB_NODE_WAIT;
             else
               nb_slot <= nb_slot + 1;
@@ -730,7 +863,6 @@ begin
             st <= ST_NB_NODE_LATCH;
 
           when ST_NB_NODE_LATCH =>
-            -- update neighbor node position
             wx := to_integer(signed(node_rdata(15 downto 0)));
             wy := to_integer(signed(node_rdata(31 downto 16)));
 
@@ -754,9 +886,385 @@ begin
             st <= ST_NB_EDGE_SET;
 
           -- ======================================================
+          -- CHECK ISOLATED S1
+          -- ======================================================
+          when ST_ISO_S1_SET =>
+            edge_raddr <= edge_addr(s1_id, iso_slot);
+            st <= ST_ISO_S1_WAIT;
+
+          when ST_ISO_S1_WAIT =>
+            st <= ST_ISO_S1_LATCH;
+
+          when ST_ISO_S1_LATCH =>
+            ew  := edge_rdata;
+            vld := edge_valid(ew);
+
+            iso_has_edge_now := iso_has_edge;
+            if vld = '1' then
+              iso_has_edge_now := '1';
+            end if;
+            iso_has_edge <= iso_has_edge_now;
+
+            if iso_slot = integer(MAX_DEG-1) then
+              if iso_has_edge_now = '0' then
+                dis_id   <= s1_id;
+                dis_slot <= 0;
+                ret_st   <= ST_MAY_INSERT;
+                st <= ST_DISABLE_ERR;
+              else
+                st <= ST_MAY_INSERT;
+              end if;
+            else
+              iso_slot <= iso_slot + 1;
+              st <= ST_ISO_S1_SET;
+            end if;
+
+          -- ======================================================
+          -- COMMON DISABLE + CLEAR
+          -- ======================================================
+          when ST_DISABLE_ERR =>
+            err_waddr <= dis_id;
+            err_wdata <= pack_err('0', ZERO31);
+            err_we <= '1';
+            dis_slot <= 0;
+            st <= ST_DISABLE_CLR;
+
+          when ST_DISABLE_CLR =>
+            edge_waddr <= edge_addr(dis_id, dis_slot);
+            edge_wdata <= make_edge('0', (others => '0'), (others => '0'));
+            edge_we <= '1';
+
+            if dis_slot = integer(MAX_DEG-1) then
+              st <= ret_st;
+            else
+              dis_slot <= dis_slot + 1;
+              st <= ST_DISABLE_CLR;
+            end if;
+
+          -- ======================================================
+          -- MAY INSERT (lambda)
+          -- ======================================================
+          when ST_MAY_INSERT =>
+            if lambda_cnt = integer(LAMBDA_STEPS-1) then
+              lambda_cnt <= 0;
+              ins_scan_id <= (others => '0');
+              q_err_max <= (others => '0');
+              q_id <= (others => '0');
+              st <= ST_INS_Q_SET;
+            else
+              lambda_cnt <= lambda_cnt + 1;
+              edec_id <= (others => '0');
+              st <= ST_EDEC_SET; -- always go to error decay per step
+            end if;
+
+          -- ======================================================
+          -- INSERT: find q (max error among active)
+          -- ======================================================
+          when ST_INS_Q_SET =>
+            err_raddr <= ins_scan_id;
+            st <= ST_INS_Q_WAIT;
+
+          when ST_INS_Q_WAIT =>
+            st <= ST_INS_Q_EVAL;
+
+          when ST_INS_Q_EVAL =>
+            if is_active(err_rdata) then
+              err_u := get_err(err_rdata);
+              if err_u > q_err_max then
+                q_err_max <= err_u;
+                q_id <= ins_scan_id;
+              end if;
+            end if;
+
+            if ins_scan_id = to_unsigned(MAX_NODES-1, 6) then
+              k_slot <= 0;
+              f_err_max <= (others => '0');
+              f_id <= (others => '0');
+              f_slot_q <= 0;
+              f_found <= '0';
+              st <= ST_INS_F_EDGE_SET;
+            else
+              ins_scan_id <= ins_scan_id + 1;
+              st <= ST_INS_Q_SET;
+            end if;
+
+          -- ======================================================
+          -- INSERT: scan edges of q to pick f with max error
+          -- ======================================================
+          when ST_INS_F_EDGE_SET =>
+            edge_raddr <= edge_addr(q_id, k_slot);
+            st <= ST_INS_F_EDGE_WAIT;
+
+          when ST_INS_F_EDGE_WAIT =>
+            st <= ST_INS_F_EDGE_LATCH;
+
+          when ST_INS_F_EDGE_LATCH =>
+            ew  := edge_rdata;
+            vld := edge_valid(ew);
+            nb  := edge_nb(ew);
+
+            if vld = '1' then
+              nb_id <= nb;
+              err_raddr <= nb;
+              st <= ST_INS_F_ERR_WAIT;
+            else
+              if k_slot = integer(MAX_DEG-1) then
+                if f_found = '0' then
+                  edec_id <= (others => '0');
+                  st <= ST_EDEC_SET; -- skip insert, still decay
+                else
+                  ins_scan_id <= (others => '0');
+                  free_found <= '0';
+                  st <= ST_INS_FREE_SET;
+                end if;
+              else
+                k_slot <= k_slot + 1;
+                st <= ST_INS_F_EDGE_SET;
+              end if;
+            end if;
+
+          when ST_INS_F_ERR_WAIT =>
+            st <= ST_INS_F_ERR_LATCH;
+
+          when ST_INS_F_ERR_LATCH =>
+            if is_active(err_rdata) then
+              err_u := get_err(err_rdata);
+              if (f_found = '0') or (err_u > f_err_max) then
+                f_found  <= '1';
+                f_err_max <= err_u;
+                f_id <= nb_id;
+                f_slot_q <= k_slot;
+              end if;
+            end if;
+
+            if k_slot = integer(MAX_DEG-1) then
+              if f_found = '0' then
+                edec_id <= (others => '0');
+                st <= ST_EDEC_SET;
+              else
+                ins_scan_id <= (others => '0');
+                free_found <= '0';
+                st <= ST_INS_FREE_SET;
+              end if;
+            else
+              k_slot <= k_slot + 1;
+              st <= ST_INS_F_EDGE_SET;
+            end if;
+
+          -- ======================================================
+          -- INSERT: find free inactive node r (if none -> stop insert)
+          -- ======================================================
+          when ST_INS_FREE_SET =>
+            err_raddr <= ins_scan_id;
+            st <= ST_INS_FREE_WAIT;
+
+          when ST_INS_FREE_WAIT =>
+            st <= ST_INS_FREE_EVAL;
+
+          when ST_INS_FREE_EVAL =>
+            if (not is_active(err_rdata)) and (free_found = '0') then
+              free_found <= '1';
+              r_id <= ins_scan_id;
+            end if;
+
+            if ins_scan_id = to_unsigned(MAX_NODES-1, 6) then
+              if free_found = '0' then
+                edec_id <= (others => '0');
+                st <= ST_EDEC_SET; -- full, stop insert, still decay
+              else
+                node_raddr <= q_id;
+                st <= ST_INS_RDQ_WAIT;
+              end if;
+            else
+              ins_scan_id <= ins_scan_id + 1;
+              st <= ST_INS_FREE_SET;
+            end if;
+
+          -- ======================================================
+          -- INSERT: read q node
+          -- ======================================================
+          when ST_INS_RDQ_SET =>
+            node_raddr <= q_id;
+            st <= ST_INS_RDQ_WAIT;
+
+          when ST_INS_RDQ_WAIT =>
+            st <= ST_INS_RDQ_LATCH;
+
+          when ST_INS_RDQ_LATCH =>
+            qx_i <= to_integer(signed(node_rdata(15 downto 0)));
+            qy_i <= to_integer(signed(node_rdata(31 downto 16)));
+            node_raddr <= f_id;
+            st <= ST_INS_RDF_WAIT;
+
+          -- ======================================================
+          -- INSERT: read f node
+          -- ======================================================
+          when ST_INS_RDF_SET =>
+            node_raddr <= f_id;
+            st <= ST_INS_RDF_WAIT;
+
+          when ST_INS_RDF_WAIT =>
+            st <= ST_INS_RDF_LATCH;
+
+          when ST_INS_RDF_LATCH =>
+            fx_i <= to_integer(signed(node_rdata(15 downto 0)));
+            fy_i <= to_integer(signed(node_rdata(31 downto 16)));
+            st <= ST_INS_WR_R;
+
+          -- ======================================================
+          -- INSERT: write r node + err(r)
+          -- FIX HERE: err(r) must equal reduced(q_err) (after ALPHA)
+          -- ======================================================
+          when ST_INS_WR_R =>
+            qx := qx_i; qy := qy_i;
+            fx := fx_i; fy := fy_i;
+
+            rx := sat16((qx + fx) / 2);
+            ry := sat16((qy + fy) / 2);
+
+            -- compute reduced q error (alpha)
+            if ALPHA_SHIFT = 0 then
+              new_q_err := q_err_max;
+            else
+              new_q_err := shift_right(q_err_max, integer(ALPHA_SHIFT));
+            end if;
+
+            node_waddr <= r_id;
+            node_wdata <= std_logic_vector(to_signed(ry,16)) & std_logic_vector(to_signed(rx,16));
+            node_we <= '1';
+
+            -- Fritzke: E_r = E_q(after alpha)
+            err_waddr <= r_id;
+            err_wdata <= pack_err('1', new_q_err);
+            err_we <= '1';
+
+            st <= ST_INS_WR_QERR;
+
+          when ST_INS_WR_QERR =>
+            old_q_err := q_err_max;
+            if ALPHA_SHIFT = 0 then
+              new_q_err := old_q_err;
+            else
+              new_q_err := shift_right(old_q_err, integer(ALPHA_SHIFT));
+            end if;
+
+            err_waddr <= q_id;
+            err_wdata <= pack_err('1', new_q_err);
+            err_we <= '1';
+
+            st <= ST_INS_WR_FERR;
+
+          when ST_INS_WR_FERR =>
+            if ALPHA_SHIFT = 0 then
+              new_f_err := f_err_max;
+            else
+              new_f_err := shift_right(f_err_max, integer(ALPHA_SHIFT));
+            end if;
+
+            err_waddr <= f_id;
+            err_wdata <= pack_err('1', new_f_err);
+            err_we <= '1';
+
+            st <= ST_INS_WR_QEDGE;
+
+          when ST_INS_WR_QEDGE =>
+            edge_waddr <= edge_addr(q_id, f_slot_q);
+            edge_wdata <= make_edge('1', (others => '0'), r_id);
+            edge_we <= '1';
+
+            k_slot <= 0;
+            fq_found <= '0';
+            fq_slot_f <= 0;
+            st <= ST_INS_FIND_FQ_SET;
+
+          when ST_INS_FIND_FQ_SET =>
+            edge_raddr <= edge_addr(f_id, k_slot);
+            st <= ST_INS_FIND_FQ_WAIT;
+
+          when ST_INS_FIND_FQ_WAIT =>
+            st <= ST_INS_FIND_FQ_LATCH;
+
+          when ST_INS_FIND_FQ_LATCH =>
+            ew  := edge_rdata;
+            vld := edge_valid(ew);
+            nb  := edge_nb(ew);
+
+            found_slot_local := fq_found;
+
+            if (vld = '1') and (nb = q_id) and (found_slot_local = '0') then
+              fq_found <= '1';
+              fq_slot_f <= k_slot;
+            end if;
+
+            if k_slot = integer(MAX_DEG-1) then
+              if fq_found = '0' then
+                edec_id <= (others => '0');
+                st <= ST_EDEC_SET;
+              else
+                st <= ST_INS_WR_FEDGE;
+              end if;
+            else
+              k_slot <= k_slot + 1;
+              st <= ST_INS_FIND_FQ_SET;
+            end if;
+
+          when ST_INS_WR_FEDGE =>
+            edge_waddr <= edge_addr(f_id, fq_slot_f);
+            edge_wdata <= make_edge('1', (others => '0'), r_id);
+            edge_we <= '1';
+
+            st <= ST_INS_WR_REDGE0;
+
+          when ST_INS_WR_REDGE0 =>
+            edge_waddr <= edge_addr(r_id, 0);
+            edge_wdata <= make_edge('1', (others => '0'), q_id);
+            edge_we <= '1';
+            st <= ST_INS_WR_REDGE1;
+
+          when ST_INS_WR_REDGE1 =>
+            edge_waddr <= edge_addr(r_id, 1);
+            edge_wdata <= make_edge('1', (others => '0'), f_id);
+            edge_we <= '1';
+
+            edec_id <= (others => '0');
+            st <= ST_EDEC_SET; -- after insert, do global decay
+
+          -- ======================================================
+          -- FRITZKE GLOBAL ERROR DECAY (per step)
+          -- ======================================================
+          when ST_EDEC_SET =>
+            err_raddr <= edec_id;
+            st <= ST_EDEC_WAIT;
+
+          when ST_EDEC_WAIT =>
+            st <= ST_EDEC_LATCH;
+
+          when ST_EDEC_LATCH =>
+            if is_active(err_rdata) then
+              err_u := get_err(err_rdata);
+
+              if BETA_SHIFT = 0 then
+                dec_tmp := err_u;
+              else
+                dec_tmp := err_u - shift_right(err_u, integer(BETA_SHIFT));
+              end if;
+
+              err_waddr <= edec_id;
+              err_wdata <= pack_err('1', dec_tmp);
+              err_we <= '1';
+            end if;
+
+            if edec_id = to_unsigned(MAX_NODES-1, 6) then
+              st <= ST_NEXT;
+            else
+              edec_id <= edec_id + 1;
+              st <= ST_EDEC_SET;
+            end if;
+
+          -- ======================================================
           -- NEXT STEP
           -- ======================================================
-          when ST_STEP_NEXT =>
+          when ST_NEXT =>
             if sample_idx = to_unsigned(DATA_WORDS-1, sample_idx'length) then
               sample_idx <= (others => '0');
             else
@@ -767,7 +1275,7 @@ begin
               st <= ST_DONE;
             else
               steps_left <= steps_left - 1;
-              st <= ST_SET_DATA;
+              st <= ST_DATA_SET;
             end if;
 
           when ST_DONE =>
