@@ -18,29 +18,52 @@ entity tang_nano_9k is
 end entity;
 
 architecture rtl of tang_nano_9k is
+  ---------------------------------------------------------------------------
+  -- Dataset BRAM C settings
+  ---------------------------------------------------------------------------
   constant DEPTH_BYTES : natural := 400;
   constant WORDS_C     : natural := DEPTH_BYTES/4; -- 100
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
+  -- GNG dump sizing (HARUS sama dengan generic yang kamu pakai)
+  ---------------------------------------------------------------------------
+  constant GNG_MAX_NODES : natural := 40;
+  constant GNG_MAX_DEG   : natural := 6;
+
+  function clog2(n : natural) return natural is
+    variable r : natural := 0;
+    variable v : natural := 1;
+  begin
+    while v < n loop
+      v := v * 2;
+      r := r + 1;
+    end loop;
+    return r;
+  end function;
+
+  constant EDGE_DEPTH : natural := GNG_MAX_NODES * GNG_MAX_DEG; -- 240
+  constant EDGE_AW    : natural := clog2(EDGE_DEPTH);          -- 8 utk 240
+
+  ---------------------------------------------------------------------------
   -- UART RX
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   signal rx_data  : std_logic_vector(7 downto 0);
   signal rx_valid : std_logic;
   signal rx_busy  : std_logic;
   signal rx_err   : std_logic;
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- UART TX
-  -----------------------------------------------------------------------------
-  signal tx_start : std_logic;
-  signal tx_data  : std_logic_vector(7 downto 0);
+  ---------------------------------------------------------------------------
+  signal tx_start : std_logic := '0';
+  signal tx_data  : std_logic_vector(7 downto 0) := (others => '0');
   signal tx_busy  : std_logic;
   signal tx_done  : std_logic;
   signal txd      : std_logic;
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- BRAM_A (RX store 8-bit)
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   type mem_a_t is array (0 to DEPTH_BYTES-1) of std_logic_vector(7 downto 0);
   signal mem_a : mem_a_t;
 
@@ -48,16 +71,16 @@ architecture rtl of tang_nano_9k is
   signal a_waddr : unsigned(8 downto 0);
   signal a_wdata : std_logic_vector(7 downto 0);
 
-  signal a_raddr : unsigned(8 downto 0);
+  signal a_raddr : unsigned(8 downto 0) := (others => '0');
   signal a_rdata : std_logic_vector(7 downto 0);
 
   signal full_p     : std_logic;
   signal locked     : std_logic;
   signal full_p_dly : std_logic := '0';
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- BRAM_C (word32)
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   type mem_c_t is array (0 to WORDS_C-1) of std_logic_vector(31 downto 0);
   signal mem_c : mem_c_t;
 
@@ -76,51 +99,49 @@ architecture rtl of tang_nano_9k is
   signal c_waddr_mem : unsigned(6 downto 0);
   signal c_wdata_mem : std_logic_vector(31 downto 0);
 
-  -- read addresses (SEPARATE, no mux)
-  signal c_raddr_send  : unsigned(6 downto 0);
-  signal c_raddr_shift : unsigned(6 downto 0);
-  signal c_raddr_gng   : unsigned(6 downto 0);
+  -- read addresses (SEPARATE)
+  signal c_raddr_shift : unsigned(6 downto 0) := (others => '0');
+  signal c_raddr_gng   : unsigned(6 downto 0) := (others => '0');
 
   -- read datas (SEPARATE)
-  signal c_rdata_send  : std_logic_vector(31 downto 0) := (others => '0');
   signal c_rdata_shift : std_logic_vector(31 downto 0) := (others => '0');
   signal c_rdata_gng   : std_logic_vector(31 downto 0) := (others => '0');
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- copy flags
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   signal copying   : std_logic;
   signal copy_done : std_logic;
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- shift flags
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   signal shifting      : std_logic;
   signal shift_done    : std_logic;
   signal shift_start_p : std_logic := '0';
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- send flags
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   signal sending     : std_logic;
   signal send_done_p : std_logic;
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- GNG flags
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   signal gng_start_p : std_logic := '0';
   signal gng_done_p  : std_logic;
   signal gng_busy    : std_logic;
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- debug latches
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   signal full_rx_store : std_logic := '0';
   signal data_ready_p  : std_logic := '0';
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- Scheduler
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   constant SHIFT_EVERY_PKTS : natural := 5;
   constant GNG_EVERY_PKTS   : natural := 10;
 
@@ -131,14 +152,24 @@ architecture rtl of tang_nano_9k is
   signal pkt_cnt_gng   : unsigned(7 downto 0) := (others => '0');
 
   signal pause_send : std_logic;
+  signal sm_busy    : std_logic;
 
-  signal sm_busy : std_logic;
+  ---------------------------------------------------------------------------
+  -- GNG dump read taps
+  ---------------------------------------------------------------------------
+  signal dump_node_raddr : unsigned(5 downto 0) := (others => '0');
+  signal dump_node_rdata : std_logic_vector(31 downto 0);
+  signal dump_err_raddr  : unsigned(5 downto 0) := (others => '0');
+  signal dump_err_rdata  : std_logic_vector(31 downto 0);
+signal dump_edge_raddr : unsigned(8 downto 0);
+
+  signal dump_edge_rdata : std_logic_vector(15 downto 0);
 
 begin
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- Debug latch: remember full
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -150,9 +181,9 @@ begin
     end if;
   end process;
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- full_p delayed 1 cycle
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -164,9 +195,9 @@ begin
     end if;
   end process;
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- BRAM_A (sync write + sync read)
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -177,17 +208,16 @@ begin
     end if;
   end process;
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- BRAM_C write mux (shift wins over copy)
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   c_we_mem    <= c_we_shift or c_we_copy;
   c_waddr_mem <= c_waddr_shift when (c_we_shift = '1') else c_waddr_copy;
   c_wdata_mem <= c_wdata_shift when (c_we_shift = '1') else c_wdata_copy;
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- BRAM_C (sync write + MULTI sync read)
-  -- NOTE: ini yang bikin sender tidak ke-block oleh gng.
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -195,16 +225,15 @@ begin
         mem_c(to_integer(c_waddr_mem)) <= c_wdata_mem;
       end if;
 
-      -- 3 read taps (untuk WORDS_C kecil, ini aman untuk synth)
-      c_rdata_send  <= mem_c(to_integer(c_raddr_send));
+      -- 2 read taps (gng + shift)
       c_rdata_gng   <= mem_c(to_integer(c_raddr_gng));
       c_rdata_shift <= mem_c(to_integer(c_raddr_shift));
     end if;
   end process;
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- UART RX
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   u_rx : entity work.uart_rx
     generic map (
       CLOCK_FREQUENCY => CLOCK_FREQUENCY,
@@ -220,9 +249,9 @@ begin
       err_o   => rx_err
     );
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- RX STORE
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   u_store : entity work.rx_store_ext
     generic map ( DEPTH => DEPTH_BYTES )
     port map (
@@ -245,9 +274,9 @@ begin
       locked_o     => locked
     );
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- COPY 8->32 (A -> C)
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   u_copy_8to32 : entity work.bram_copy_8to32
     generic map ( DEPTH_BYTES => DEPTH_BYTES )
     port map (
@@ -266,9 +295,9 @@ begin
       busy_o    => copying
     );
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- data_ready latch
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -280,16 +309,15 @@ begin
     end if;
   end process;
 
-  -----------------------------------------------------------------------------
-  -- PAUSE sender: HANYA saat ada WRITE besar ke mem_c
-  -- (copying/shift). GNG TIDAK mem-pause sender lagi.
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
+  -- PAUSE sender: hanya saat WRITE besar ke mem_c (copy/shift)
+  ---------------------------------------------------------------------------
   sm_busy    <= '1' when ((sm = RUN_GNG) or (sm = WAIT_GNG) or (sm = DO_SHIFT) or (sm = WAIT_SHIFT)) else '0';
-  pause_send <= copying or shifting;  -- <<<<<< INI FIX UTAMA
+  pause_send <= copying or shifting;
 
-  -----------------------------------------------------------------------------
-  -- Scheduler (tetap kamu pakai)
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
+  -- Scheduler
+  ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -353,12 +381,12 @@ begin
     end if;
   end process;
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- GNG (reads dataset from mem_c)
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   u_gng : entity work.gng
     generic map (
-      MAX_NODES        => 40,
+      MAX_NODES        => GNG_MAX_NODES,
       DATA_WORDS       => WORDS_C,
       DONE_EVERY_STEPS => 10,
       INIT_X0          => 200, INIT_Y0 => 200,
@@ -376,12 +404,22 @@ begin
       gng_busy_o => gng_busy,
 
       s1_id_o => open,
-      s2_id_o => open
+      s2_id_o => open,
+
+      -- debug taps (HARUS ADA di entity gng)
+      dbg_node_raddr_i => dump_node_raddr,
+      dbg_node_rdata_o => dump_node_rdata,
+
+      dbg_err_raddr_i  => dump_err_raddr,
+      dbg_err_rdata_o  => dump_err_rdata,
+
+      dbg_edge_raddr_i => dump_edge_raddr,
+      dbg_edge_rdata_o => dump_edge_rdata
     );
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- SHIFT word32 (update mem_c in-place)
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   u_shift : entity work.bram_shift_word32_xy16
     generic map (
       WORDS   => WORDS_C,
@@ -406,24 +444,33 @@ begin
       busy_o => shifting
     );
 
-  -----------------------------------------------------------------------------
-  -- SEND32 (mem_c -> UART packet)
-  -----------------------------------------------------------------------------
-  u_send32 : entity work.bram_send_word32_sumchk
+  ---------------------------------------------------------------------------
+  -- GNG DUMP SENDER (UART)
+  ---------------------------------------------------------------------------
+  u_dump_gng : entity work.gng_dump_state_uart_sumchk
     generic map (
-      WORDS     => WORDS_C,
+      MAX_NODES => GNG_MAX_NODES,
+      MAX_DEG   => GNG_MAX_DEG,
       CLOCK_HZ  => CLOCK_FREQUENCY,
       STREAM_HZ => 50
     )
     port map (
-      clk_i        => clk_i,
-      rstn_i       => rstn_i,
+      clk_i  => clk_i,
+      rstn_i => rstn_i,
+
       start_i      => '1',
       continuous_i => '1',
       pause_i      => pause_send,
+      step_tick_i  => gng_done_p,
 
-      c_raddr_o    => c_raddr_send,
-      c_rdata_i    => c_rdata_send,
+      node_raddr_o => dump_node_raddr,
+      node_rdata_i => dump_node_rdata,
+
+      err_raddr_o  => dump_err_raddr,
+      err_rdata_i  => dump_err_rdata,
+
+      edge_raddr_o => dump_edge_raddr,
+      edge_rdata_i => dump_edge_rdata,
 
       tx_busy_i    => tx_busy,
       tx_done_i    => tx_done,
@@ -434,9 +481,9 @@ begin
       busy_o       => sending
     );
 
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   -- UART TX
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
   u_tx : entity work.uart_tx
     generic map (
       CLOCK_FREQUENCY => CLOCK_FREQUENCY,
@@ -454,9 +501,9 @@ begin
 
   uart_txd_o <= std_ulogic(txd);
 
-  -----------------------------------------------------------------------------
-  -- LEDs active-low (balik ke mapping kamu)
-  -----------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
+  -- LEDs active-low
+  ---------------------------------------------------------------------------
   gpio_o <= (
     0 => std_ulogic(not sending),
     1 => std_ulogic(not copying),

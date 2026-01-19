@@ -15,7 +15,6 @@ entity gng is
     ALPHA_SHIFT      : natural := 1;   -- q,f error *= 1/2^ALPHA_SHIFT saat insert
 
     -- Fritzke global error decay: E <- E - (E >> BETA_SHIFT)
-    -- beta ~= 1 - 2^-BETA_SHIFT (BETA_SHIFT=8 => ~0.996)
     BETA_SHIFT       : natural := 8;
 
     -- init nodes (x,y) integer
@@ -42,7 +41,17 @@ entity gng is
     gng_busy_o : out std_logic;
 
     s1_id_o : out unsigned(5 downto 0);
-    s2_id_o : out unsigned(5 downto 0)
+    s2_id_o : out unsigned(5 downto 0);
+
+    -- debug read taps (sync 1-cycle)
+    dbg_node_raddr_i : in  unsigned(5 downto 0);
+    dbg_node_rdata_o : out std_logic_vector(31 downto 0);
+
+    dbg_err_raddr_i  : in  unsigned(5 downto 0);
+    dbg_err_rdata_o  : out std_logic_vector(31 downto 0);
+
+    dbg_edge_raddr_i : in  unsigned(8 downto 0);
+    dbg_edge_rdata_o : out std_logic_vector(15 downto 0)
   );
 end entity;
 
@@ -78,97 +87,117 @@ architecture rtl of gng is
     return r;
   end function;
 
+  -- ============================================================
+  -- constants / subtypes (FIX Gowin EX4762)
+  -- ============================================================
   constant EDGE_DEPTH : natural := MAX_NODES * MAX_DEG;
-  constant EDGE_AW    : natural := clog2(EDGE_DEPTH);
+  constant EDGE_AW    : natural := clog2(EDGE_DEPTH); -- 240 -> 8
 
-  function edge_addr(node_id : unsigned(5 downto 0); slot : integer) return unsigned is
+  subtype u8_t       is unsigned(7 downto 0);
+  subtype u6_t       is unsigned(5 downto 0);
+  subtype u31_t      is unsigned(30 downto 0);
+  subtype slv16_t    is std_logic_vector(15 downto 0);
+  subtype slv32_t    is std_logic_vector(31 downto 0);
+  subtype edge_addr_t is unsigned(EDGE_AW-1 downto 0);
+
+  constant ZERO31    : u31_t := (others => '0');
+  constant U31_MAX   : u31_t := (others => '1');
+  constant SLOT_NONE : integer := 255;
+
+  -- ============================================================
+  -- edge address + packing helpers
+  -- ============================================================
+  function edge_addr(node_id : u6_t; slot : integer) return edge_addr_t is
     variable base : integer;
   begin
     base := to_integer(node_id) * integer(MAX_DEG);
     return to_unsigned(base + slot, EDGE_AW);
   end function;
 
-  -- ============================================================
-  -- BRAM-style memories
-  -- ============================================================
-  -- node_mem[i] : [31:16]=y(s16), [15:0]=x(s16)
-  type node_mem_t is array (0 to MAX_NODES-1) of std_logic_vector(31 downto 0);
-  signal node_mem : node_mem_t := (others => (others => '0'));
-  signal node_raddr : unsigned(5 downto 0) := (others => '0');
-  signal node_rdata : std_logic_vector(31 downto 0) := (others => '0');
-  signal node_we    : std_logic := '0';
-  signal node_waddr : unsigned(5 downto 0) := (others => '0');
-  signal node_wdata : std_logic_vector(31 downto 0) := (others => '0');
-
-  -- err_mem[i] : bit31=active, bits30..0=unsigned error
-  type err_mem_t is array (0 to MAX_NODES-1) of std_logic_vector(31 downto 0);
-  signal err_mem : err_mem_t := (others => (others => '0'));
-  signal err_raddr : unsigned(5 downto 0) := (others => '0');
-  signal err_rdata : std_logic_vector(31 downto 0) := (others => '0');
-  signal err_we    : std_logic := '0';
-  signal err_waddr : unsigned(5 downto 0) := (others => '0');
-  signal err_wdata : std_logic_vector(31 downto 0) := (others => '0');
-
-  -- edge_mem slot: 16-bit
-  -- [15]=valid, [14:7]=age(8), [6:1]=nb_id(6), [0]=0
-  type edge_mem_t is array (0 to EDGE_DEPTH-1) of std_logic_vector(15 downto 0);
-  signal edge_mem : edge_mem_t := (others => (others => '0'));
-  signal edge_raddr : unsigned(EDGE_AW-1 downto 0) := (others => '0');
-  signal edge_rdata : std_logic_vector(15 downto 0) := (others => '0');
-  signal edge_we    : std_logic := '0';
-  signal edge_waddr : unsigned(EDGE_AW-1 downto 0) := (others => '0');
-  signal edge_wdata : std_logic_vector(15 downto 0) := (others => '0');
-
-  attribute ram_style : string;
-  attribute ram_style of node_mem : signal is "block";
-  attribute ram_style of err_mem  : signal is "block";
-  attribute ram_style of edge_mem : signal is "block";
-
-  function edge_valid(w : std_logic_vector(15 downto 0)) return std_logic is
+  function edge_valid(w : slv16_t) return std_logic is
   begin
     return w(15);
   end function;
 
-  function edge_age(w : std_logic_vector(15 downto 0)) return unsigned is
+  function edge_age(w : slv16_t) return u8_t is
+    variable a : u8_t;
   begin
-    return unsigned(w(14 downto 7));
+    a := unsigned(w(14 downto 7));
+    return a;
   end function;
 
-  function edge_nb(w : std_logic_vector(15 downto 0)) return unsigned is
+  function edge_nb(w : slv16_t) return u6_t is
+    variable n : u6_t;
   begin
-    return unsigned(w(6 downto 1));
+    n := unsigned(w(6 downto 1));
+    return n;
   end function;
 
-  function make_edge(vld : std_logic; age : unsigned(7 downto 0); nb : unsigned(5 downto 0)) return std_logic_vector is
-    variable r : std_logic_vector(15 downto 0);
+  function make_edge(vld : std_logic; age : u8_t; nb : u6_t) return slv16_t is
+    variable r : slv16_t := (others => '0');
   begin
     r(15) := vld;
     r(14 downto 7) := std_logic_vector(age);
-    r(6 downto 1) := std_logic_vector(nb);
+    r(6 downto 1)  := std_logic_vector(nb);
     r(0) := '0';
     return r;
   end function;
 
-  function is_active(e : std_logic_vector(31 downto 0)) return boolean is
+  function is_active(e : slv32_t) return boolean is
   begin
     return (e(31) = '1');
   end function;
 
-  function get_err(e : std_logic_vector(31 downto 0)) return unsigned is
+  function get_err(e : slv32_t) return u31_t is
+    variable v : u31_t;
   begin
-    return unsigned(e(30 downto 0));
+    v := unsigned(e(30 downto 0));
+    return v;
   end function;
 
-  function pack_err(active : std_logic; val : unsigned(30 downto 0)) return std_logic_vector is
-    variable r : std_logic_vector(31 downto 0);
+  function pack_err(active : std_logic; val : u31_t) return slv32_t is
+    variable r : slv32_t := (others => '0');
   begin
     r(31) := active;
     r(30 downto 0) := std_logic_vector(val);
     return r;
   end function;
 
-  constant ZERO31 : unsigned(30 downto 0) := (others => '0');
-  constant SLOT_NONE : integer := 255;
+  -- ============================================================
+  -- BRAM-style memories
+  -- ============================================================
+  -- node_mem[i] : [31:16]=y(s16), [15:0]=x(s16)
+  type node_mem_t is array (0 to MAX_NODES-1) of slv32_t;
+  signal node_mem  : node_mem_t := (others => (others => '0'));
+  signal node_raddr : u6_t := (others => '0');
+  signal node_rdata : slv32_t := (others => '0');
+  signal node_we    : std_logic := '0';
+  signal node_waddr : u6_t := (others => '0');
+  signal node_wdata : slv32_t := (others => '0');
+
+  -- err_mem[i] : bit31=active, bits30..0=unsigned error
+  type err_mem_t is array (0 to MAX_NODES-1) of slv32_t;
+  signal err_mem   : err_mem_t := (others => (others => '0'));
+  signal err_raddr : u6_t := (others => '0');
+  signal err_rdata : slv32_t := (others => '0');
+  signal err_we    : std_logic := '0';
+  signal err_waddr : u6_t := (others => '0');
+  signal err_wdata : slv32_t := (others => '0');
+
+  -- edge_mem slot: 16-bit
+  -- [15]=valid, [14:7]=age(8), [6:1]=nb_id(6), [0]=0
+  type edge_mem_t is array (0 to EDGE_DEPTH-1) of slv16_t;
+  signal edge_mem   : edge_mem_t := (others => (others => '0'));
+  signal edge_raddr : edge_addr_t := (others => '0');
+  signal edge_rdata : slv16_t := (others => '0');
+  signal edge_we    : std_logic := '0';
+  signal edge_waddr : edge_addr_t := (others => '0');
+  signal edge_wdata : slv16_t := (others => '0');
+
+  attribute ram_style : string;
+  attribute ram_style of node_mem : signal is "block";
+  attribute ram_style of err_mem  : signal is "block";
+  attribute ram_style of edge_mem : signal is "block";
 
   -- ============================================================
   -- FSM
@@ -183,7 +212,7 @@ architecture rtl of gng is
     -- read dataset word32
     ST_DATA_SET, ST_DATA_WAIT, ST_DATA_LATCH,
 
-    -- find winners (s1,s2)
+    -- find winners (s1,s2) - Manhattan distance
     ST_FIND_SET, ST_FIND_WAIT, ST_FIND_EVAL,
 
     -- age/prune edges of s1
@@ -238,7 +267,8 @@ architecture rtl of gng is
     ST_NEXT,
     ST_DONE
   );
-  signal st : st_t := ST_IDLE;
+
+  signal st     : st_t := ST_IDLE;
   signal ret_st : st_t := ST_IDLE;
 
   -- start pulse
@@ -247,8 +277,8 @@ architecture rtl of gng is
 
   -- init counters
   signal inited      : std_logic := '0';
-  signal init_i      : unsigned(5 downto 0) := (others => '0');
-  signal init_edge_i : unsigned(EDGE_AW-1 downto 0) := (others => '0');
+  signal init_i      : u6_t := (others => '0');
+  signal init_edge_i : edge_addr_t := (others => '0');
 
   -- dataset
   signal sample_idx : unsigned(6 downto 0) := (others => '0');
@@ -261,20 +291,20 @@ architecture rtl of gng is
   signal lambda_cnt : integer range 0 to integer(LAMBDA_STEPS-1) := 0;
 
   -- find winners
-  signal node_idx : unsigned(5 downto 0) := (others => '0');
+  signal node_idx : u6_t := (others => '0');
   signal best1    : integer := 2147483647;
   signal best2    : integer := 2147483647;
-  signal s1_id    : unsigned(5 downto 0) := (others => '0');
-  signal s2_id    : unsigned(5 downto 0) := (others => '0');
+  signal s1_id    : u6_t := (others => '0');
+  signal s2_id    : u6_t := (others => '0');
 
-  -- loops
+  -- loops / temps
   signal k_slot    : integer range 0 to 255 := 0;
   signal rm_k      : integer range 0 to 255 := 0;
   signal nb_slot   : integer range 0 to 255 := 0;
   signal iso_slot  : integer range 0 to 255 := 0;
 
-  signal rm_nb : unsigned(5 downto 0) := (others => '0');
-  signal rm_has_edge : std_logic := '0';
+  signal rm_nb        : u6_t := (others => '0');
+  signal rm_has_edge  : std_logic := '0';
   signal iso_has_edge : std_logic := '0';
 
   -- connect bookkeeping
@@ -286,21 +316,21 @@ architecture rtl of gng is
   signal c_empty2 : integer range 0 to 255 := 0;
 
   -- neighbor temp
-  signal nb_id : unsigned(5 downto 0) := (others => '0');
+  signal nb_id : u6_t := (others => '0');
 
   -- disable target
-  signal dis_id   : unsigned(5 downto 0) := (others => '0');
+  signal dis_id   : u6_t := (others => '0');
   signal dis_slot : integer range 0 to 255 := 0;
 
   -- INSERT temp
-  signal ins_scan_id : unsigned(5 downto 0) := (others => '0');
+  signal ins_scan_id : u6_t := (others => '0');
 
-  signal q_id    : unsigned(5 downto 0) := (others => '0');
-  signal f_id    : unsigned(5 downto 0) := (others => '0');
-  signal r_id    : unsigned(5 downto 0) := (others => '0');
+  signal q_id    : u6_t := (others => '0');
+  signal f_id    : u6_t := (others => '0');
+  signal r_id    : u6_t := (others => '0');
 
-  signal q_err_max : unsigned(30 downto 0) := (others => '0');
-  signal f_err_max : unsigned(30 downto 0) := (others => '0');
+  signal q_err_max : u31_t := (others => '0');
+  signal f_err_max : u31_t := (others => '0');
 
   signal f_slot_q : integer range 0 to 255 := 0; -- slot in q that points to f
   signal f_found  : std_logic := '0';
@@ -314,7 +344,7 @@ architecture rtl of gng is
   signal fq_found  : std_logic := '0';
 
   -- error decay scan id
-  signal edec_id : unsigned(5 downto 0) := (others => '0');
+  signal edec_id : u6_t := (others => '0');
 
   signal done_pulse : std_logic := '0';
 
@@ -331,17 +361,18 @@ begin
   process(clk_i)
   begin
     if rising_edge(clk_i) then
-      start_p <= start_i and (not start_d);
-      start_d <= start_i;
       if rstn_i = '0' then
         start_d <= '0';
         start_p <= '0';
+      else
+        start_p <= start_i and (not start_d);
+        start_d <= start_i;
       end if;
     end if;
   end process;
 
   -- ============================================================
-  -- RAMs sync write + sync read
+  -- RAMs sync write + sync read ( + debug taps )
   -- ============================================================
   process(clk_i)
   begin
@@ -360,6 +391,11 @@ begin
         edge_mem(to_integer(edge_waddr)) <= edge_wdata;
       end if;
       edge_rdata <= edge_mem(to_integer(edge_raddr));
+
+      -- debug read taps (slice address)
+      dbg_node_rdata_o <= node_mem(to_integer(dbg_node_raddr_i));
+      dbg_err_rdata_o  <= err_mem(to_integer(dbg_err_raddr_i));
+      dbg_edge_rdata_o <= edge_mem(to_integer(dbg_edge_raddr_i(EDGE_AW-1 downto 0)));
     end if;
   end process;
 
@@ -372,15 +408,16 @@ begin
     variable dx, dy : integer;
     variable dist   : integer;
 
-    variable ew     : std_logic_vector(15 downto 0);
+    variable ew     : slv16_t;
     variable vld    : std_logic;
-    variable age    : unsigned(7 downto 0);
-    variable nb     : unsigned(5 downto 0);
+    variable age    : u8_t;
+    variable nb     : u6_t;
 
-    variable err_u : unsigned(30 downto 0);
-    variable err_n : unsigned(30 downto 0);
+    variable err_u  : u31_t;
+    variable err_n  : u31_t;
+    variable dist_u : u31_t;
 
-    variable upd   : integer;
+    variable upd    : integer;
 
     variable rm_has_edge_now  : std_logic;
     variable iso_has_edge_now : std_logic;
@@ -388,13 +425,13 @@ begin
     variable qx, qy, fx, fy : integer;
     variable rx, ry : integer;
 
-    variable old_q_err : unsigned(30 downto 0);
-    variable new_q_err : unsigned(30 downto 0);
-    variable new_f_err : unsigned(30 downto 0);
+    variable old_q_err : u31_t;
+    variable new_q_err : u31_t;
+    variable new_f_err : u31_t;
 
     variable found_slot_local : std_logic;
 
-    variable dec_tmp : unsigned(30 downto 0);
+    variable dec_tmp : u31_t;
   begin
     if rising_edge(clk_i) then
       done_pulse <= '0';
@@ -406,42 +443,41 @@ begin
       if rstn_i = '0' then
         st <= ST_IDLE;
 
-        inited <= '0';
-        init_i <= (others => '0');
+        inited      <= '0';
+        init_i      <= (others => '0');
         init_edge_i <= (others => '0');
 
-        sample_idx <= (others => '0');
+        sample_idx  <= (others => '0');
         sx_i <= 0; sy_i <= 0;
-        steps_left <= 0;
+        steps_left  <= 0;
 
         lambda_cnt <= 0;
 
         node_idx <= (others => '0');
-        best1 <= 2147483647;
-        best2 <= 2147483647;
-        s1_id <= (others => '0');
-        s2_id <= (others => '0');
+        best1    <= 2147483647;
+        best2    <= 2147483647;
+        s1_id    <= (others => '0');
+        s2_id    <= (others => '0');
 
         k_slot <= 0;
-        rm_k <= 0;
-        rm_nb <= (others => '0');
+        rm_k   <= 0;
+        rm_nb  <= (others => '0');
         rm_has_edge <= '0';
 
         nb_slot <= 0;
-        nb_id <= (others => '0');
+        nb_id   <= (others => '0');
 
         iso_slot <= 0;
         iso_has_edge <= '0';
 
-        dis_id <= (others => '0');
+        dis_id   <= (others => '0');
         dis_slot <= 0;
-        ret_st <= ST_IDLE;
+        ret_st   <= ST_IDLE;
 
         c_found1 <= '0'; c_found2 <= '0';
         c_empty1 <= SLOT_NONE; c_empty2 <= SLOT_NONE;
         c_slot1  <= SLOT_NONE; c_slot2  <= SLOT_NONE;
 
-        -- insert
         ins_scan_id <= (others => '0');
         q_id <= (others => '0');
         f_id <= (others => '0');
@@ -449,12 +485,12 @@ begin
         q_err_max <= (others => '0');
         f_err_max <= (others => '0');
         f_slot_q <= 0;
-        f_found <= '0';
+        f_found  <= '0';
         free_found <= '0';
         qx_i <= 0; qy_i <= 0;
         fx_i <= 0; fy_i <= 0;
         fq_slot_f <= 0;
-        fq_found <= '0';
+        fq_found  <= '0';
 
         edec_id <= (others => '0');
 
@@ -551,7 +587,7 @@ begin
             st <= ST_FIND_SET;
 
           -- ======================================================
-          -- FIND WINNERS
+          -- FIND WINNERS (Manhattan)
           -- ======================================================
           when ST_FIND_SET =>
             node_raddr <= node_idx;
@@ -567,6 +603,7 @@ begin
               wy := to_integer(signed(node_rdata(31 downto 16)));
               dx := sx_i - wx;
               dy := sy_i - wy;
+
               dist := abs_i(dx) + abs_i(dy);
 
               if dist < best1 then
@@ -814,12 +851,14 @@ begin
             node_wdata <= std_logic_vector(to_signed(wy,16)) & std_logic_vector(to_signed(wx,16));
             node_we <= '1';
 
-            -- accumulate error s1
-            err_u := get_err(err_rdata);
-            if (err_u + to_unsigned(best1, 31)) > to_unsigned(2**31-1, 31) then
-              err_n := (others => '1');
+            -- accumulate error s1 (saturate 31-bit)
+            err_u  := get_err(err_rdata);
+            dist_u := to_unsigned(best1, 31);
+
+            if err_u > (U31_MAX - dist_u) then
+              err_n := U31_MAX;
             else
-              err_n := err_u + to_unsigned(best1, 31);
+              err_n := err_u + dist_u;
             end if;
 
             err_waddr <= s1_id;
@@ -954,7 +993,7 @@ begin
             else
               lambda_cnt <= lambda_cnt + 1;
               edec_id <= (others => '0');
-              st <= ST_EDEC_SET; -- always go to error decay per step
+              st <= ST_EDEC_SET;
             end if;
 
           -- ======================================================
@@ -1011,7 +1050,7 @@ begin
               if k_slot = integer(MAX_DEG-1) then
                 if f_found = '0' then
                   edec_id <= (others => '0');
-                  st <= ST_EDEC_SET; -- skip insert, still decay
+                  st <= ST_EDEC_SET;
                 else
                   ins_scan_id <= (others => '0');
                   free_found <= '0';
@@ -1030,22 +1069,17 @@ begin
             if is_active(err_rdata) then
               err_u := get_err(err_rdata);
               if (f_found = '0') or (err_u > f_err_max) then
-                f_found  <= '1';
+                f_found   <= '1';
                 f_err_max <= err_u;
-                f_id <= nb_id;
-                f_slot_q <= k_slot;
+                f_id      <= nb_id;
+                f_slot_q  <= k_slot;
               end if;
             end if;
 
             if k_slot = integer(MAX_DEG-1) then
-              if f_found = '0' then
-                edec_id <= (others => '0');
-                st <= ST_EDEC_SET;
-              else
-                ins_scan_id <= (others => '0');
-                free_found <= '0';
-                st <= ST_INS_FREE_SET;
-              end if;
+              ins_scan_id <= (others => '0');
+              free_found <= '0';
+              st <= ST_INS_FREE_SET;
             else
               k_slot <= k_slot + 1;
               st <= ST_INS_F_EDGE_SET;
@@ -1070,10 +1104,9 @@ begin
             if ins_scan_id = to_unsigned(MAX_NODES-1, 6) then
               if free_found = '0' then
                 edec_id <= (others => '0');
-                st <= ST_EDEC_SET; -- full, stop insert, still decay
+                st <= ST_EDEC_SET;
               else
-                node_raddr <= q_id;
-                st <= ST_INS_RDQ_WAIT;
+                st <= ST_INS_RDQ_SET;
               end if;
             else
               ins_scan_id <= ins_scan_id + 1;
@@ -1093,8 +1126,7 @@ begin
           when ST_INS_RDQ_LATCH =>
             qx_i <= to_integer(signed(node_rdata(15 downto 0)));
             qy_i <= to_integer(signed(node_rdata(31 downto 16)));
-            node_raddr <= f_id;
-            st <= ST_INS_RDF_WAIT;
+            st <= ST_INS_RDF_SET;
 
           -- ======================================================
           -- INSERT: read f node
@@ -1112,8 +1144,7 @@ begin
             st <= ST_INS_WR_R;
 
           -- ======================================================
-          -- INSERT: write r node + err(r)
-          -- FIX HERE: err(r) must equal reduced(q_err) (after ALPHA)
+          -- INSERT: write r node + err(r) = reduced(q_err)
           -- ======================================================
           when ST_INS_WR_R =>
             qx := qx_i; qy := qy_i;
@@ -1122,7 +1153,6 @@ begin
             rx := sat16((qx + fx) / 2);
             ry := sat16((qy + fy) / 2);
 
-            -- compute reduced q error (alpha)
             if ALPHA_SHIFT = 0 then
               new_q_err := q_err_max;
             else
@@ -1133,7 +1163,6 @@ begin
             node_wdata <= std_logic_vector(to_signed(ry,16)) & std_logic_vector(to_signed(rx,16));
             node_we <= '1';
 
-            -- Fritzke: E_r = E_q(after alpha)
             err_waddr <= r_id;
             err_wdata <= pack_err('1', new_q_err);
             err_we <= '1';
@@ -1192,7 +1221,7 @@ begin
             found_slot_local := fq_found;
 
             if (vld = '1') and (nb = q_id) and (found_slot_local = '0') then
-              fq_found <= '1';
+              fq_found  <= '1';
               fq_slot_f <= k_slot;
             end if;
 
@@ -1212,7 +1241,6 @@ begin
             edge_waddr <= edge_addr(f_id, fq_slot_f);
             edge_wdata <= make_edge('1', (others => '0'), r_id);
             edge_we <= '1';
-
             st <= ST_INS_WR_REDGE0;
 
           when ST_INS_WR_REDGE0 =>
@@ -1227,7 +1255,7 @@ begin
             edge_we <= '1';
 
             edec_id <= (others => '0');
-            st <= ST_EDEC_SET; -- after insert, do global decay
+            st <= ST_EDEC_SET;
 
           -- ======================================================
           -- FRITZKE GLOBAL ERROR DECAY (per step)

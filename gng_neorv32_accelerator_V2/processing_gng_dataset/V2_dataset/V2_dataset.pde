@@ -8,7 +8,7 @@ final String PORT_NAME = "COM1";     // <-- GANTI sesuai Serial.list()
 final int    BAUD      = 1_000_000;
 
 // ======================================================
-// Dataset options (SAMA PERSIS seperti yang kamu kirim)
+// Dataset options (SAMA seperti sebelumnya)
 // ======================================================
 final int     MOONS_N            = 100;     // 100 points -> 400 bytes
 final boolean MOONS_RANDOM_ANGLE = false;
@@ -22,6 +22,29 @@ final float SCALE = 1000.0;
 final int BYTES_PER_POINT = 4;
 final int TX_BYTES = MOONS_N * BYTES_PER_POINT; // 400
 byte[] txBuf = new byte[TX_BYTES];
+
+// ======================================================
+// NEW: GNG state packet payload format
+// ======================================================
+final int PKT_TYPE_GNG = 0xA1;
+final int MAX_NODES = 40;
+final int MAX_DEG   = 6;
+
+// payload length we expect from FPGA (recommended)
+final int GNG_MASK_BYTES = 8; // support up to 64 nodes
+final int GNG_PAYLOAD_LEN = 1 + 2 + 1 + 1 + GNG_MASK_BYTES + (MAX_NODES * 4) + (MAX_NODES * MAX_DEG * 2); // 653
+
+// decoded GNG state
+boolean[] gngActive = new boolean[MAX_NODES];
+float[][] gngNodes  = new float[MAX_NODES][2];      // in "float" units (divide SCALE)
+boolean[][] gngEdgeValid = new boolean[MAX_NODES][MAX_DEG];
+int[][] gngEdgeNb   = new int[MAX_NODES][MAX_DEG];
+int[][] gngEdgeAge  = new int[MAX_NODES][MAX_DEG];
+int gngStep = 0;
+int gngNodeN = MAX_NODES;
+int gngDegN  = MAX_DEG;
+
+boolean haveGng = false;
 
 // ======================================================
 // Live packet RX (FF FF LEN(2) SEQ(1) PAYLOAD LEN bytes CHK(1))
@@ -62,10 +85,10 @@ int lastByteMs = 0;
 final int PARSER_TIMEOUT_MS = 120;
 
 // ======================================================
-// Data arrays (REUSE, no new each packet)
+// Data arrays
 // ======================================================
 float[][] moonsTx;
-float[][] moonsRx = new float[MOONS_N][2];
+float[][] moonsRx = new float[MOONS_N][2]; // (optional fallback)
 
 // ======================================================
 // FIXED AXIS range (computed once from TX + margin)
@@ -81,7 +104,7 @@ float panelH = 600;
 
 void setup() {
   size(1400, 780);
-  surface.setTitle("TX -> FPGA -> RX (Two Moons, FIXED AXIS, Y normal)");
+  surface.setTitle("TX -> FPGA -> RX (GNG nodes+edges viewer)");
 
   textFont(createFont("Consolas", 14));
   frameRate(60);
@@ -98,7 +121,6 @@ void setup() {
   buildTwoMoonsAndPack();
 
   // Compute fixed view from TX.
-  // Jika LIMIT shift di FPGA besar (misal 0.8), naikkan marginX.
   computeFixedViewFromTx(0.35, 0.35);
 
   // Open serial
@@ -113,7 +135,7 @@ void setup() {
 void draw() {
   background(18);
 
-  drawPointsPanelsFixedAxis();
+  drawPanels();
   drawDebugBar();
 
   // after sending dataset, wait a bit before parsing stream
@@ -142,7 +164,6 @@ void keyPressed() {
     pktOK=0; pktBad=0; badLen=0; lost=0; lastSeq=-1;
     statusMsg = "stats cleared";
   } else if (key == '+' || key == '=') {
-    // enlarge X margin quickly for big shift tests
     float mx = (viewMaxX - viewMinX) * 0.1;
     viewMinX -= mx; viewMaxX += mx;
     statusMsg = "view marginX increased";
@@ -163,7 +184,7 @@ void sendDatasetOnce() {
   tSendMs = millis();
   ignoreRx = true;
 
-  statusMsg = "TX: sent 400 bytes (dataset). Waiting stream...";
+  statusMsg = "TX: sent 400 bytes (dataset). Waiting GNG stream...";
   myPort.write(txBuf);
 }
 
@@ -261,16 +282,111 @@ void onGoodPacket(int seq, int len) {
   }
   lastSeq = seq;
 
-  // decode only if len == 400
-  if (len != TX_BYTES) {
-    badLen++;
-    verifyMsg = "CHK OK but LEN!=" + TX_BYTES + " (len=" + len + ")";
+  // 1) GNG state packet
+  if (len >= 5 && (payload[0] & 0xFF) == PKT_TYPE_GNG) {
+    if (!decodeGngState(len)) {
+      pktBad++;
+      verifyMsg = "GNG decode failed (len=" + len + ")";
+    } else {
+      int activeCnt = 0;
+      for (int i=0;i<gngNodeN;i++) if (gngActive[i]) activeCnt++;
+
+      int edgeDrawn = countUndirectedEdges();
+
+      verifyMsg = "GNG OK seq=" + seq +
+                  " step=" + gngStep +
+                  " nodes(active)=" + activeCnt + "/" + gngNodeN +
+                  " edges~=" + edgeDrawn +
+                  " ok=" + pktOK +
+                  " bad=" + pktBad +
+                  " lost~=" + lost +
+                  " badLen=" + badLen;
+    }
     return;
   }
 
-  // decode payload -> moonsRx
+  // 2) (optional) old mode: dataset 400 bytes
+  if (len == TX_BYTES) {
+    int p = 0;
+    for (int i = 0; i < MOONS_N; i++) {
+      int xL = payload[p++] & 0xFF;
+      int xH = payload[p++] & 0xFF;
+      int yL = payload[p++] & 0xFF;
+      int yH = payload[p++] & 0xFF;
+
+      int xi = xL | (xH << 8);
+      int yi = yL | (yH << 8);
+
+      if (xi >= 32768) xi -= 65536;
+      if (yi >= 32768) yi -= 65536;
+
+      moonsRx[i][0] = xi / SCALE;
+      moonsRx[i][1] = yi / SCALE;
+    }
+
+    float[] cTx = centroid(moonsTx);
+    float[] cRx = centroid(moonsRx);
+
+    verifyMsg = "DATA OK seq=" + seq +
+                " len=" + len +
+                " ok=" + pktOK +
+                " bad=" + pktBad +
+                " lost~=" + lost +
+                " badLen=" + badLen +
+                "  dC=(" + nf(cRx[0]-cTx[0],1,3) + "," + nf(cRx[1]-cTx[1],1,3) + ")";
+    return;
+  }
+
+  // unknown len
+  badLen++;
+  verifyMsg = "CHK OK but unknown LEN=" + len;
+}
+
+// ======================================================
+// Decode GNG state payload
+// Payload spec:
+// [0] type=0xA1
+// [1..2] step u16 LE
+// [3] nodeN
+// [4] degN
+// [5..12] active mask (8 bytes)
+// [..] nodes (nodeN * 4): x s16 LE, y s16 LE
+// [..] edges (nodeN*degN*2): edge word16 LE (same as edge_mem)
+// ======================================================
+boolean decodeGngState(int len) {
   int p = 0;
-  for (int i = 0; i < MOONS_N; i++) {
+  int type = payload[p++] & 0xFF;
+  if (type != PKT_TYPE_GNG) return false;
+
+  if (p + 4 > len) return false;
+
+  int stepL = payload[p++] & 0xFF;
+  int stepH = payload[p++] & 0xFF;
+  gngStep = stepL | (stepH << 8);
+
+  gngNodeN = payload[p++] & 0xFF;
+  gngDegN  = payload[p++] & 0xFF;
+
+  if (gngNodeN > MAX_NODES) gngNodeN = MAX_NODES;
+  if (gngDegN  > MAX_DEG)   gngDegN  = MAX_DEG;
+
+  if (p + GNG_MASK_BYTES > len) return false;
+
+  int[] mask = new int[GNG_MASK_BYTES];
+  for (int i=0;i<GNG_MASK_BYTES;i++) mask[i] = payload[p++] & 0xFF;
+
+  for (int i=0;i<MAX_NODES;i++) gngActive[i] = false;
+  for (int i=0;i<gngNodeN;i++) {
+    int b = mask[i >> 3];
+    int bit = (b >> (i & 7)) & 1;
+    gngActive[i] = (bit == 1);
+  }
+
+  // nodes
+  int needNodes = gngNodeN * 4;
+  if (p + needNodes > len) return false;
+
+  for (int i=0;i<gngNodeN;i++) {
     int xL = payload[p++] & 0xFF;
     int xH = payload[p++] & 0xFF;
     int yL = payload[p++] & 0xFF;
@@ -282,25 +398,51 @@ void onGoodPacket(int seq, int len) {
     if (xi >= 32768) xi -= 65536;
     if (yi >= 32768) yi -= 65536;
 
-    moonsRx[i][0] = xi / SCALE;
-    moonsRx[i][1] = yi / SCALE;
+    gngNodes[i][0] = xi / SCALE;
+    gngNodes[i][1] = yi / SCALE;
   }
 
-  // centroid delta (helps confirm shift)
-  float[] cTx = centroid(moonsTx);
-  float[] cRx = centroid(moonsRx);
+  // edges
+  int needEdges = gngNodeN * gngDegN * 2;
+  if (p + needEdges > len) return false;
 
-  verifyMsg = "OK seq=" + seq +
-              " len=" + len +
-              " ok=" + pktOK +
-              " bad=" + pktBad +
-              " lost~=" + lost +
-              " badLen=" + badLen +
-              "  dC=(" + nf(cRx[0]-cTx[0],1,3) + "," + nf(cRx[1]-cTx[1],1,3) + ")";
+  for (int i=0;i<gngNodeN;i++) {
+    for (int k=0;k<gngDegN;k++) {
+      int wL = payload[p++] & 0xFF;
+      int wH = payload[p++] & 0xFF;
+      int w  = wL | (wH << 8);
+
+      boolean vld = ((w >> 15) & 1) == 1;
+      int age = (w >> 7) & 0xFF;
+      int nb  = (w >> 1) & 0x3F;
+
+      gngEdgeValid[i][k] = vld;
+      gngEdgeAge[i][k]   = age;
+      gngEdgeNb[i][k]    = nb;
+    }
+  }
+
+  haveGng = true;
+  return true;
+}
+
+int countUndirectedEdges() {
+  int c = 0;
+  for (int i=0;i<gngNodeN;i++) {
+    if (!gngActive[i]) continue;
+    for (int k=0;k<gngDegN;k++) {
+      if (!gngEdgeValid[i][k]) continue;
+      int nb = gngEdgeNb[i][k];
+      if (nb < 0 || nb >= gngNodeN) continue;
+      if (!gngActive[nb]) continue;
+      if (i < nb) c++; // avoid duplicates
+    }
+  }
+  return c;
 }
 
 // ======================================================
-// Build dataset + pack 400 bytes (SAMA PERSIS DENGAN KODE KAMU)
+// Build dataset + pack 400 bytes
 // ======================================================
 void buildTwoMoonsAndPack() {
   moonsTx = generateMoons(
@@ -343,19 +485,28 @@ void computeFixedViewFromTx(float marginX, float marginY) {
 }
 
 // ======================================================
-// Drawing (FIXED AXIS, Y normal / tidak dibalik)
+// Drawing panels
 // ======================================================
-void drawPointsPanelsFixedAxis() {
+void drawPanels() {
   float leftX  = 60;
   float rightX = 740;
 
   fill(230);
   text("TX DATASET (static)", leftX, 55);
-  drawScatterFixed(moonsTx, leftX, panelY, panelW, panelH);
+  drawScatterFixed(moonsTx, leftX, panelY, panelW, panelH, 255, 5);
 
   fill(230);
-  text("RX FROM FPGA", rightX, 55);
-  drawScatterFixed(moonsRx, rightX, panelY, panelW, panelH);
+  text("FPGA: GNG nodes + edges (overlay on dataset)", rightX, 55);
+
+  // draw dataset faint as background reference
+  drawScatterFixed(moonsTx, rightX, panelY, panelW, panelH, 120, 4);
+
+  if (haveGng) {
+    drawGngOverlay(rightX, panelY, panelW, panelH);
+  } else {
+    fill(180);
+    text("waiting GNG_STATE packet (type 0xA1)...", rightX + 20, panelY + 30);
+  }
 
   // border
   noFill();
@@ -364,32 +515,84 @@ void drawPointsPanelsFixedAxis() {
   rect(rightX, panelY, panelW, panelH);
 }
 
-void drawScatterFixed(float[][] pts, float x0, float y0, float w, float h) {
+void drawScatterFixed(float[][] pts, float x0, float y0, float w, float h, int alpha, float dotSize) {
   noStroke();
   fill(0, 0, 0, 110);
   rect(x0, y0, w, h);
 
-  // axis cross at x=0,y=0 (Y normal: top-down)
+  // axis cross at x=0,y=0
   stroke(70);
-
   float xZero = map(0, viewMinX, viewMaxX, x0, x0 + w);
   float yZero = map(0, viewMinY, viewMaxY, y0, y0 + h);
-
   line(x0, yZero, x0 + w, yZero);
   line(xZero, y0, xZero, y0 + h);
 
   if (pts == null) return;
 
   noStroke();
-  fill(255);
+  fill(255, alpha);
   for (int i = 0; i < pts.length; i++) {
-    float xn = (pts[i][0] - viewMinX) / (viewMaxX - viewMinX);
-    float yn = (pts[i][1] - viewMinY) / (viewMaxY - viewMinY);
+    float px = mapToPanelX(pts[i][0], x0, w);
+    float py = mapToPanelY(pts[i][1], y0, h);
+    ellipse(px, py, dotSize, dotSize);
+  }
+}
 
-    float px = x0 + 10 + xn * (w - 20);
-    float py = y0 + 10 + yn * (h - 20);  // ✅ Y tidak dibalik
+float mapToPanelX(float x, float x0, float w) {
+  float xn = (x - viewMinX) / (viewMaxX - viewMinX);
+  return x0 + 10 + xn * (w - 20);
+}
+float mapToPanelY(float y, float y0, float h) {
+  float yn = (y - viewMinY) / (viewMaxY - viewMinY);
+  return y0 + 10 + yn * (h - 20); // Y normal
+}
 
-    ellipse(px, py, 5, 5);
+void drawGngOverlay(float x0, float y0, float w, float h) {
+  // draw edges first
+  strokeWeight(2);
+
+  for (int i=0;i<gngNodeN;i++) {
+    if (!gngActive[i]) continue;
+
+    float x1 = gngNodes[i][0];
+    float y1 = gngNodes[i][1];
+    float px1 = mapToPanelX(x1, x0, w);
+    float py1 = mapToPanelY(y1, y0, h);
+
+    for (int k=0;k<gngDegN;k++) {
+      if (!gngEdgeValid[i][k]) continue;
+      int nb = gngEdgeNb[i][k];
+      if (nb < 0 || nb >= gngNodeN) continue;
+      if (!gngActive[nb]) continue;
+
+      // avoid duplicate drawing
+      if (i >= nb) continue;
+
+      float x2 = gngNodes[nb][0];
+      float y2 = gngNodes[nb][1];
+      float px2 = mapToPanelX(x2, x0, w);
+      float py2 = mapToPanelY(y2, y0, h);
+
+      int age = gngEdgeAge[i][k]; // 0..255
+      int a = constrain(60 + age, 60, 220);
+
+      stroke(120, 220, 255, a);
+      line(px1, py1, px2, py2);
+    }
+  }
+
+  // draw nodes on top
+  noStroke();
+  for (int i=0;i<gngNodeN;i++) {
+    if (!gngActive[i]) continue;
+    float px = mapToPanelX(gngNodes[i][0], x0, w);
+    float py = mapToPanelY(gngNodes[i][1], y0, h);
+
+    fill(255, 220, 80, 230);
+    ellipse(px, py, 10, 10);
+
+    fill(255, 180);
+    text(i, px + 6, py - 6);
   }
 }
 
@@ -415,6 +618,9 @@ void drawDebugBar() {
   fill(180);
   text("Keys: [R]=rebuild+send  [S]=send  [C]=clear stats  [+/-]=adjust view X margin",
        740, height - 20);
+
+  fill(180);
+  text("Expecting GNG_STATE len=" + GNG_PAYLOAD_LEN + " (type=0xA1)", 740, height - 40);
 }
 
 // ======================================================
@@ -428,7 +634,7 @@ float[] centroid(float[][] pts) {
 }
 
 // ======================================================
-// Two-moons generator (SAMA PERSIS DENGAN KODE KAMU)
+// Two-moons generator
 // ======================================================
 float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed,
                         boolean shuffle, boolean normalize01) {

@@ -9,9 +9,9 @@
         <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\uart_rx.vhd" type="vhdl"/>
         <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\uart_tx.vhd" type="vhdl"/>
         <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\bram_copy_8to32.vhd" type="vhdl"/>
-        <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\bram_send_word32_sumchk.vhd" type="vhdl"/>
         <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\bram_shift.vhd" type="vhdl"/>
         <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\gng.vhd" type="vhdl"/>
+        <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\gng_dump_state_uart_sumchk.vhd" type="vhdl"/>
     </FileList>
     <OptionList>
         <Option type="disable_insert_pad" value="0"/>
