@@ -25,7 +25,7 @@ architecture rtl of tang_nano_9k is
   constant WORDS_C     : natural := DEPTH_BYTES/4; -- 100
 
   ---------------------------------------------------------------------------
-  -- GNG dump sizing (HARUS sama dengan generic yang kamu pakai)
+  -- GNG sizing
   ---------------------------------------------------------------------------
   constant GNG_MAX_NODES : natural := 40;
   constant GNG_MAX_DEG   : natural := 6;
@@ -42,7 +42,6 @@ architecture rtl of tang_nano_9k is
   end function;
 
   constant EDGE_DEPTH : natural := GNG_MAX_NODES * GNG_MAX_DEG; -- 240
-  constant EDGE_AW    : natural := clog2(EDGE_DEPTH);          -- 8 utk 240
 
   ---------------------------------------------------------------------------
   -- UART RX
@@ -121,12 +120,6 @@ architecture rtl of tang_nano_9k is
   signal shift_start_p : std_logic := '0';
 
   ---------------------------------------------------------------------------
-  -- send flags
-  ---------------------------------------------------------------------------
-  signal sending     : std_logic;
-  signal send_done_p : std_logic;
-
-  ---------------------------------------------------------------------------
   -- GNG flags
   ---------------------------------------------------------------------------
   signal gng_start_p : std_logic := '0';
@@ -145,25 +138,33 @@ architecture rtl of tang_nano_9k is
   constant SHIFT_EVERY_PKTS : natural := 5;
   constant GNG_EVERY_PKTS   : natural := 10;
 
-  type sm_t is (WAIT_DATA, RUN_GNG, WAIT_GNG, STREAMING, DO_SHIFT, WAIT_SHIFT);
+  type sm_t is (WAIT_DATA, RUN_GNG, WAIT_GNG, DO_DUMP, WAIT_DUMP, DO_SHIFT, WAIT_SHIFT);
   signal sm : sm_t := WAIT_DATA;
 
   signal pkt_cnt_shift : unsigned(7 downto 0) := (others => '0');
   signal pkt_cnt_gng   : unsigned(7 downto 0) := (others => '0');
 
-  signal pause_send : std_logic;
-  signal sm_busy    : std_logic;
+  signal pause_send  : std_logic;
+  signal gng_pending : std_logic := '0';
 
   ---------------------------------------------------------------------------
-  -- GNG dump read taps
+  -- GNG dump taps (from GNG debug ports)
   ---------------------------------------------------------------------------
   signal dump_node_raddr : unsigned(5 downto 0) := (others => '0');
   signal dump_node_rdata : std_logic_vector(31 downto 0);
+
   signal dump_err_raddr  : unsigned(5 downto 0) := (others => '0');
   signal dump_err_rdata  : std_logic_vector(31 downto 0);
-signal dump_edge_raddr : unsigned(8 downto 0);
 
+  signal dump_edge_raddr : unsigned(8 downto 0) := (others => '0');
   signal dump_edge_rdata : std_logic_vector(15 downto 0);
+
+  ---------------------------------------------------------------------------
+  -- Dump control (NEW one-shot)
+  ---------------------------------------------------------------------------
+  signal dump_start_p : std_logic := '0';
+  signal sending      : std_logic;
+  signal send_done_p  : std_logic;
 
 begin
 
@@ -310,31 +311,41 @@ begin
   end process;
 
   ---------------------------------------------------------------------------
-  -- PAUSE sender: hanya saat WRITE besar ke mem_c (copy/shift)
+  -- Pause dump/start saat copy/shift sedang write besar (optional safety)
   ---------------------------------------------------------------------------
-  sm_busy    <= '1' when ((sm = RUN_GNG) or (sm = WAIT_GNG) or (sm = DO_SHIFT) or (sm = WAIT_SHIFT)) else '0';
   pause_send <= copying or shifting;
 
   ---------------------------------------------------------------------------
-  -- Scheduler
+  -- Scheduler (UPDATED for one-shot dump)
   ---------------------------------------------------------------------------
   process(clk_i)
+    variable shift_due : boolean;
+    variable gng_due   : boolean;
   begin
     if rising_edge(clk_i) then
       if rstn_i = '0' then
         sm <= WAIT_DATA;
+
         pkt_cnt_shift <= (others => '0');
         pkt_cnt_gng   <= (others => '0');
+
         gng_start_p   <= '0';
         shift_start_p <= '0';
+        dump_start_p  <= '0';
+
+        gng_pending   <= '0';
+
       else
         gng_start_p   <= '0';
         shift_start_p <= '0';
+        dump_start_p  <= '0';
 
         case sm is
           when WAIT_DATA =>
             pkt_cnt_shift <= (others => '0');
             pkt_cnt_gng   <= (others => '0');
+            gng_pending   <= '0';
+
             if data_ready_p = '1' then
               sm <= RUN_GNG;
             end if;
@@ -345,23 +356,50 @@ begin
 
           when WAIT_GNG =>
             if gng_done_p = '1' then
-              sm <= STREAMING;
+              sm <= DO_DUMP;
             end if;
 
-          when STREAMING =>
+          when DO_DUMP =>
+            -- Start dumper hanya saat aman & dumper idle
+            if (pause_send = '0') and (sending = '0') then
+              dump_start_p <= '1';     -- pulse 1 clk
+              sm <= WAIT_DUMP;
+            end if;
+
+          when WAIT_DUMP =>
             if send_done_p = '1' then
-              if pkt_cnt_shift = to_unsigned(SHIFT_EVERY_PKTS-1, pkt_cnt_shift'length) then
+              -- hitung "packet" = 1 frame dump selesai
+              shift_due := (pkt_cnt_shift = to_unsigned(SHIFT_EVERY_PKTS-1, pkt_cnt_shift'length));
+              gng_due   := (pkt_cnt_gng   = to_unsigned(GNG_EVERY_PKTS-1,   pkt_cnt_gng'length));
+
+              -- update counters
+              if shift_due then
                 pkt_cnt_shift <= (others => '0');
-                sm <= DO_SHIFT;
               else
                 pkt_cnt_shift <= pkt_cnt_shift + 1;
               end if;
 
-              if pkt_cnt_gng = to_unsigned(GNG_EVERY_PKTS-1, pkt_cnt_gng'length) then
+              if gng_due then
                 pkt_cnt_gng <= (others => '0');
-                sm <= RUN_GNG;
               else
                 pkt_cnt_gng <= pkt_cnt_gng + 1;
+              end if;
+
+              -- priority:
+              -- 1) shift dulu kalau due
+              -- 2) lalu GNG kalau due
+              -- 3) kalau tidak, dump lagi
+              if shift_due then
+                if gng_due then
+                  gng_pending <= '1'; -- jalankan GNG setelah shift selesai
+                end if;
+                sm <= DO_SHIFT;
+
+              elsif gng_due then
+                sm <= RUN_GNG;
+
+              else
+                sm <= DO_DUMP;
               end if;
             end if;
 
@@ -371,7 +409,12 @@ begin
 
           when WAIT_SHIFT =>
             if shift_done = '1' then
-              sm <= STREAMING;
+              if gng_pending = '1' then
+                gng_pending <= '0';
+                sm <= RUN_GNG;
+              else
+                sm <= DO_DUMP;
+              end if;
             end if;
 
           when others =>
@@ -393,8 +436,8 @@ begin
       INIT_X1          => 800, INIT_Y1 => 800
     )
     port map (
-      clk_i  => clk_i,
-      rstn_i => rstn_i,
+      clk_i   => clk_i,
+      rstn_i  => rstn_i,
       start_i => gng_start_p,
 
       data_raddr_o => c_raddr_gng,
@@ -406,7 +449,7 @@ begin
       s1_id_o => open,
       s2_id_o => open,
 
-      -- debug taps (HARUS ADA di entity gng)
+      -- debug taps
       dbg_node_raddr_i => dump_node_raddr,
       dbg_node_rdata_o => dump_node_rdata,
 
@@ -445,23 +488,18 @@ begin
     );
 
   ---------------------------------------------------------------------------
-  -- GNG DUMP SENDER (UART)
+  -- GNG DUMP SENDER (UART) - NEW ONE-SHOT VERSION
   ---------------------------------------------------------------------------
   u_dump_gng : entity work.gng_dump_state_uart_sumchk
     generic map (
       MAX_NODES => GNG_MAX_NODES,
-      MAX_DEG   => GNG_MAX_DEG,
-      CLOCK_HZ  => CLOCK_FREQUENCY,
-      STREAM_HZ => 50
+      MAX_DEG   => GNG_MAX_DEG
     )
     port map (
       clk_i  => clk_i,
       rstn_i => rstn_i,
 
-      start_i      => '1',
-      continuous_i => '1',
-      pause_i      => pause_send,
-      step_tick_i  => gng_done_p,
+      start_i => dump_start_p,
 
       node_raddr_o => dump_node_raddr,
       node_rdata_i => dump_node_rdata,
@@ -502,15 +540,16 @@ begin
   uart_txd_o <= std_ulogic(txd);
 
   ---------------------------------------------------------------------------
-  -- LEDs active-low
+  -- LEDs active-low (safe for IO_GPIO_NUM != 6)
   ---------------------------------------------------------------------------
   gpio_o <= (
-    0 => std_ulogic(not sending),
-    1 => std_ulogic(not copying),
-    2 => std_ulogic(not locked),
-    3 => std_ulogic(not full_rx_store),
-    4 => std_ulogic(not gng_busy),
-    5 => std_ulogic(not shifting)
+    0      => std_ulogic(not sending),
+    1      => std_ulogic(not copying),
+    2      => std_ulogic(not locked),
+    3      => std_ulogic(not full_rx_store),
+    4      => std_ulogic(not gng_busy),
+    5      => std_ulogic(not shifting),
+    others => '1'
   );
 
 end architecture;

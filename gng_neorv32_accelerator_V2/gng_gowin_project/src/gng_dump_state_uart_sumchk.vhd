@@ -5,20 +5,13 @@ use ieee.numeric_std.all;
 entity gng_dump_state_uart_sumchk is
   generic (
     MAX_NODES : natural := 40;
-    MAX_DEG   : natural := 6;
-    CLOCK_HZ  : natural := 27_000_000;
-    STREAM_HZ : natural := 50
+    MAX_DEG   : natural := 6
   );
   port (
     clk_i  : in  std_logic;
     rstn_i : in  std_logic;
 
-    start_i      : in std_logic;
-    continuous_i : in std_logic;
-    pause_i      : in std_logic;
-
-    -- step tick (optional)
-    step_tick_i  : in std_logic;
+    start_i : in std_logic;
 
     -- debug memories (sync 1-cycle read)
     node_raddr_o : out unsigned(5 downto 0);
@@ -36,7 +29,7 @@ entity gng_dump_state_uart_sumchk is
     tx_start_o : out std_logic;
     tx_data_o  : out std_logic_vector(7 downto 0);
 
-    done_o : out std_logic;
+    done_o : out std_logic;  -- == SEND_DONE pulse 1 clk
     busy_o : out std_logic
   );
 end entity;
@@ -56,15 +49,13 @@ architecture rtl of gng_dump_state_uart_sumchk is
 
   constant NODE_AW      : natural := clog2(MAX_NODES); -- 6 for 40
   constant EDGE_DEPTH   : natural := MAX_NODES * MAX_DEG; -- 240
-  constant EDGE_AW_PORT : natural := 9; -- force 9-bit to match top/debug
+  constant EDGE_AW_PORT : natural := 9; -- force 9-bit
 
   constant GNG_MASK_BYTES : natural := 8;
 
-  constant TICKS_PER_PKT : natural := CLOCK_HZ / STREAM_HZ;
-
   -- payload:
   -- [0]   : 0xA1
-  -- [1:2] : step counter u16 LE
+  -- [1:2] : step counter u16 LE (di versi ini = 0)
   -- [3]   : nodeN (=MAX_NODES)
   -- [4]   : degN  (=MAX_DEG)
   -- [5..12] : active mask 8 bytes (LSB=node0)
@@ -74,7 +65,7 @@ architecture rtl of gng_dump_state_uart_sumchk is
     1 + 2 + 1 + 1 + GNG_MASK_BYTES + (MAX_NODES*4) + (EDGE_DEPTH*2);
 
   type st_t is (
-    IDLE, WAIT_TICK,
+    IDLE,
 
     SEND_FF1, WAIT_FF1,
     SEND_FF2, WAIT_FF2,
@@ -122,11 +113,11 @@ architecture rtl of gng_dump_state_uart_sumchk is
 
   signal st : st_t := IDLE;
 
-  signal tick_cnt : unsigned(31 downto 0) := (others => '0');
   signal seq      : unsigned(7 downto 0)  := (others => '0');
-
-  signal step_cnt : unsigned(15 downto 0) := (others => '0');
   signal chk      : unsigned(7 downto 0)  := (others => '0');
+
+  -- step counter dikirim, tapi di versi ini selalu 0
+  constant step_cnt : unsigned(15 downto 0) := (others => '0');
 
   signal node_idx : unsigned(NODE_AW-1 downto 0) := (others => '0');
   signal node_reg : std_logic_vector(31 downto 0) := (others => '0');
@@ -143,6 +134,10 @@ architecture rtl of gng_dump_state_uart_sumchk is
   signal err_raddr_s  : unsigned(NODE_AW-1 downto 0) := (others => '0');
   signal edge_raddr_s : unsigned(EDGE_AW_PORT-1 downto 0) := (others => '0');
 
+  -- start edge detect
+  signal start_d     : std_logic := '0';
+  signal start_pulse : std_logic := '0';
+
   function lo8(v : natural) return std_logic_vector is
   begin
     return std_logic_vector(to_unsigned(v, 16)(7 downto 0));
@@ -158,16 +153,16 @@ begin
   err_raddr_o  <= err_raddr_s;
   edge_raddr_o <= edge_raddr_s;
 
-  -- step counter increments on step_tick_i pulse
+  -- start rising-edge detector
   process(clk_i)
   begin
     if rising_edge(clk_i) then
       if rstn_i = '0' then
-        step_cnt <= (others => '0');
+        start_d     <= '0';
+        start_pulse <= '0';
       else
-        if step_tick_i = '1' then
-          step_cnt <= step_cnt + 1;
-        end if;
+        start_pulse <= start_i and (not start_d);
+        start_d     <= start_i;
       end if;
     end if;
   end process;
@@ -192,346 +187,277 @@ begin
       done_o     <= '0';
 
       if rstn_i = '0' then
-        st       <= IDLE;
-        tick_cnt <= (others => '0');
-        seq      <= (others => '0');
-        chk      <= (others => '0');
+        st  <= IDLE;
+        seq <= (others => '0');
+        chk <= (others => '0');
 
         node_idx <= (others => '0');
-        node_reg <= (others => '0');
-
         edge_idx <= (others => '0');
-        edge_reg <= (others => '0');
+        mask_idx <= (others => '0');
 
         node_raddr_s <= (others => '0');
         err_raddr_s  <= (others => '0');
         edge_raddr_s <= (others => '0');
 
         mask_arr <= (others => (others => '0'));
-        mask_idx <= (others => '0');
 
       else
-        if pause_i = '1' then
-          null; -- hold state
-        else
-          case st is
+        case st is
 
-            when IDLE =>
-              tick_cnt <= (others => '0');
-              if start_i = '1' then
-                st <= WAIT_TICK;
+          when IDLE =>
+            if start_pulse = '1' then
+              st <= SEND_FF1;
+            end if;
+
+          when SEND_FF1 =>
+            if tx_busy_i = '0' then
+              kick_send(x"FF");
+              st <= WAIT_FF1;
+            end if;
+
+          when WAIT_FF1 =>
+            if tx_done_i = '1' then st <= SEND_FF2; end if;
+
+          when SEND_FF2 =>
+            if tx_busy_i = '0' then
+              kick_send(x"FF");
+              st <= WAIT_FF2;
+            end if;
+
+          when WAIT_FF2 =>
+            if tx_done_i = '1' then st <= SEND_LEN0; end if;
+
+          when SEND_LEN0 =>
+            if tx_busy_i = '0' then
+              kick_send(lo8(PAYLOAD_BYTES));
+              st <= WAIT_LEN0;
+            end if;
+
+          when WAIT_LEN0 =>
+            if tx_done_i = '1' then st <= SEND_LEN1; end if;
+
+          when SEND_LEN1 =>
+            if tx_busy_i = '0' then
+              kick_send(hi8(PAYLOAD_BYTES));
+              st <= WAIT_LEN1;
+            end if;
+
+          when WAIT_LEN1 =>
+            if tx_done_i = '1' then st <= SEND_SEQ; end if;
+
+          when SEND_SEQ =>
+            if tx_busy_i = '0' then
+              kick_send(std_logic_vector(seq));
+              chk      <= (others => '0'); -- checksum untuk payload saja
+              node_idx <= (others => '0');
+              edge_idx <= (others => '0');
+              mask_idx <= (others => '0');
+              st       <= WAIT_SEQ;
+            end if;
+
+          when WAIT_SEQ =>
+            if tx_done_i = '1' then st <= MASK_CLR; end if;
+
+          -- ==========================
+          -- build active mask
+          -- ==========================
+          when MASK_CLR =>
+            mask_arr <= (others => (others => '0'));
+            mask_idx <= (others => '0');
+            st <= MASK_SET;
+
+          when MASK_SET =>
+            err_raddr_s <= mask_idx;
+            st <= MASK_WAIT;
+
+          when MASK_WAIT =>
+            st <= MASK_LATCH;
+
+          when MASK_LATCH =>
+            if err_rdata_i(31) = '1' then
+              bi := to_integer(mask_idx) / 8;
+              bj := to_integer(mask_idx) mod 8;
+              if (bi >= 0) and (bi <= 7) then
+                mask_arr(bi)(bj) <= '1';
               end if;
+            end if;
 
-            when WAIT_TICK =>
-              if tick_cnt = to_unsigned(TICKS_PER_PKT-1, tick_cnt'length) then
-                tick_cnt <= (others => '0');
-                st <= SEND_FF1;
-              else
-                tick_cnt <= tick_cnt + 1;
-              end if;
-
-            when SEND_FF1 =>
-              if tx_busy_i = '0' then
-                kick_send(x"FF");
-                st <= WAIT_FF1;
-              end if;
-
-            when WAIT_FF1 =>
-              if tx_done_i = '1' then st <= SEND_FF2; end if;
-
-            when SEND_FF2 =>
-              if tx_busy_i = '0' then
-                kick_send(x"FF");
-                st <= WAIT_FF2;
-              end if;
-
-            when WAIT_FF2 =>
-              if tx_done_i = '1' then st <= SEND_LEN0; end if;
-
-            when SEND_LEN0 =>
-              if tx_busy_i = '0' then
-                kick_send(lo8(PAYLOAD_BYTES));
-                st <= WAIT_LEN0;
-              end if;
-
-            when WAIT_LEN0 =>
-              if tx_done_i = '1' then st <= SEND_LEN1; end if;
-
-            when SEND_LEN1 =>
-              if tx_busy_i = '0' then
-                kick_send(hi8(PAYLOAD_BYTES));
-                st <= WAIT_LEN1;
-              end if;
-
-            when WAIT_LEN1 =>
-              if tx_done_i = '1' then st <= SEND_SEQ; end if;
-
-            when SEND_SEQ =>
-              if tx_busy_i = '0' then
-                kick_send(std_logic_vector(seq));
-                chk      <= (others => '0'); -- checksum for payload only
-                node_idx <= (others => '0');
-                edge_idx <= (others => '0');
-                mask_idx <= (others => '0');
-                st       <= WAIT_SEQ;
-              end if;
-
-            when WAIT_SEQ =>
-              if tx_done_i = '1' then st <= MASK_CLR; end if;
-
-            -- ======================================================
-            -- build active mask from err_mem (bit31)
-            -- ======================================================
-            when MASK_CLR =>
-              mask_arr(0) <= (others => '0');
-              mask_arr(1) <= (others => '0');
-              mask_arr(2) <= (others => '0');
-              mask_arr(3) <= (others => '0');
-              mask_arr(4) <= (others => '0');
-              mask_arr(5) <= (others => '0');
-              mask_arr(6) <= (others => '0');
-              mask_arr(7) <= (others => '0');
-              mask_idx    <= (others => '0');
+            if mask_idx = to_unsigned(MAX_NODES-1, mask_idx'length) then
+              st <= SEND_MAGIC;
+            else
+              mask_idx <= mask_idx + 1;
               st <= MASK_SET;
+            end if;
 
-            when MASK_SET =>
-              err_raddr_s <= mask_idx;
-              st <= MASK_WAIT;
+          -- ==========================
+          -- payload header
+          -- ==========================
+          when SEND_MAGIC =>
+            if tx_busy_i = '0' then
+              kick_send(x"A1"); add_chk(x"A1");
+              st <= WAIT_MAGIC;
+            end if;
 
-            when MASK_WAIT =>
-              st <= MASK_LATCH;
+          when WAIT_MAGIC =>
+            if tx_done_i = '1' then st <= SEND_STEP0; end if;
 
-            when MASK_LATCH =>
-              if err_rdata_i(31) = '1' then
-                bi := to_integer(mask_idx) / 8;
-                bj := to_integer(mask_idx) mod 8;
-                if (bi >= 0) and (bi <= 7) then
-                  mask_arr(bi)(bj) <= '1';
-                end if;
-              end if;
+          when SEND_STEP0 =>
+            if tx_busy_i = '0' then
+              kick_send(std_logic_vector(step_cnt(7 downto 0)));
+              add_chk(std_logic_vector(step_cnt(7 downto 0)));
+              st <= WAIT_STEP0;
+            end if;
 
-              if mask_idx = to_unsigned(MAX_NODES-1, mask_idx'length) then
-                st <= SEND_MAGIC;
+          when WAIT_STEP0 =>
+            if tx_done_i = '1' then st <= SEND_STEP1; end if;
+
+          when SEND_STEP1 =>
+            if tx_busy_i = '0' then
+              kick_send(std_logic_vector(step_cnt(15 downto 8)));
+              add_chk(std_logic_vector(step_cnt(15 downto 8)));
+              st <= WAIT_STEP1;
+            end if;
+
+          when WAIT_STEP1 =>
+            if tx_done_i = '1' then st <= SEND_NODEN; end if;
+
+          when SEND_NODEN =>
+            if tx_busy_i = '0' then
+              kick_send(std_logic_vector(to_unsigned(MAX_NODES, 8)));
+              add_chk(std_logic_vector(to_unsigned(MAX_NODES, 8)));
+              st <= WAIT_NODEN;
+            end if;
+
+          when WAIT_NODEN =>
+            if tx_done_i = '1' then st <= SEND_DEGN; end if;
+
+          when SEND_DEGN =>
+            if tx_busy_i = '0' then
+              kick_send(std_logic_vector(to_unsigned(MAX_DEG, 8)));
+              add_chk(std_logic_vector(to_unsigned(MAX_DEG, 8)));
+              st <= WAIT_DEGN;
+            end if;
+
+          when WAIT_DEGN =>
+            if tx_done_i = '1' then st <= SEND_M0; end if;
+
+          -- mask bytes
+          when SEND_M0 => if tx_busy_i='0' then kick_send(mask_arr(0)); add_chk(mask_arr(0)); st<=WAIT_M0; end if;
+          when WAIT_M0 => if tx_done_i='1' then st<=SEND_M1; end if;
+
+          when SEND_M1 => if tx_busy_i='0' then kick_send(mask_arr(1)); add_chk(mask_arr(1)); st<=WAIT_M1; end if;
+          when WAIT_M1 => if tx_done_i='1' then st<=SEND_M2; end if;
+
+          when SEND_M2 => if tx_busy_i='0' then kick_send(mask_arr(2)); add_chk(mask_arr(2)); st<=WAIT_M2; end if;
+          when WAIT_M2 => if tx_done_i='1' then st<=SEND_M3; end if;
+
+          when SEND_M3 => if tx_busy_i='0' then kick_send(mask_arr(3)); add_chk(mask_arr(3)); st<=WAIT_M3; end if;
+          when WAIT_M3 => if tx_done_i='1' then st<=SEND_M4; end if;
+
+          when SEND_M4 => if tx_busy_i='0' then kick_send(mask_arr(4)); add_chk(mask_arr(4)); st<=WAIT_M4; end if;
+          when WAIT_M4 => if tx_done_i='1' then st<=SEND_M5; end if;
+
+          when SEND_M5 => if tx_busy_i='0' then kick_send(mask_arr(5)); add_chk(mask_arr(5)); st<=WAIT_M5; end if;
+          when WAIT_M5 => if tx_done_i='1' then st<=SEND_M6; end if;
+
+          when SEND_M6 => if tx_busy_i='0' then kick_send(mask_arr(6)); add_chk(mask_arr(6)); st<=WAIT_M6; end if;
+          when WAIT_M6 => if tx_done_i='1' then st<=SEND_M7; end if;
+
+          when SEND_M7 => if tx_busy_i='0' then kick_send(mask_arr(7)); add_chk(mask_arr(7)); st<=WAIT_M7; end if;
+          when WAIT_M7 => if tx_done_i='1' then st<=RD_NODE_SET; end if;
+
+          -- ==========================
+          -- nodes
+          -- ==========================
+          when RD_NODE_SET =>
+            node_raddr_s <= node_idx;
+            st <= RD_NODE_WAIT;
+
+          when RD_NODE_WAIT =>
+            st <= RD_NODE_LATCH;
+
+          when RD_NODE_LATCH =>
+            node_reg <= node_rdata_i;
+            st <= SEND_N0;
+
+          when SEND_N0 =>
+            if tx_busy_i='0' then kick_send(node_reg(7 downto 0));  add_chk(node_reg(7 downto 0));  st<=WAIT_N0; end if;
+          when WAIT_N0 => if tx_done_i='1' then st<=SEND_N1; end if;
+
+          when SEND_N1 =>
+            if tx_busy_i='0' then kick_send(node_reg(15 downto 8)); add_chk(node_reg(15 downto 8)); st<=WAIT_N1; end if;
+          when WAIT_N1 => if tx_done_i='1' then st<=SEND_N2; end if;
+
+          when SEND_N2 =>
+            if tx_busy_i='0' then kick_send(node_reg(23 downto 16)); add_chk(node_reg(23 downto 16)); st<=WAIT_N2; end if;
+          when WAIT_N2 => if tx_done_i='1' then st<=SEND_N3; end if;
+
+          when SEND_N3 =>
+            if tx_busy_i='0' then kick_send(node_reg(31 downto 24)); add_chk(node_reg(31 downto 24)); st<=WAIT_N3; end if;
+
+          when WAIT_N3 =>
+            if tx_done_i='1' then
+              if node_idx = to_unsigned(MAX_NODES-1, node_idx'length) then
+                edge_idx <= (others => '0');
+                st <= RD_EDGE_SET;
               else
-                mask_idx <= mask_idx + 1;
-                st <= MASK_SET;
+                node_idx <= node_idx + 1;
+                st <= RD_NODE_SET;
               end if;
+            end if;
 
-            -- ======================================================
-            -- PAYLOAD: MAGIC + STEP + nodeN + degN + mask
-            -- ======================================================
-            when SEND_MAGIC =>
-              if tx_busy_i = '0' then
-                kick_send(x"A1");
-                add_chk(x"A1");
-                st <= WAIT_MAGIC;
-              end if;
+          -- ==========================
+          -- edges
+          -- ==========================
+          when RD_EDGE_SET =>
+            edge_raddr_s <= edge_idx;
+            st <= RD_EDGE_WAIT;
 
-            when WAIT_MAGIC =>
-              if tx_done_i = '1' then st <= SEND_STEP0; end if;
+          when RD_EDGE_WAIT =>
+            st <= RD_EDGE_LATCH;
 
-            when SEND_STEP0 =>
-              if tx_busy_i = '0' then
-                kick_send(std_logic_vector(step_cnt(7 downto 0)));
-                add_chk(std_logic_vector(step_cnt(7 downto 0)));
-                st <= WAIT_STEP0;
-              end if;
+          when RD_EDGE_LATCH =>
+            edge_reg <= edge_rdata_i;
+            st <= SEND_E0;
 
-            when WAIT_STEP0 =>
-              if tx_done_i = '1' then st <= SEND_STEP1; end if;
+          when SEND_E0 =>
+            if tx_busy_i='0' then kick_send(edge_reg(7 downto 0)); add_chk(edge_reg(7 downto 0)); st<=WAIT_E0; end if;
+          when WAIT_E0 => if tx_done_i='1' then st<=SEND_E1; end if;
 
-            when SEND_STEP1 =>
-              if tx_busy_i = '0' then
-                kick_send(std_logic_vector(step_cnt(15 downto 8)));
-                add_chk(std_logic_vector(step_cnt(15 downto 8)));
-                st <= WAIT_STEP1;
-              end if;
+          when SEND_E1 =>
+            if tx_busy_i='0' then kick_send(edge_reg(15 downto 8)); add_chk(edge_reg(15 downto 8)); st<=WAIT_E1; end if;
 
-            when WAIT_STEP1 =>
-              if tx_done_i = '1' then st <= SEND_NODEN; end if;
-
-            when SEND_NODEN =>
-              if tx_busy_i = '0' then
-                kick_send(std_logic_vector(to_unsigned(MAX_NODES, 8)));
-                add_chk(std_logic_vector(to_unsigned(MAX_NODES, 8)));
-                st <= WAIT_NODEN;
-              end if;
-
-            when WAIT_NODEN =>
-              if tx_done_i = '1' then st <= SEND_DEGN; end if;
-
-            when SEND_DEGN =>
-              if tx_busy_i = '0' then
-                kick_send(std_logic_vector(to_unsigned(MAX_DEG, 8)));
-                add_chk(std_logic_vector(to_unsigned(MAX_DEG, 8)));
-                st <= WAIT_DEGN;
-              end if;
-
-            when WAIT_DEGN =>
-              if tx_done_i = '1' then st <= SEND_M0; end if;
-
-            -- mask 8 bytes
-            when SEND_M0 =>
-              if tx_busy_i = '0' then kick_send(mask_arr(0)); add_chk(mask_arr(0)); st <= WAIT_M0; end if;
-            when WAIT_M0 => if tx_done_i = '1' then st <= SEND_M1; end if;
-
-            when SEND_M1 =>
-              if tx_busy_i = '0' then kick_send(mask_arr(1)); add_chk(mask_arr(1)); st <= WAIT_M1; end if;
-            when WAIT_M1 => if tx_done_i = '1' then st <= SEND_M2; end if;
-
-            when SEND_M2 =>
-              if tx_busy_i = '0' then kick_send(mask_arr(2)); add_chk(mask_arr(2)); st <= WAIT_M2; end if;
-            when WAIT_M2 => if tx_done_i = '1' then st <= SEND_M3; end if;
-
-            when SEND_M3 =>
-              if tx_busy_i = '0' then kick_send(mask_arr(3)); add_chk(mask_arr(3)); st <= WAIT_M3; end if;
-            when WAIT_M3 => if tx_done_i = '1' then st <= SEND_M4; end if;
-
-            when SEND_M4 =>
-              if tx_busy_i = '0' then kick_send(mask_arr(4)); add_chk(mask_arr(4)); st <= WAIT_M4; end if;
-            when WAIT_M4 => if tx_done_i = '1' then st <= SEND_M5; end if;
-
-            when SEND_M5 =>
-              if tx_busy_i = '0' then kick_send(mask_arr(5)); add_chk(mask_arr(5)); st <= WAIT_M5; end if;
-            when WAIT_M5 => if tx_done_i = '1' then st <= SEND_M6; end if;
-
-            when SEND_M6 =>
-              if tx_busy_i = '0' then kick_send(mask_arr(6)); add_chk(mask_arr(6)); st <= WAIT_M6; end if;
-            when WAIT_M6 => if tx_done_i = '1' then st <= SEND_M7; end if;
-
-            when SEND_M7 =>
-              if tx_busy_i = '0' then kick_send(mask_arr(7)); add_chk(mask_arr(7)); st <= WAIT_M7; end if;
-            when WAIT_M7 => if tx_done_i = '1' then st <= RD_NODE_SET; end if;
-
-            -- ======================================================
-            -- NODES: read 32-bit word, send 4 bytes little-endian
-            -- ======================================================
-            when RD_NODE_SET =>
-              node_raddr_s <= node_idx;
-              st <= RD_NODE_WAIT;
-
-            when RD_NODE_WAIT =>
-              st <= RD_NODE_LATCH;
-
-            when RD_NODE_LATCH =>
-              node_reg <= node_rdata_i;
-              st <= SEND_N0;
-
-            when SEND_N0 =>
-              if tx_busy_i = '0' then
-                kick_send(node_reg(7 downto 0));
-                add_chk(node_reg(7 downto 0));
-                st <= WAIT_N0;
-              end if;
-
-            when WAIT_N0 =>
-              if tx_done_i = '1' then st <= SEND_N1; end if;
-
-            when SEND_N1 =>
-              if tx_busy_i = '0' then
-                kick_send(node_reg(15 downto 8));
-                add_chk(node_reg(15 downto 8));
-                st <= WAIT_N1;
-              end if;
-
-            when WAIT_N1 =>
-              if tx_done_i = '1' then st <= SEND_N2; end if;
-
-            when SEND_N2 =>
-              if tx_busy_i = '0' then
-                kick_send(node_reg(23 downto 16));
-                add_chk(node_reg(23 downto 16));
-                st <= WAIT_N2;
-              end if;
-
-            when WAIT_N2 =>
-              if tx_done_i = '1' then st <= SEND_N3; end if;
-
-            when SEND_N3 =>
-              if tx_busy_i = '0' then
-                kick_send(node_reg(31 downto 24));
-                add_chk(node_reg(31 downto 24));
-                st <= WAIT_N3;
-              end if;
-
-            when WAIT_N3 =>
-              if tx_done_i = '1' then
-                if node_idx = to_unsigned(MAX_NODES-1, node_idx'length) then
-                  edge_idx <= (others => '0');
-                  st <= RD_EDGE_SET;
-                else
-                  node_idx <= node_idx + 1;
-                  st <= RD_NODE_SET;
-                end if;
-              end if;
-
-            -- ======================================================
-            -- EDGES: read 16-bit halfword, send 2 bytes little-endian
-            -- ======================================================
-            when RD_EDGE_SET =>
-              edge_raddr_s <= edge_idx;
-              st <= RD_EDGE_WAIT;
-
-            when RD_EDGE_WAIT =>
-              st <= RD_EDGE_LATCH;
-
-            when RD_EDGE_LATCH =>
-              edge_reg <= edge_rdata_i;
-              st <= SEND_E0;
-
-            when SEND_E0 =>
-              if tx_busy_i = '0' then
-                kick_send(edge_reg(7 downto 0));
-                add_chk(edge_reg(7 downto 0));
-                st <= WAIT_E0;
-              end if;
-
-            when WAIT_E0 =>
-              if tx_done_i = '1' then st <= SEND_E1; end if;
-
-            when SEND_E1 =>
-              if tx_busy_i = '0' then
-                kick_send(edge_reg(15 downto 8));
-                add_chk(edge_reg(15 downto 8));
-                st <= WAIT_E1;
-              end if;
-
-            when WAIT_E1 =>
-              if tx_done_i = '1' then
-                if edge_idx = to_unsigned(EDGE_DEPTH-1, edge_idx'length) then
-                  st <= SEND_CHK;
-                else
-                  edge_idx <= edge_idx + 1;
-                  st <= RD_EDGE_SET;
-                end if;
-              end if;
-
-            -- ======================================================
-            -- CHECKSUM + FINISH
-            -- ======================================================
-            when SEND_CHK =>
-              if tx_busy_i = '0' then
-                kick_send(std_logic_vector(chk));
-                st <= WAIT_CHK;
-              end if;
-
-            when WAIT_CHK =>
-              if tx_done_i = '1' then st <= FINISH; end if;
-
-            when FINISH =>
-              done_o <= '1';
-              seq <= seq + 1;
-              if continuous_i = '1' then
-                st <= WAIT_TICK;
+          when WAIT_E1 =>
+            if tx_done_i='1' then
+              if edge_idx = to_unsigned(EDGE_DEPTH-1, edge_idx'length) then
+                st <= SEND_CHK;
               else
-                st <= IDLE;
+                edge_idx <= edge_idx + 1;
+                st <= RD_EDGE_SET;
               end if;
+            end if;
 
-            when others =>
-              st <= IDLE;
+          -- ==========================
+          -- checksum + finish (ONE-SHOT)
+          -- ==========================
+          when SEND_CHK =>
+            if tx_busy_i='0' then
+              kick_send(std_logic_vector(chk));
+              st <= WAIT_CHK;
+            end if;
 
-          end case;
-        end if;
+          when WAIT_CHK =>
+            if tx_done_i='1' then st <= FINISH; end if;
+
+          when FINISH =>
+            done_o <= '1';      -- SEND_DONE pulse 1 clk
+            seq    <= seq + 1;  -- optional: nomor dump
+            st     <= IDLE;     -- stop (tidak looping)
+
+          when others =>
+            st <= IDLE;
+
+        end case;
       end if;
     end if;
   end process;

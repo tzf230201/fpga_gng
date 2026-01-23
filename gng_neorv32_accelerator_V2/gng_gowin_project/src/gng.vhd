@@ -6,7 +6,7 @@ entity gng is
   generic (
     MAX_NODES        : natural := 40;  -- <= 64
     MAX_DEG          : natural := 6;
-    A_MAX            : natural := 50;
+    A_MAX            : natural := 100;
 
     DATA_WORDS       : natural := 100; -- dataset size (word32)
     DONE_EVERY_STEPS : natural := 10;  -- pulse gng_done tiap N step
