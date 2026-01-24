@@ -30,19 +30,6 @@ architecture rtl of tang_nano_9k is
   constant GNG_MAX_NODES : natural := 40;
   constant GNG_MAX_DEG   : natural := 6;
 
-  function clog2(n : natural) return natural is
-    variable r : natural := 0;
-    variable v : natural := 1;
-  begin
-    while v < n loop
-      v := v * 2;
-      r := r + 1;
-    end loop;
-    return r;
-  end function;
-
-  constant EDGE_DEPTH : natural := GNG_MAX_NODES * GNG_MAX_DEG; -- 240
-
   ---------------------------------------------------------------------------
   -- UART RX
   ---------------------------------------------------------------------------
@@ -136,19 +123,14 @@ architecture rtl of tang_nano_9k is
   -- Scheduler
   ---------------------------------------------------------------------------
   constant SHIFT_EVERY_PKTS : natural := 5;
-  constant GNG_EVERY_PKTS   : natural := 10;
 
   type sm_t is (WAIT_DATA, RUN_GNG, WAIT_GNG, DO_DUMP, WAIT_DUMP, DO_SHIFT, WAIT_SHIFT);
   signal sm : sm_t := WAIT_DATA;
 
   signal pkt_cnt_shift : unsigned(7 downto 0) := (others => '0');
-  signal pkt_cnt_gng   : unsigned(7 downto 0) := (others => '0');
-
-  signal pause_send  : std_logic;
-  signal gng_pending : std_logic := '0';
 
   ---------------------------------------------------------------------------
-  -- GNG dump taps (from GNG debug ports)
+  -- GNG dump read taps (from GNG debug ports)
   ---------------------------------------------------------------------------
   signal dump_node_raddr : unsigned(5 downto 0) := (others => '0');
   signal dump_node_rdata : std_logic_vector(31 downto 0);
@@ -160,11 +142,11 @@ architecture rtl of tang_nano_9k is
   signal dump_edge_rdata : std_logic_vector(15 downto 0);
 
   ---------------------------------------------------------------------------
-  -- Dump control (NEW one-shot)
+  -- Dump control (one-shot)
   ---------------------------------------------------------------------------
   signal dump_start_p : std_logic := '0';
-  signal sending      : std_logic;
-  signal send_done_p  : std_logic;
+  signal sending     : std_logic;
+  signal send_done_p : std_logic;
 
 begin
 
@@ -311,29 +293,18 @@ begin
   end process;
 
   ---------------------------------------------------------------------------
-  -- Pause dump/start saat copy/shift sedang write besar (optional safety)
-  ---------------------------------------------------------------------------
-  pause_send <= copying or shifting;
-
-  ---------------------------------------------------------------------------
-  -- Scheduler (UPDATED for one-shot dump)
+  -- Scheduler: 1x GNG -> 1x DUMP -> repeat (shift tiap SHIFT_EVERY_PKTS)
   ---------------------------------------------------------------------------
   process(clk_i)
-    variable shift_due : boolean;
-    variable gng_due   : boolean;
   begin
     if rising_edge(clk_i) then
       if rstn_i = '0' then
         sm <= WAIT_DATA;
-
         pkt_cnt_shift <= (others => '0');
-        pkt_cnt_gng   <= (others => '0');
 
         gng_start_p   <= '0';
         shift_start_p <= '0';
         dump_start_p  <= '0';
-
-        gng_pending   <= '0';
 
       else
         gng_start_p   <= '0';
@@ -343,16 +314,16 @@ begin
         case sm is
           when WAIT_DATA =>
             pkt_cnt_shift <= (others => '0');
-            pkt_cnt_gng   <= (others => '0');
-            gng_pending   <= '0';
-
             if data_ready_p = '1' then
               sm <= RUN_GNG;
             end if;
 
           when RUN_GNG =>
-            gng_start_p <= '1';
-            sm <= WAIT_GNG;
+            -- optional safety: hanya start kalau engine idle
+            if gng_busy = '0' then
+              gng_start_p <= '1';
+              sm <= WAIT_GNG;
+            end if;
 
           when WAIT_GNG =>
             if gng_done_p = '1' then
@@ -360,46 +331,21 @@ begin
             end if;
 
           when DO_DUMP =>
-            -- Start dumper hanya saat aman & dumper idle
-            if (pause_send = '0') and (sending = '0') then
-              dump_start_p <= '1';     -- pulse 1 clk
+            -- start dump hanya saat aman (tidak sedang copy/shift) dan dumper idle
+            if (copying = '0') and (shifting = '0') and (sending = '0') then
+              dump_start_p <= '1';   -- pulse 1 clk
               sm <= WAIT_DUMP;
             end if;
 
           when WAIT_DUMP =>
             if send_done_p = '1' then
-              -- hitung "packet" = 1 frame dump selesai
-              shift_due := (pkt_cnt_shift = to_unsigned(SHIFT_EVERY_PKTS-1, pkt_cnt_shift'length));
-              gng_due   := (pkt_cnt_gng   = to_unsigned(GNG_EVERY_PKTS-1,   pkt_cnt_gng'length));
-
-              -- update counters
-              if shift_due then
+              -- 1 dump selesai = 1 siklus
+              if pkt_cnt_shift = to_unsigned(SHIFT_EVERY_PKTS-1, pkt_cnt_shift'length) then
                 pkt_cnt_shift <= (others => '0');
+                sm <= DO_SHIFT;
               else
                 pkt_cnt_shift <= pkt_cnt_shift + 1;
-              end if;
-
-              if gng_due then
-                pkt_cnt_gng <= (others => '0');
-              else
-                pkt_cnt_gng <= pkt_cnt_gng + 1;
-              end if;
-
-              -- priority:
-              -- 1) shift dulu kalau due
-              -- 2) lalu GNG kalau due
-              -- 3) kalau tidak, dump lagi
-              if shift_due then
-                if gng_due then
-                  gng_pending <= '1'; -- jalankan GNG setelah shift selesai
-                end if;
-                sm <= DO_SHIFT;
-
-              elsif gng_due then
-                sm <= RUN_GNG;
-
-              else
-                sm <= DO_DUMP;
+                sm <= RUN_GNG;       -- <--- kunci: langsung GNG lagi
               end if;
             end if;
 
@@ -409,12 +355,7 @@ begin
 
           when WAIT_SHIFT =>
             if shift_done = '1' then
-              if gng_pending = '1' then
-                gng_pending <= '0';
-                sm <= RUN_GNG;
-              else
-                sm <= DO_DUMP;
-              end if;
+              sm <= RUN_GNG;
             end if;
 
           when others =>
@@ -449,7 +390,7 @@ begin
       s1_id_o => open,
       s2_id_o => open,
 
-      -- debug taps
+      -- debug taps (HARUS ADA di entity gng)
       dbg_node_raddr_i => dump_node_raddr,
       dbg_node_rdata_o => dump_node_rdata,
 
@@ -488,7 +429,7 @@ begin
     );
 
   ---------------------------------------------------------------------------
-  -- GNG DUMP SENDER (UART) - NEW ONE-SHOT VERSION
+  -- GNG DUMP SENDER (UART) - ONE SHOT
   ---------------------------------------------------------------------------
   u_dump_gng : entity work.gng_dump_state_uart_sumchk
     generic map (
@@ -540,7 +481,7 @@ begin
   uart_txd_o <= std_ulogic(txd);
 
   ---------------------------------------------------------------------------
-  -- LEDs active-low (safe for IO_GPIO_NUM != 6)
+  -- LEDs active-low
   ---------------------------------------------------------------------------
   gpio_o <= (
     0      => std_ulogic(not sending),

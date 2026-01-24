@@ -9,7 +9,7 @@ entity gng is
     A_MAX            : natural := 100;
 
     DATA_WORDS       : natural := 100; -- dataset size (word32)
-    DONE_EVERY_STEPS : natural := 10;  -- pulse gng_done tiap N step
+    DONE_EVERY_STEPS : natural := 20;  -- pulse gng_done tiap N step
 
     LAMBDA_STEPS     : natural := 50;  -- INSERT setiap 50 step
     ALPHA_SHIFT      : natural := 1;   -- q,f error *= 1/2^ALPHA_SHIFT saat insert
