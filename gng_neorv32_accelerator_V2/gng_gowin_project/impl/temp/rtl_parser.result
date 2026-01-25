@@ -9,7 +9,7 @@
   "SubInsts" : [
    {
     "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 220,
+    "InstLine" : 192,
     "InstName" : "u_rx",
     "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/uart_rx.vhd",
     "ModuleLine" : 5,
@@ -17,7 +17,7 @@
    },
    {
     "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 238,
+    "InstLine" : 210,
     "InstName" : "u_store",
     "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/rx_store.vhd",
     "ModuleLine" : 5,
@@ -25,7 +25,7 @@
    },
    {
     "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 263,
+    "InstLine" : 235,
     "InstName" : "u_copy_8to32",
     "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/bram_copy_8to32.vhd",
     "ModuleLine" : 5,
@@ -33,31 +33,33 @@
    },
    {
     "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 371,
+    "InstLine" : 325,
     "InstName" : "u_gng",
     "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd",
     "ModuleLine" : 5,
-    "ModuleName" : "gng"
+    "ModuleName" : "gng",
+    "SubInsts" : [
+     {
+      "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd",
+      "InstLine" : 143,
+      "InstName" : "u_find",
+      "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_find_winner.vhd",
+      "ModuleLine" : 5,
+      "ModuleName" : "gng_find_winner"
+     }
+    ]
    },
    {
     "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 407,
-    "InstName" : "u_shift",
-    "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/bram_shift.vhd",
-    "ModuleLine" : 5,
-    "ModuleName" : "bram_shift_word32_xy16"
-   },
-   {
-    "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 434,
-    "InstName" : "u_dump_gng",
+    "InstLine" : 363,
+    "InstName" : "u_dump",
     "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_dump_state_uart_sumchk.vhd",
     "ModuleLine" : 5,
-    "ModuleName" : "gng_dump_state_uart_sumchk"
+    "ModuleName" : "gng_dump_nodes_winners_uart"
    },
    {
     "InstFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 466,
+    "InstLine" : 397,
     "InstName" : "u_tx",
     "ModuleFile" : "C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/uart_tx.vhd",
     "ModuleLine" : 5,

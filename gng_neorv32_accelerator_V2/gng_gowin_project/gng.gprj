@@ -12,9 +12,10 @@
         <File path="src/bram_decay.vhd" type="file.vhdl" enable="0"/>
         <File path="src/bram_send.vhd" type="file.vhdl" enable="0"/>
         <File path="src/bram_send_word32_sumchk.vhd" type="file.vhdl" enable="0"/>
-        <File path="src/bram_shift.vhd" type="file.vhdl" enable="1"/>
+        <File path="src/bram_shift.vhd" type="file.vhdl" enable="0"/>
         <File path="src/gng.vhd" type="file.vhdl" enable="1"/>
         <File path="src/gng_dump_state_uart_sumchk.vhd" type="file.vhdl" enable="1"/>
+        <File path="src/gng_find_winner.vhd" type="file.vhdl" enable="1"/>
         <File path="src/gowin_user_flash.vhd" type="file.vhdl" enable="0"/>
         <File path="src/rx_store.vhd" type="file.vhdl" enable="1"/>
         <File path="src/tang_nano_9k.vhd" type="file.vhdl" enable="1"/>
