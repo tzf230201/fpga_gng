@@ -1,0 +1,82 @@
+[
+  {
+    "dataset": "two_moons",
+    "algorithm": "Float32",
+    "qe": 0.040266986936330795,
+    "te": 0.0,
+    "memory_bytes": 778,
+    "training_time": 0.29881310000200756,
+    "nodes": 32,
+    "edges": 49
+  },
+  {
+    "dataset": "two_moons",
+    "algorithm": "Fixed Q16.16",
+    "qe": 0.10677526146173477,
+    "te": 0.066,
+    "memory_bytes": 868,
+    "training_time": 0.2785524999999325,
+    "nodes": 32,
+    "edges": 64
+  },
+  {
+    "dataset": "gaussian_mix",
+    "algorithm": "Float32",
+    "qe": 0.04156549274921417,
+    "te": 0.018333333333333333,
+    "memory_bytes": 868,
+    "training_time": 0.40455389999988256,
+    "nodes": 32,
+    "edges": 64
+  },
+  {
+    "dataset": "gaussian_mix",
+    "algorithm": "Fixed Q16.16",
+    "qe": 0.0561017282307148,
+    "te": 0.016666666666666666,
+    "memory_bytes": 868,
+    "training_time": 0.3215157999948133,
+    "nodes": 32,
+    "edges": 64
+  },
+  {
+    "dataset": "spiral",
+    "algorithm": "Float32",
+    "qe": 0.05493002012372017,
+    "te": 0.052,
+    "memory_bytes": 868,
+    "training_time": 0.3162383000017144,
+    "nodes": 32,
+    "edges": 64
+  },
+  {
+    "dataset": "spiral",
+    "algorithm": "Fixed Q16.16",
+    "qe": 0.08181304484605789,
+    "te": 0.13,
+    "memory_bytes": 868,
+    "training_time": 0.2777600999979768,
+    "nodes": 32,
+    "edges": 64
+  },
+  {
+    "dataset": "outliers",
+    "algorithm": "Float32",
+    "qe": 0.049379799515008926,
+    "te": 0.036,
+    "memory_bytes": 868,
+    "training_time": 0.31835290000162786,
+    "nodes": 32,
+    "edges": 64
+  },
+  {
+    "dataset": "outliers",
+    "algorithm": "Fixed Q16.16",
+    "qe": 0.056440286338329315,
+    "te": 0.16,
+    "memory_bytes": 868,
+    "training_time": 1.0530656000046292,
+    "nodes": 32,
+    "edges": 64
+  }
+]

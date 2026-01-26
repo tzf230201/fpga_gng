@@ -4,21 +4,21 @@
     <Version>beta</Version>
     <Device id="GW1NR-9C" package="QFN88P" speed="6" partNumber="GW1NR-LV9QN88PC6/I5"/>
     <FileList>
-        <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\bram_copy_8to32.vhd" type="vhdl"/>
-        <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\gng.vhd" type="vhdl"/>
-        <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\gng_dump_state_uart_sumchk.vhd" type="vhdl"/>
-        <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\gng_find_winner.vhd" type="vhdl"/>
-        <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\rx_store.vhd" type="vhdl"/>
-        <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\tang_nano_9k.vhd" type="vhdl"/>
-        <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\uart_rx.vhd" type="vhdl"/>
-        <File path="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\uart_tx.vhd" type="vhdl"/>
+        <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\bram_copy_8to32.vhd" type="vhdl"/>
+        <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\gng.vhd" type="vhdl"/>
+        <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\gng_dump_state_uart_sumchk.vhd" type="vhdl"/>
+        <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\gng_find_winner.vhd" type="vhdl"/>
+        <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\rx_store.vhd" type="vhdl"/>
+        <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\tang_nano_9k.vhd" type="vhdl"/>
+        <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\uart_rx.vhd" type="vhdl"/>
+        <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\uart_tx.vhd" type="vhdl"/>
     </FileList>
     <OptionList>
         <Option type="disable_insert_pad" value="0"/>
         <Option type="global_freq" value="50.000"/>
         <Option type="include_path" value="C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src"/>
         <Option type="looplimit" value="2000"/>
-        <Option type="output_file" value="C:\Users\HP\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\impl\gwsynthesis\gng.vg"/>
+        <Option type="output_file" value="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\impl\gwsynthesis\gng.vg"/>
         <Option type="print_all_synthesis_warning" value="0"/>
         <Option type="ram_rw_check" value="0"/>
         <Option type="vcc" value="1.2"/>

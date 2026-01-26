@@ -1,0 +1,110 @@
+[
+  {
+    "algorithm": "Fixed-Point",
+    "dataset": "two_moons",
+    "qe": 0.09991242736577988,
+    "te": 0.068,
+    "memory_bytes": 868,
+    "train_time": 0.8162685999996029,
+    "nodes": 32
+  },
+  {
+    "algorithm": "Pruned",
+    "dataset": "two_moons",
+    "qe": Infinity,
+    "te": 1.0,
+    "memory_bytes": 100,
+    "train_time": 0.0003665999975055456,
+    "nodes": 0
+  },
+  {
+    "algorithm": "Hierarchical",
+    "dataset": "two_moons",
+    "qe": 0.08079929649829865,
+    "te": 0.052,
+    "memory_bytes": 1232,
+    "train_time": 1.2832644000009168,
+    "nodes": 48
+  },
+  {
+    "algorithm": "Fixed-Point",
+    "dataset": "gaussian_mix",
+    "qe": 0.05614983290433884,
+    "te": 0.0033333333333333335,
+    "memory_bytes": 868,
+    "train_time": 1.2206196999977692,
+    "nodes": 32
+  },
+  {
+    "algorithm": "Pruned",
+    "dataset": "gaussian_mix",
+    "qe": Infinity,
+    "te": 1.0,
+    "memory_bytes": 100,
+    "train_time": 0.00016649999452056363,
+    "nodes": 0
+  },
+  {
+    "algorithm": "Hierarchical",
+    "dataset": "gaussian_mix",
+    "qe": 0.053632184863090515,
+    "te": 0.051666666666666666,
+    "memory_bytes": 1304,
+    "train_time": 2.307336800004123,
+    "nodes": 48
+  },
+  {
+    "algorithm": "Fixed-Point",
+    "dataset": "spiral",
+    "qe": 0.08363622426986694,
+    "te": 0.078,
+    "memory_bytes": 868,
+    "train_time": 0.6189827999987756,
+    "nodes": 32
+  },
+  {
+    "algorithm": "Pruned",
+    "dataset": "spiral",
+    "qe": Infinity,
+    "te": 1.0,
+    "memory_bytes": 100,
+    "train_time": 0.00031630000012228265,
+    "nodes": 0
+  },
+  {
+    "algorithm": "Hierarchical",
+    "dataset": "spiral",
+    "qe": 0.07523336261510849,
+    "te": 0.038,
+    "memory_bytes": 1316,
+    "train_time": 2.342435899998236,
+    "nodes": 48
+  },
+  {
+    "algorithm": "Fixed-Point",
+    "dataset": "outliers",
+    "qe": 0.05731137841939926,
+    "te": 0.096,
+    "memory_bytes": 868,
+    "train_time": 0.928890399998636,
+    "nodes": 32
+  },
+  {
+    "algorithm": "Pruned",
+    "dataset": "outliers",
+    "qe": Infinity,
+    "te": 1.0,
+    "memory_bytes": 100,
+    "train_time": 0.0002502999996067956,
+    "nodes": 0
+  },
+  {
+    "algorithm": "Hierarchical",
+    "dataset": "outliers",
+    "qe": 0.05843384563922882,
+    "te": 0.024,
+    "memory_bytes": 1352,
+    "train_time": 2.9473559000034584,
+    "nodes": 48
+  }
+]

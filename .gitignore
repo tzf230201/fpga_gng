@@ -15,3 +15,8 @@ neorv32/**
 # Python
 __pycache__/
 *.pyc
+
+# Research papers and reports (work in progress)
+**/IJCNN_2026_Report.md
+**/IJCNN_*.md
+**/*_Report.md

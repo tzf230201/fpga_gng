@@ -1,0 +1,72 @@
+[
+  {
+    "max_nodes": 16,
+    "actual_nodes": 16,
+    "edges": 32,
+    "qe": 0.11118599027395248,
+    "te": 0.0,
+    "memory_bytes": 484,
+    "memory_kb": 0.47265625,
+    "train_time": 0.9286370999980136
+  },
+  {
+    "max_nodes": 32,
+    "actual_nodes": 32,
+    "edges": 63,
+    "qe": 0.10129819810390472,
+    "te": 0.016,
+    "memory_bytes": 862,
+    "memory_kb": 0.841796875,
+    "train_time": 0.8830010999954538
+  },
+  {
+    "max_nodes": 64,
+    "actual_nodes": 64,
+    "edges": 128,
+    "qe": 0.10175581276416779,
+    "te": 0.118,
+    "memory_bytes": 1636,
+    "memory_kb": 1.59765625,
+    "train_time": 1.1870595999935176
+  },
+  {
+    "max_nodes": 128,
+    "actual_nodes": 120,
+    "edges": 256,
+    "qe": 0.09761366248130798,
+    "te": 0.352,
+    "memory_bytes": 3076,
+    "memory_kb": 3.00390625,
+    "train_time": 2.7492249999995693
+  },
+  {
+    "max_nodes": 256,
+    "actual_nodes": 102,
+    "edges": 290,
+    "qe": 0.10040993988513947,
+    "te": 0.046,
+    "memory_bytes": 3064,
+    "memory_kb": 2.9921875,
+    "train_time": 2.323557099996833
+  },
+  {
+    "max_nodes": 512,
+    "actual_nodes": 51,
+    "edges": 134,
+    "qe": 0.10003085434436798,
+    "te": 0.01,
+    "memory_bytes": 1516,
+    "memory_kb": 1.48046875,
+    "train_time": 1.3234719999964
+  },
+  {
+    "max_nodes": 1024,
+    "actual_nodes": 26,
+    "edges": 63,
+    "qe": 0.10512690246105194,
+    "te": 0.012,
+    "memory_bytes": 790,
+    "memory_kb": 0.771484375,
+    "train_time": 0.6220908000032068
+  }
+]

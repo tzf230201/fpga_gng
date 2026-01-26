@@ -1,17 +1,17 @@
 //
 //Written by GowinSynthesis
-//Tool Version "V1.9.12 (64-bit)"
-//Sun Jan 25 10:41:34 2026
+//Tool Version "V1.9.12.01 (64-bit)"
+//Mon Jan 26 23:55:53 2026
 
 //Source file index table:
-//file0 "\C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/bram_copy_8to32.vhd"
-//file1 "\C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd"
-//file2 "\C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_dump_state_uart_sumchk.vhd"
-//file3 "\C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_find_winner.vhd"
-//file4 "\C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/rx_store.vhd"
-//file5 "\C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd"
-//file6 "\C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/uart_rx.vhd"
-//file7 "\C:/Users/HP/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/uart_tx.vhd"
+//file0 "\C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/bram_copy_8to32.vhd"
+//file1 "\C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd"
+//file2 "\C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_dump_state_uart_sumchk.vhd"
+//file3 "\C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_find_winner.vhd"
+//file4 "\C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/rx_store.vhd"
+//file5 "\C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd"
+//file6 "\C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/uart_rx.vhd"
+//file7 "\C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/uart_tx.vhd"
 `timescale 100 ps/100 ps
 module uart_rx (
   clk_i_d,
