@@ -12,6 +12,7 @@
         <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\tang_nano_9k.vhd" type="vhdl"/>
         <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\uart_rx.vhd" type="vhdl"/>
         <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\uart_tx.vhd" type="vhdl"/>
+        <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\edge_aging.vhd" type="vhdl"/>
     </FileList>
     <OptionList>
         <Option type="disable_insert_pad" value="0"/>

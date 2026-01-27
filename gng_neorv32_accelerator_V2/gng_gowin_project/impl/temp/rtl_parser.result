@@ -41,11 +41,19 @@
     "SubInsts" : [
      {
       "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd",
-      "InstLine" : 157,
+      "InstLine" : 190,
       "InstName" : "u_find",
       "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_find_winner.vhd",
       "ModuleLine" : 5,
       "ModuleName" : "gng_find_winner"
+     },
+     {
+      "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd",
+      "InstLine" : 219,
+      "InstName" : "u_edge",
+      "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/edge_aging.vhd",
+      "ModuleLine" : 14,
+      "ModuleName" : "edge_aging"
      }
     ]
    },

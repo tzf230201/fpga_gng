@@ -13,6 +13,7 @@
         <File path="src/bram_send.vhd" type="file.vhdl" enable="0"/>
         <File path="src/bram_send_word32_sumchk.vhd" type="file.vhdl" enable="0"/>
         <File path="src/bram_shift.vhd" type="file.vhdl" enable="0"/>
+        <File path="src/edge_aging.vhd" type="file.vhdl" enable="1"/>
         <File path="src/gng.vhd" type="file.vhdl" enable="1"/>
         <File path="src/gng_dump_state_uart_sumchk.vhd" type="file.vhdl" enable="1"/>
         <File path="src/gng_find_winner.vhd" type="file.vhdl" enable="1"/>

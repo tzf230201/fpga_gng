@@ -29,7 +29,9 @@ entity gng_find_winner is
     -- outputs (8-bit IDs)
     s1_o : out unsigned(7 downto 0);
     s2_o : out unsigned(7 downto 0);
-    d1_o : out unsigned(16 downto 0) -- L1 distance (|dx|+|dy|)
+
+    -- L2 squared distance (dx^2 + dy^2)
+    d1_o : out unsigned(32 downto 0)
   );
 end entity;
 
@@ -43,35 +45,33 @@ architecture rtl of gng_find_winner is
 
   signal best_id   : unsigned(7 downto 0) := (others => '0');
   signal second_id : unsigned(7 downto 0) := (others => '0');
-  signal best_d    : unsigned(16 downto 0) := (others => '1');
-  signal second_d  : unsigned(16 downto 0) := (others => '1');
+
+  -- distances are L2^2; need wider than 17-bit
+  signal best_d    : unsigned(32 downto 0) := (others => '1');
+  signal second_d  : unsigned(32 downto 0) := (others => '1');
 
   -- latched node x/y (optional debug)
   signal nx : signed(15 downto 0) := (others => '0');
   signal ny : signed(15 downto 0) := (others => '0');
-
-  function abs17(a : signed(15 downto 0)) return unsigned is
-    variable v : signed(16 downto 0);
-  begin
-    v := resize(a, 17);
-    if v(16) = '1' then
-      return unsigned(-v);
-    else
-      return unsigned(v);
-    end if;
-  end function;
 
 begin
 
   node_raddr_o <= idx;
 
   process(clk_i)
-    variable dx       : signed(15 downto 0);
-    variable dy       : signed(15 downto 0);
-    variable dist     : unsigned(16 downto 0);
-    variable ncnt     : integer;
-    variable iint     : integer;
-    variable is_active: boolean;
+    variable dx        : signed(16 downto 0);  -- widen for safe multiply
+    variable dy        : signed(16 downto 0);
+
+    variable dx2       : unsigned(33 downto 0);
+    variable dy2       : unsigned(33 downto 0);
+    variable dist      : unsigned(32 downto 0);
+
+    variable ncnt      : integer;
+    variable iint      : integer;
+    variable is_active : boolean;
+
+    variable nx_v      : signed(15 downto 0);
+    variable ny_v      : signed(15 downto 0);
   begin
     if rising_edge(clk_i) then
       done_o <= '0';
@@ -108,13 +108,20 @@ begin
             st <= ST_RD_LATCH;
 
           when ST_RD_LATCH =>
-            nx <= signed(node_rdata_i(15 downto 0));
-            ny <= signed(node_rdata_i(31 downto 16));
+            nx_v := signed(node_rdata_i(15 downto 0));
+            ny_v := signed(node_rdata_i(31 downto 16));
 
-            -- compute dist
-            dx   := x_i - signed(node_rdata_i(15 downto 0));
-            dy   := y_i - signed(node_rdata_i(31 downto 16));
-            dist := abs17(dx) + abs17(dy);
+            nx <= nx_v;
+            ny <= ny_v;
+
+            -- compute L2^2 dist = dx^2 + dy^2
+            dx := resize(x_i, 17) - resize(nx_v, 17);
+            dy := resize(y_i, 17) - resize(ny_v, 17);
+
+            dx2 := unsigned(dx * dx); -- signed*signed -> signed, cast to unsigned (non-negative)
+            dy2 := unsigned(dy * dy);
+
+            dist := resize(dx2, 33) + resize(dy2, 33);
 
             ncnt := to_integer(node_count_i);
             iint := to_integer(idx);
@@ -135,7 +142,6 @@ begin
                 best_id   <= idx;
 
               elsif dist < second_d then
-                -- runner-up must not equal winner
                 if idx /= best_id then
                   second_d  <= dist;
                   second_id <= idx;
