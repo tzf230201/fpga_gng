@@ -5,7 +5,6 @@ use ieee.numeric_std.all;
 entity gng is
   generic (
     MAX_NODES        : natural := 40;
-    MAX_DEG          : natural := 6;
 
     DATA_WORDS       : natural := 100;
     DONE_EVERY_STEPS : natural := 10; -- (unused in this debug-only version)
@@ -21,23 +20,24 @@ entity gng is
     start_i : in  std_logic;
 
     -- dataset BRAM_C read (sync 1-cycle)
-    data_raddr_o : out unsigned(6 downto 0);
+    data_raddr_o : out unsigned(6 downto 0);  -- still enough for 0..99
     data_rdata_i : in  std_logic_vector(31 downto 0);
 
     gng_done_o : out std_logic;
     gng_busy_o : out std_logic;
 
-    s1_id_o : out unsigned(5 downto 0);
-    s2_id_o : out unsigned(5 downto 0);
+    -- 8-bit winner IDs
+    s1_id_o : out unsigned(7 downto 0);
+    s2_id_o : out unsigned(7 downto 0);
 
-    -- debug taps for 0xA1 dumper
-    dbg_node_raddr_i : in  unsigned(5 downto 0);
+    -- debug taps for 0xA1 dumper (node addr now 8-bit)
+    dbg_node_raddr_i : in  unsigned(7 downto 0);
     dbg_node_rdata_o : out std_logic_vector(31 downto 0);
 
-    dbg_err_raddr_i  : in  unsigned(5 downto 0);
+    dbg_err_raddr_i  : in  unsigned(7 downto 0);
     dbg_err_rdata_o  : out std_logic_vector(31 downto 0);
 
-    dbg_edge_raddr_i : in  unsigned(8 downto 0);
+    dbg_edge_raddr_i : in  unsigned(12 downto 0);
     dbg_edge_rdata_o : out std_logic_vector(15 downto 0);
 
     -- winner-log tap for 0xB1 dumper
@@ -47,6 +47,9 @@ entity gng is
 end entity;
 
 architecture rtl of gng is
+
+  -- 8-bit node id type
+  subtype node_id_t is unsigned(7 downto 0);
 
   -- FSM
   type st_t is (ST_IDLE, ST_RD_SET, ST_RD_WAIT, ST_RD_LATCH, ST_WF_START, ST_WF_WAIT, ST_NEXT, ST_FINISH);
@@ -60,10 +63,7 @@ architecture rtl of gng is
   signal start_d : std_logic := '0';
   signal start_p : std_logic := '0';
 
-  -- ============================================================
-  -- FIX: active_mask jangan hanya di-set saat reset.
-  -- Buat initializer mask untuk node0 & node1 aktif.
-  -- ============================================================
+  -- initializer mask untuk node0 & node1 aktif
   function init_active_mask return std_logic_vector is
     variable m : std_logic_vector(MAX_NODES-1 downto 0) := (others => '0');
   begin
@@ -76,19 +76,19 @@ architecture rtl of gng is
   signal wf_start : std_logic := '0';
   signal wf_done  : std_logic;
   signal wf_busy  : std_logic;
-  signal wf_s1    : unsigned(5 downto 0);
-  signal wf_s2    : unsigned(5 downto 0);
+  signal wf_s1    : node_id_t;
+  signal wf_s2    : node_id_t;
   signal wf_d1    : unsigned(16 downto 0);
 
-  -- node scan interface
-  signal wf_node_raddr : unsigned(5 downto 0) := (others => '0');
+  -- node scan interface (now 8-bit address)
+  signal wf_node_raddr : node_id_t := (others => '0');
   signal wf_node_rdata : std_logic_vector(31 downto 0) := (others => '0');
 
-  signal node_count  : unsigned(5 downto 0) := to_unsigned(2,6);
-  -- FIX: default active_mask langsung node0 & node1 aktif
+  -- node_count now 8-bit (supports up to 255 nodes)
+  signal node_count  : node_id_t := to_unsigned(2,8);
   signal active_mask : std_logic_vector(MAX_NODES-1 downto 0) := init_active_mask;
 
-  -- winner log BRAM (100 records)
+  -- winner log BRAM (100 records), 8-bit s1 + 8-bit s2 => 16-bit ok
   type win_mem_t is array (0 to DATA_WORDS-1) of std_logic_vector(15 downto 0);
   signal win_mem : win_mem_t := (others => (others => '0'));
 
@@ -120,17 +120,16 @@ begin
     end if;
   end process;
 
-  -- FIX: pastikan node0 & node1 aktif bukan cuma setelah reset,
-  -- tapi juga setiap kali start (jadi gak perlu reset manual).
+  -- pastikan node0 & node1 aktif bukan cuma setelah reset, tapi juga setiap kali start
   process(clk_i)
   begin
     if rising_edge(clk_i) then
       if rstn_i='0' then
         active_mask <= init_active_mask;
-        node_count  <= to_unsigned(2,6);
+        node_count  <= to_unsigned(2,8);
       elsif start_p='1' then
         active_mask <= init_active_mask;
-        node_count  <= to_unsigned(2,6);
+        node_count  <= to_unsigned(2,8);
       end if;
     end if;
   end process;
@@ -154,7 +153,7 @@ begin
     end if;
   end process;
 
-  -- instantiate winner finder
+  -- instantiate winner finder (ports harus 8-bit juga)
   u_find : entity work.gng_find_winner
     generic map (
       MAX_NODES => MAX_NODES
@@ -227,8 +226,8 @@ begin
 
               -- store to winner log: [7:0]=s1, [15:8]=s2
               win_mem(to_integer(step_idx)) <=
-                std_logic_vector(resize(wf_s2, 8)) &
-                std_logic_vector(resize(wf_s1, 8));
+                std_logic_vector(wf_s2) &
+                std_logic_vector(wf_s1);
 
               st <= ST_NEXT;
             end if;

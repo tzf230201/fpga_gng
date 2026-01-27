@@ -5,7 +5,7 @@ use ieee.numeric_std.all;
 entity gng_dump_nodes_winners_uart is
   generic (
     MAX_NODES  : natural := 40;
-    MASK_BYTES : natural := 8;   -- up to 64 nodes
+    MASK_BYTES : natural := 8;   -- MUST be >= ceil(MAX_NODES/8)
     N_SAMPLES  : natural := 100
   );
   port (
@@ -14,11 +14,11 @@ entity gng_dump_nodes_winners_uart is
 
     start_i : in std_logic;
 
-    -- node/err (sync 1-cycle read)
-    node_raddr_o : out unsigned(5 downto 0);
+    -- node/err (sync 1-cycle read)  <-- UPDATED to 8-bit addr
+    node_raddr_o : out unsigned(7 downto 0);
     node_rdata_i : in  std_logic_vector(31 downto 0);
 
-    err_raddr_o  : out unsigned(5 downto 0);
+    err_raddr_o  : out unsigned(7 downto 0);
     err_rdata_i  : in  std_logic_vector(31 downto 0);
 
     -- winner log (sync 1-cycle read)
@@ -88,10 +88,11 @@ architecture rtl of gng_dump_nodes_winners_uart is
   signal start_d : std_logic := '0';
   signal start_p : std_logic := '0';
 
-  signal mi     : unsigned(5 downto 0) := (others => '0'); -- mask scan node id
+  -- UPDATED: 8-bit scan counters
+  signal mi     : unsigned(7 downto 0) := (others => '0'); -- mask scan node id
   signal mask_k : integer range 0 to MASK_BYTES-1 := 0;
 
-  signal nid    : unsigned(5 downto 0) := (others => '0'); -- node send id
+  signal nid      : unsigned(7 downto 0) := (others => '0'); -- node send id
   signal node_reg : std_logic_vector(31 downto 0) := (others => '0');
 
   signal idx     : unsigned(6 downto 0) := (others => '0');
@@ -144,7 +145,7 @@ begin
       done_o     <= '0';
 
       if rstn_i = '0' then
-        st <= IDLE;
+        st  <= IDLE;
         seq <= (others => '0');
         chk <= (others => '0');
 
@@ -156,7 +157,7 @@ begin
         nid <= (others => '0');
         idx <= (others => '0');
 
-        mask_k <= 0;
+        mask_k   <= 0;
         mask_arr <= (others => (others => '0'));
 
       else
@@ -183,12 +184,18 @@ begin
             st <= M_RD_LATCH;
 
           when M_RD_LATCH =>
+            -- set bit if active
             if err_rdata_i(31) = '1' then
-              byte_idx := to_integer(mi(5 downto 3)); -- /8
-              bit_idx  := to_integer(mi(2 downto 0)); -- %8
-              tmp := mask_arr(byte_idx);
-              tmp(bit_idx) := '1';
-              mask_arr(byte_idx) <= tmp;
+              -- UPDATED: /8 uses mi(7 downto 3), %8 uses mi(2 downto 0)
+              byte_idx := to_integer(mi(7 downto 3));
+              bit_idx  := to_integer(mi(2 downto 0));
+
+              -- guard against wrong MASK_BYTES setting
+              if (byte_idx >= 0) and (byte_idx < integer(MASK_BYTES)) then
+                tmp := mask_arr(byte_idx);
+                tmp(bit_idx) := '1';
+                mask_arr(byte_idx) <= tmp;
+              end if;
             end if;
 
             if mi = to_unsigned(MAX_NODES-1, mi'length) then
@@ -224,9 +231,9 @@ begin
           when A1_SEQ =>
             if tx_busy_i='0' then
               kick(std_logic_vector(seq));
-              chk <= (others=>'0');
+              chk    <= (others=>'0');
               mask_k <= 0;
-              nid <= (others => '0');
+              nid    <= (others => '0');
               st <= A1_WSEQ;
             end if;
           when A1_WSEQ =>
@@ -259,7 +266,7 @@ begin
           when A1_NN =>
             if tx_busy_i='0' then
               kick(std_logic_vector(to_unsigned(MAX_NODES,8)));
-              add(std_logic_vector(to_unsigned(MAX_NODES,8)));
+              add (std_logic_vector(to_unsigned(MAX_NODES,8)));
               st <= A1_WNN;
             end if;
           when A1_WNN =>
@@ -267,8 +274,7 @@ begin
 
           when A1_DN =>
             if tx_busy_i='0' then
-              -- degN=0 => no edges
-              kick(x"00"); add(x"00");
+              kick(x"00"); add(x"00"); -- degN=0 => no edges
               st <= A1_WDN;
             end if;
           when A1_WDN =>
@@ -348,7 +354,7 @@ begin
             end if;
           when A1_WCHK =>
             if tx_done_i='1' then
-              seq <= seq + 1;           -- next packet seq
+              seq <= seq + 1; -- next packet seq
               st  <= B1_FF1;
             end if;
 
@@ -396,7 +402,7 @@ begin
           when B1_N =>
             if tx_busy_i='0' then
               kick(std_logic_vector(to_unsigned(N_SAMPLES,8)));
-              add(std_logic_vector(to_unsigned(N_SAMPLES,8)));
+              add (std_logic_vector(to_unsigned(N_SAMPLES,8)));
               st <= B1_WN;
             end if;
           when B1_WN =>
@@ -416,7 +422,7 @@ begin
           when B1_IDX =>
             if tx_busy_i='0' then
               kick(std_logic_vector(resize(idx,8)));
-              add(std_logic_vector(resize(idx,8)));
+              add (std_logic_vector(resize(idx,8)));
               st <= B1_WIDX;
             end if;
           when B1_WIDX =>
@@ -425,7 +431,7 @@ begin
           when B1_S1 =>
             if tx_busy_i='0' then
               kick(win_reg(7 downto 0));
-              add(win_reg(7 downto 0));
+              add (win_reg(7 downto 0));
               st <= B1_WS1;
             end if;
           when B1_WS1 =>
@@ -434,7 +440,7 @@ begin
           when B1_S2 =>
             if tx_busy_i='0' then
               kick(win_reg(15 downto 8));
-              add(win_reg(15 downto 8));
+              add (win_reg(15 downto 8));
               st <= B1_WS2;
             end if;
           when B1_WS2 =>
