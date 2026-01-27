@@ -25,7 +25,8 @@ architecture rtl of tang_nano_9k is
   constant DEPTH_BYTES : natural := 400;
   constant WORDS_C     : natural := DEPTH_BYTES/4; -- 100
 
-  constant GNG_MAX_NODES : natural := 40; -- (ubah ke 100 nanti kalau mau)
+  constant GNG_MAX_NODES : natural := 40;
+  constant MASK_BYTES    : natural := (GNG_MAX_NODES + 7)/8;
 
   ---------------------------------------------------------------------------
   -- UART RX
@@ -67,12 +68,10 @@ architecture rtl of tang_nano_9k is
   type mem_c_t is array (0 to WORDS_C-1) of std_logic_vector(31 downto 0);
   signal mem_c : mem_c_t;
 
-  -- write from copy
   signal c_we_copy    : std_logic;
   signal c_waddr_copy : unsigned(6 downto 0);
   signal c_wdata_copy : std_logic_vector(31 downto 0);
 
-  -- read for gng
   signal c_raddr_gng : unsigned(6 downto 0) := (others => '0');
   signal c_rdata_gng : std_logic_vector(31 downto 0) := (others => '0');
 
@@ -92,7 +91,7 @@ architecture rtl of tang_nano_9k is
   signal gng_busy    : std_logic;
 
   ---------------------------------------------------------------------------
-  -- GNG debug taps (read by dumper)  <-- UPDATED to 8-bit for node/err
+  -- GNG debug taps (read by dumper)
   ---------------------------------------------------------------------------
   signal dump_node_raddr : unsigned(7 downto 0) := (others => '0');
   signal dump_node_rdata : std_logic_vector(31 downto 0);
@@ -100,7 +99,7 @@ architecture rtl of tang_nano_9k is
   signal dump_err_raddr  : unsigned(7 downto 0) := (others => '0');
   signal dump_err_rdata  : std_logic_vector(31 downto 0);
 
-  -- (not used) keep as-is
+  -- edge debug (not dumped by this dumper)
   signal dump_edge_raddr : unsigned(12 downto 0) := (others => '0');
   signal dump_edge_rdata : std_logic_vector(15 downto 0);
 
@@ -120,15 +119,11 @@ architecture rtl of tang_nano_9k is
   type sm_t is (WAIT_DATA, RUN_GNG, WAIT_GNG, DO_DUMP, WAIT_DUMP);
   signal sm : sm_t := WAIT_DATA;
 
-  -- debug latch
   signal full_rx_store : std_logic := '0';
-
-  -- step field for dumper (kalau perlu)
   signal step_zero : unsigned(15 downto 0) := (others => '0');
 
 begin
 
-  -- tie off edge raddr (dumper kamu tidak pakai edges)
   dump_edge_raddr <= (others => '0');
 
   ---------------------------------------------------------------------------
@@ -250,7 +245,7 @@ begin
     );
 
   ---------------------------------------------------------------------------
-  -- have_data latch (set when copy_done pulse)
+  -- have_data latch
   ---------------------------------------------------------------------------
   process(clk_i)
   begin
@@ -261,7 +256,6 @@ begin
         if copy_done='1' then
           have_data <= '1';
         end if;
-        -- clear when we actually start GNG
         if gng_start_p='1' then
           have_data <= '0';
         end if;
@@ -270,7 +264,7 @@ begin
   end process;
 
   ---------------------------------------------------------------------------
-  -- Scheduler: upload -> run gng debug -> dump
+  -- Scheduler
   ---------------------------------------------------------------------------
   process(clk_i)
   begin
@@ -319,15 +313,15 @@ begin
   end process;
 
   ---------------------------------------------------------------------------
-  -- GNG DEBUG winner-only (reads dataset from mem_c)
-  -- NOTE: entity work.gng kamu harus sudah versi 8-bit untuk dbg_node/err addr
+  -- GNG
   ---------------------------------------------------------------------------
   u_gng : entity work.gng
     generic map (
       MAX_NODES  => GNG_MAX_NODES,
       DATA_WORDS => WORDS_C,
       INIT_X0    => 200, INIT_Y0 => 200,
-      INIT_X1    => 800, INIT_Y1 => 800
+      INIT_X1    => 800, INIT_Y1 => 800,
+      EDGE_A_MAX => 50
     )
     port map (
       clk_i   => clk_i,
@@ -340,7 +334,7 @@ begin
       gng_done_o => gng_done_p,
       gng_busy_o => gng_busy,
 
-      s1_id_o => open, -- 8-bit IDs (boleh open)
+      s1_id_o => open,
       s2_id_o => open,
 
       dbg_node_raddr_i => dump_node_raddr,
@@ -357,13 +351,12 @@ begin
     );
 
   ---------------------------------------------------------------------------
-  -- DUMP (0xA1 then 0xB1)
-  -- NOTE: entity work.gng_dump_nodes_winners_uart harus sudah 8-bit node/err addr
+  -- DUMP
   ---------------------------------------------------------------------------
   u_dump : entity work.gng_dump_nodes_winners_uart
     generic map (
       MAX_NODES  => GNG_MAX_NODES,
-      MASK_BYTES => 8,       -- untuk 40 nodes OK. kalau 100 nodes => set 13
+      MASK_BYTES => MASK_BYTES,
       N_SAMPLES  => WORDS_C
     )
     port map (

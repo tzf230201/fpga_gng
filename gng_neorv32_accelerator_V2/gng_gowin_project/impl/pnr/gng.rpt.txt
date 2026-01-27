@@ -12,27 +12,27 @@
   <Part Number>: GW1NR-LV9QN88PC6/I5
   <Device>: GW1NR-9
   <Device Version>: C
-  <Created Time>:Tue Jan 27 19:27:44 2026
+  <Created Time>:Tue Jan 27 23:59:05 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 0.065s, Elapsed time = 0h 0m 0.065s
-    Placement Phase 1: CPU time = 0h 0m 0.048s, Elapsed time = 0h 0m 0.047s
-    Placement Phase 2: CPU time = 0h 0m 0.104s, Elapsed time = 0h 0m 0.105s
-    Placement Phase 3: CPU time = 0h 0m 0.496s, Elapsed time = 0h 0m 0.495s
-    Total Placement: CPU time = 0h 0m 0.713s, Elapsed time = 0h 0m 0.712s
+    Placement Phase 0: CPU time = 0h 0m 0.523s, Elapsed time = 0h 0m 0.523s
+    Placement Phase 1: CPU time = 0h 0m 0.064s, Elapsed time = 0h 0m 0.063s
+    Placement Phase 2: CPU time = 0h 0m 0.679s, Elapsed time = 0h 0m 0.679s
+    Placement Phase 3: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
+    Total Placement: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.001s, Elapsed time = 0h 0m 0s
-    Routing Phase 1: CPU time = 0h 0m 0.135s, Elapsed time = 0h 0m 0.135s
-    Routing Phase 2: CPU time = 0h 0m 0.312s, Elapsed time = 0h 0m 0.312s
+    Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.001s
+    Routing Phase 1: CPU time = 0h 0m 0.789s, Elapsed time = 0h 0m 0.79s
+    Routing Phase 2: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 0m 0.448s, Elapsed time = 0h 0m 0.447s
+    Total Routing: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
  Generate output files:
-    CPU time = 0h 0m 0.738s, Elapsed time = 0h 0m 0.738s
+    CPU time = 0h 0m 0.725s, Elapsed time = 0h 0m 0.724s
 
- Total Time and Memory Usage: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s, Peak memory usage = 357MB
+ Total Time and Memory Usage: CPU time = 0h 0m 6s, Elapsed time = 0h 0m 6s, Peak memory usage = 362MB
 
 
 3. Resource Usage Summary
@@ -40,24 +40,25 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 1179/8640                           |  14%
-    --LUT,ALU,ROM16           | 1155(973 LUT, 182 ALU, 0 ROM16)     | -
+  Logic                       | 3119/8640                           |  37%
+    --LUT,ALU,ROM16           | 3095(2747 LUT, 348 ALU, 0 ROM16)    | -
     --SSRAM(RAM16)            | 4                                   | -
-  Register                    | 625/6693                            |  10%
+  Register                    | 2251/6693                           |  34%
     --Logic Register as Latch | 0/6480                              |  0%
-    --Logic Register as FF    | 623/6480                            |  10%
+    --Logic Register as FF    | 2249/6480                           |  35%
     --I/O Register as Latch   | 0/213                               |  0%
     --I/O Register as FF      | 2/213                               |  <1%
-  CLS                         | 789/4320                            |  19%
+  CLS                         | 2791/4320                           |  65%
   I/O Port                    | 10/71                               |  15%
   I/O Buf                     | 10                                  | -
     --Input Buf               | 3                                   | -
     --Output Buf              | 7                                   | -
     --Inout Buf               | 0                                   | -
-  BSRAM                       | 4/26                                | 16%
-    --SPX9                    | 1
-    --SDPB                    | 3
-  DSP                         | 1/10                                | 10%
+  BSRAM                       | 3/26                                | 12%
+    --SDPB                    | 2
+    --SDPX9B                  | 1
+  DSP                         | 1.75/10                             | 18%
+    --MULT9X9                 | 3
     --MULTADDALU18X18         | 1
   ================================================================================
 
@@ -80,7 +81,7 @@
   Clock Resource| Usage         | Utilization 
   ------------------------------------------
   PRIMARY       | 1/8           | 13%
-  LW            | 1/8           | 13%
+  LW            | 3/8           | 38%
   GCLK_PIN      | 2/3           | 67%
   ==========================================
 
@@ -92,6 +93,8 @@
   -------------------------------------------
   clk_i_d        | PRIMARY        |  TR TL BR BL
   rstn_i_d       | LW             |  -
+  u_gng/n120_4   | LW             |  -
+  u_gng/n7308_4  | LW             |  -
   ===========================================
 
 

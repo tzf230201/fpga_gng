@@ -30,48 +30,76 @@ entity gng_find_winner is
     s1_o : out unsigned(7 downto 0);
     s2_o : out unsigned(7 downto 0);
 
-    -- L2 squared distance (dx^2 + dy^2)
+    -- L2^2 distance (dx^2 + dy^2), 33-bit
     d1_o : out unsigned(32 downto 0)
   );
 end entity;
 
 architecture rtl of gng_find_winner is
 
+  subtype u8_t  is unsigned(7 downto 0);
+  subtype u16_t is unsigned(15 downto 0);
+  subtype u32_t is unsigned(31 downto 0);
+  subtype u33_t is unsigned(32 downto 0);
+
   type st_t is (ST_IDLE, ST_RD_SET, ST_RD_WAIT, ST_RD_LATCH, ST_NEXT, ST_FINISH);
   signal st : st_t := ST_IDLE;
 
-  -- 8-bit index
-  signal idx : unsigned(7 downto 0) := (others => '0');
+  signal idx : u8_t := (others => '0');
 
-  signal best_id   : unsigned(7 downto 0) := (others => '0');
-  signal second_id : unsigned(7 downto 0) := (others => '0');
+  signal best_id   : u8_t := (others => '0');
+  signal second_id : u8_t := (others => '0');
 
-  -- distances are L2^2; need wider than 17-bit
-  signal best_d    : unsigned(32 downto 0) := (others => '1');
-  signal second_d  : unsigned(32 downto 0) := (others => '1');
+  signal best_d    : u33_t := (others => '1');
+  signal second_d  : u33_t := (others => '1');
 
-  -- latched node x/y (optional debug)
+  -- optional debug latch
   signal nx : signed(15 downto 0) := (others => '0');
   signal ny : signed(15 downto 0) := (others => '0');
+
+  -- abs(signed17) -> unsigned16 (step-by-step, Gowin friendly)
+  function abs_u16(a : signed(16 downto 0)) return u16_t is
+    variable v : signed(16 downto 0);
+    variable r : u16_t;
+  begin
+    v := a;
+    if v(16) = '1' then
+      v := -v;
+    end if;
+    r := unsigned(v(15 downto 0));
+    return r;
+  end function;
+
+  -- square unsigned16 -> unsigned32
+  function sq_u32(u : u16_t) return u32_t is
+    variable p : u32_t;
+  begin
+    p := u * u;  -- 16*16 -> 32 bit
+    return p;
+  end function;
 
 begin
 
   node_raddr_o <= idx;
 
   process(clk_i)
-    variable dx        : signed(16 downto 0);  -- widen for safe multiply
-    variable dy        : signed(16 downto 0);
+    variable dx17     : signed(16 downto 0);
+    variable dy17     : signed(16 downto 0);
 
-    variable dx2       : unsigned(33 downto 0);
-    variable dy2       : unsigned(33 downto 0);
-    variable dist      : unsigned(32 downto 0);
+    variable adx      : u16_t;
+    variable ady      : u16_t;
 
-    variable ncnt      : integer;
-    variable iint      : integer;
-    variable is_active : boolean;
+    variable sx       : u32_t;
+    variable sy       : u32_t;
 
-    variable nx_v      : signed(15 downto 0);
-    variable ny_v      : signed(15 downto 0);
+    variable dist33   : u33_t;
+
+    variable ncnt     : integer;
+    variable iint     : integer;
+    variable is_active: boolean;
+
+    variable node_x   : signed(15 downto 0);
+    variable node_y   : signed(15 downto 0);
   begin
     if rising_edge(clk_i) then
       done_o <= '0';
@@ -79,10 +107,12 @@ begin
       if rstn_i = '0' then
         st        <= ST_IDLE;
         idx       <= (others => '0');
+
         best_id   <= (others => '0');
         second_id <= (others => '0');
         best_d    <= (others => '1');
         second_d  <= (others => '1');
+
         nx        <= (others => '0');
         ny        <= (others => '0');
 
@@ -108,25 +138,28 @@ begin
             st <= ST_RD_LATCH;
 
           when ST_RD_LATCH =>
-            nx_v := signed(node_rdata_i(15 downto 0));
-            ny_v := signed(node_rdata_i(31 downto 16));
+            node_x := signed(node_rdata_i(15 downto 0));
+            node_y := signed(node_rdata_i(31 downto 16));
 
-            nx <= nx_v;
-            ny <= ny_v;
+            nx <= node_x;
+            ny <= node_y;
 
-            -- compute L2^2 dist = dx^2 + dy^2
-            dx := resize(x_i, 17) - resize(nx_v, 17);
-            dy := resize(y_i, 17) - resize(ny_v, 17);
+            -- dx,dy in 17-bit to avoid overflow
+            dx17 := resize(x_i, 17) - resize(node_x, 17);
+            dy17 := resize(y_i, 17) - resize(node_y, 17);
 
-            dx2 := unsigned(dx * dx); -- signed*signed -> signed, cast to unsigned (non-negative)
-            dy2 := unsigned(dy * dy);
+            adx := abs_u16(dx17);
+            ady := abs_u16(dy17);
 
-            dist := resize(dx2, 33) + resize(dy2, 33);
+            sx := sq_u32(adx);
+            sy := sq_u32(ady);
+
+            dist33 := ('0' & sx) + ('0' & sy);  -- 33-bit sum
 
             ncnt := to_integer(node_count_i);
             iint := to_integer(idx);
 
-            -- SAFE active check (avoid out-of-range on active_mask)
+            -- SAFE active check
             is_active := false;
             if (iint >= 0) and (iint < ncnt) and (iint < integer(MAX_NODES)) then
               if active_mask_i(iint) = '1' then
@@ -135,15 +168,16 @@ begin
             end if;
 
             if is_active then
-              if dist < best_d then
+              if dist33 < best_d then
                 second_d  <= best_d;
                 second_id <= best_id;
-                best_d    <= dist;
+
+                best_d    <= dist33;
                 best_id   <= idx;
 
-              elsif dist < second_d then
+              elsif dist33 < second_d then
                 if idx /= best_id then
-                  second_d  <= dist;
+                  second_d  <= dist33;
                   second_id <= idx;
                 end if;
               end if;

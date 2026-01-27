@@ -9,7 +9,7 @@
   "SubInsts" : [
    {
     "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 191,
+    "InstLine" : 186,
     "InstName" : "u_rx",
     "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/uart_rx.vhd",
     "ModuleLine" : 5,
@@ -17,7 +17,7 @@
    },
    {
     "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 209,
+    "InstLine" : 204,
     "InstName" : "u_store",
     "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/rx_store.vhd",
     "ModuleLine" : 5,
@@ -25,7 +25,7 @@
    },
    {
     "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 234,
+    "InstLine" : 229,
     "InstName" : "u_copy_8to32",
     "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/bram_copy_8to32.vhd",
     "ModuleLine" : 5,
@@ -33,7 +33,7 @@
    },
    {
     "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 325,
+    "InstLine" : 318,
     "InstName" : "u_gng",
     "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd",
     "ModuleLine" : 5,
@@ -41,7 +41,7 @@
     "SubInsts" : [
      {
       "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd",
-      "InstLine" : 190,
+      "InstLine" : 298,
       "InstName" : "u_find",
       "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_find_winner.vhd",
       "ModuleLine" : 5,
@@ -49,17 +49,25 @@
      },
      {
       "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd",
-      "InstLine" : 219,
+      "InstLine" : 330,
       "InstName" : "u_edge",
-      "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/edge_aging.vhd",
-      "ModuleLine" : 14,
+      "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_edge_aging.vhd",
+      "ModuleLine" : 5,
       "ModuleName" : "edge_aging"
+     },
+     {
+      "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd",
+      "InstLine" : 360,
+      "InstName" : "u_move",
+      "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_move_winner_neighbors.vhd",
+      "ModuleLine" : 5,
+      "ModuleName" : "gng_move_winner_neighbors"
      }
     ]
    },
    {
     "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 363,
+    "InstLine" : 356,
     "InstName" : "u_dump",
     "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_dump_state_uart_sumchk.vhd",
     "ModuleLine" : 5,
@@ -67,7 +75,7 @@
    },
    {
     "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",
-    "InstLine" : 397,
+    "InstLine" : 390,
     "InstName" : "u_tx",
     "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/uart_tx.vhd",
     "ModuleLine" : 5,
