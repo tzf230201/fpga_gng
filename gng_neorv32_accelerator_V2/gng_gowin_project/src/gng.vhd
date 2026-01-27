@@ -48,7 +48,7 @@ end entity;
 
 architecture rtl of gng is
 
-  -- FIX: jangan pakai literal "NEXT" (reserved word VHDL)
+  -- FSM
   type st_t is (ST_IDLE, ST_RD_SET, ST_RD_WAIT, ST_RD_LATCH, ST_WF_START, ST_WF_WAIT, ST_NEXT, ST_FINISH);
   signal st : st_t := ST_IDLE;
 
@@ -59,6 +59,18 @@ architecture rtl of gng is
   -- start edge detect
   signal start_d : std_logic := '0';
   signal start_p : std_logic := '0';
+
+  -- ============================================================
+  -- FIX: active_mask jangan hanya di-set saat reset.
+  -- Buat initializer mask untuk node0 & node1 aktif.
+  -- ============================================================
+  function init_active_mask return std_logic_vector is
+    variable m : std_logic_vector(MAX_NODES-1 downto 0) := (others => '0');
+  begin
+    if MAX_NODES > 0 then m(0) := '1'; end if;
+    if MAX_NODES > 1 then m(1) := '1'; end if;
+    return m;
+  end function;
 
   -- winner finder signals
   signal wf_start : std_logic := '0';
@@ -73,7 +85,8 @@ architecture rtl of gng is
   signal wf_node_rdata : std_logic_vector(31 downto 0) := (others => '0');
 
   signal node_count  : unsigned(5 downto 0) := to_unsigned(2,6);
-  signal active_mask : std_logic_vector(MAX_NODES-1 downto 0) := (others => '0');
+  -- FIX: default active_mask langsung node0 & node1 aktif
+  signal active_mask : std_logic_vector(MAX_NODES-1 downto 0) := init_active_mask;
 
   -- winner log BRAM (100 records)
   type win_mem_t is array (0 to DATA_WORDS-1) of std_logic_vector(15 downto 0);
@@ -93,7 +106,7 @@ architecture rtl of gng is
 
 begin
 
-  -- start pulse
+  -- start pulse (registered edge detect)
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -107,14 +120,16 @@ begin
     end if;
   end process;
 
-  -- only node0 & node1 active (debug version)
+  -- FIX: pastikan node0 & node1 aktif bukan cuma setelah reset,
+  -- tapi juga setiap kali start (jadi gak perlu reset manual).
   process(clk_i)
   begin
     if rising_edge(clk_i) then
       if rstn_i='0' then
-        active_mask <= (others => '0');
-        if MAX_NODES > 0 then active_mask(0) <= '1'; end if;
-        if MAX_NODES > 1 then active_mask(1) <= '1'; end if;
+        active_mask <= init_active_mask;
+        node_count  <= to_unsigned(2,6);
+      elsif start_p='1' then
+        active_mask <= init_active_mask;
         node_count  <= to_unsigned(2,6);
       end if;
     end if;
@@ -191,11 +206,9 @@ begin
             end if;
 
           when ST_RD_SET =>
-            -- address already stable via step_idx
             st <= ST_RD_WAIT;
 
           when ST_RD_WAIT =>
-            -- wait 1 cycle for data_rdata_i
             st <= ST_RD_LATCH;
 
           when ST_RD_LATCH =>

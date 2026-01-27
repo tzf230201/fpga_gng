@@ -41,7 +41,7 @@
     "SubInsts" : [
      {
       "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd",
-      "InstLine" : 143,
+      "InstLine" : 158,
       "InstName" : "u_find",
       "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_find_winner.vhd",
       "ModuleLine" : 5,
