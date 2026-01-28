@@ -18,11 +18,6 @@
   },
   {
    "Library" : "work",
-   "Path" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_find_winner.vhd",
-   "Type" : "vhdl"
-  },
-  {
-   "Library" : "work",
    "Path" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/rx_store.vhd",
    "Type" : "vhdl"
   },
@@ -39,16 +34,6 @@
   {
    "Library" : "work",
    "Path" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/uart_tx.vhd",
-   "Type" : "vhdl"
-  },
-  {
-   "Library" : "work",
-   "Path" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_edge_aging.vhd",
-   "Type" : "vhdl"
-  },
-  {
-   "Library" : "work",
-   "Path" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_move_winner_neighbors.vhd",
    "Type" : "vhdl"
   }
  ],

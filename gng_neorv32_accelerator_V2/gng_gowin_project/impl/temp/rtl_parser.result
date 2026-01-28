@@ -37,33 +37,7 @@
     "InstName" : "u_gng",
     "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd",
     "ModuleLine" : 5,
-    "ModuleName" : "gng",
-    "SubInsts" : [
-     {
-      "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd",
-      "InstLine" : 298,
-      "InstName" : "u_find",
-      "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_find_winner.vhd",
-      "ModuleLine" : 5,
-      "ModuleName" : "gng_find_winner"
-     },
-     {
-      "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd",
-      "InstLine" : 330,
-      "InstName" : "u_edge",
-      "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_edge_aging.vhd",
-      "ModuleLine" : 5,
-      "ModuleName" : "edge_aging"
-     },
-     {
-      "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng.vhd",
-      "InstLine" : 360,
-      "InstName" : "u_move",
-      "ModuleFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/gng_move_winner_neighbors.vhd",
-      "ModuleLine" : 5,
-      "ModuleName" : "gng_move_winner_neighbors"
-     }
-    ]
+    "ModuleName" : "gng"
    },
    {
     "InstFile" : "C:/Users/teuku/Documents/Github/fpga_gng/gng_neorv32_accelerator_V2/gng_gowin_project/src/tang_nano_9k.vhd",

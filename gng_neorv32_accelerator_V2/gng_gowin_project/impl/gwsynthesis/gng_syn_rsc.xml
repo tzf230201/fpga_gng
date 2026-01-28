@@ -1,13 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Module name="tang_nano_9k" Register="8" Lut="14" Bsram="2" T_Register="2251(8)" T_Alu="319(0)" T_Lut="2748(14)" T_MULT9X9="3(0)" T_MULTADDALU18X18="1(0)" T_Bsram="3(2)" T_Ssram="4(0)">
- <SubModule name="u_rx" Register="48" Lut="88" T_Register="48(48)" T_Lut="88(88)"/>
- <SubModule name="u_store" Register="31" Lut="17" T_Register="31(31)" T_Lut="17(17)"/>
- <SubModule name="u_copy_8to32" Register="98" Lut="50" T_Register="98(98)" T_Lut="50(50)"/>
- <SubModule name="u_gng" Register="1598" Lut="1626" T_Register="1825(1598)" T_Alu="255(0)" T_Lut="2142(1626)" T_MULT9X9="3(0)" T_MULTADDALU18X18="1(0)" T_Bsram="1(0)">
-  <SubModule name="u_find" Register="83" Alu="97" Lut="179" MULTADDALU18X18="1" T_Register="83(83)" T_Alu="97(97)" T_Lut="179(179)" T_MULTADDALU18X18="1(1)"/>
-  <SubModule name="u_edge" Register="59" Alu="40" Lut="187" MULT9X9="2" Bsram="1" T_Register="59(59)" T_Alu="40(40)" T_Lut="187(187)" T_MULT9X9="2(2)" T_Bsram="1(1)"/>
-  <SubModule name="u_move" Register="85" Alu="118" Lut="150" MULT9X9="1" T_Register="85(85)" T_Alu="118(118)" T_Lut="150(150)" T_MULT9X9="1(1)"/>
- </SubModule>
- <SubModule name="u_dump" Register="193" Alu="64" Lut="348" Ssram="4" T_Register="193(193)" T_Alu="64(64)" T_Lut="348(348)" T_Ssram="4(4)"/>
- <SubModule name="u_tx" Register="48" Lut="89" T_Register="48(48)" T_Lut="89(89)"/>
+<Module name="tang_nano_9k" Register="8" Lut="14" Bsram="2" T_Register="1969(8)" T_Alu="303(0)" T_Lut="5594(14)" T_MULTADDALU18X18="1(0)" T_Bsram="4(2)" T_Ssram="4(0)">
+ <SubModule name="u_rx" Register="48" Lut="118" T_Register="48(48)" T_Lut="118(118)"/>
+ <SubModule name="u_store" Register="31" Lut="18" T_Register="31(31)" T_Lut="18(18)"/>
+ <SubModule name="u_copy_8to32" Register="98" Lut="49" T_Register="98(98)" T_Lut="49(49)"/>
+ <SubModule name="u_gng" Register="1536" Alu="239" Lut="4939" MULTADDALU18X18="1" Bsram="2" T_Register="1536(1536)" T_Alu="239(239)" T_Lut="4939(4939)" T_MULTADDALU18X18="1(1)" T_Bsram="2(2)"/>
+ <SubModule name="u_dump" Register="200" Alu="64" Lut="364" Ssram="4" T_Register="200(200)" T_Alu="64(64)" T_Lut="364(364)" T_Ssram="4(4)"/>
+ <SubModule name="u_tx" Register="48" Lut="92" T_Register="48(48)" T_Lut="92(92)"/>
 </Module>
