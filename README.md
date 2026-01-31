@@ -13,6 +13,8 @@ This tutorial explains how to:
 6. Configure the Makefile to use the correct Python interpreter
 7. Build the firmware
 8. Flash the firmware using `make program`
+9. Install processing 4.4.10
+10. Use dataset form processing_gng_dataset folder
 
 This documentation is intended for the **fpga_gng/picotiny** project.
 
@@ -177,6 +179,12 @@ Or (recommended):
 PYTHON ?= /mingw64/bin/python
 ```
 
+install pyserial
+
+```
+pacman -S mingw-w64-x86_64-python-pyserial
+
+```
 ---
 
 # 🏗️ 9. Build the Firmware
