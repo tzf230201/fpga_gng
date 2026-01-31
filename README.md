@@ -107,7 +107,7 @@ Choose the Windows `.zip` release (not installer).
 Example folder path after extraction:
 
 ```
-C:\xpack-riscv-none-embed-gcc\12.2.0-1\bin
+C:\xpack-riscv-none-embed-gcc\bin
 ```
 
 Add this folder to PATH inside MSYS2.
@@ -120,7 +120,7 @@ nano ~/.bashrc
 Add:
 
 ```
-export PATH="/c/xpack-riscv-none-embed-gcc/12.2.0-1/bin:$PATH"
+export PATH="/c/xpack-riscv-none-embed-gcc/bin:$PATH"
 ```
 
 Reload:
@@ -132,7 +132,7 @@ source ~/.bashrc
 Check:
 
 ```
-riscv-none-embed-gcc --version
+riscv-none-elf-gcc --version
 ```
 
 You should see xPack GCC version info.
