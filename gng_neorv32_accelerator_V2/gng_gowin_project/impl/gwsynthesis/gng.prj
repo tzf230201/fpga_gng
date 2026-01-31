@@ -6,7 +6,6 @@
     <FileList>
         <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\bram_copy_8to32.vhd" type="vhdl"/>
         <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\gng.vhd" type="vhdl"/>
-        <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\gng_dump_state_uart_sumchk.vhd" type="vhdl"/>
         <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\rx_store.vhd" type="vhdl"/>
         <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\tang_nano_9k.vhd" type="vhdl"/>
         <File path="C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\uart_rx.vhd" type="vhdl"/>

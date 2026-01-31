@@ -1,0 +1,17 @@
+-d C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\impl\gwsynthesis\gng.vg
+-p GW1NR-9C-QFN88P-6
+-pn GW1NR-LV9QN88PC6/I5
+-cst C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\tang_nano_9k.cst
+-cfg C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\impl\pnr\device.cfg
+-sdc C:\Users\teuku\Documents\Github\fpga_gng\gng_neorv32_accelerator_V2\gng_gowin_project\src\tang_nano_9k.sdc
+-bit
+-tr
+-ph
+-timing
+-cst_error
+-place_option 0
+-route_option 0
+-clock_route_order 0
+-correct_hold 1
+-route_maxfan 23
+-global_freq 50.000

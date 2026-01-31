@@ -25,10 +25,27 @@ byte[] txBuf = new byte[TX_BYTES];
 float[][] moonsTx;
 
 // ======================================================
-// Packet types
+// Packet types (framed dump - your old format)
 // ======================================================
-final int PKT_TYPE_WIN = 0xB1; // winners log
-final int PKT_TYPE_GNG = 0xA1; // optional
+final int PKT_TYPE_EDGE = 0xB1; // edges dump
+final int PKT_TYPE_NODE = 0xA1; // nodes dump
+
+// ======================================================
+// DEBUG stream from new gng.vhd FSM
+// sends: A5 <state> every 100ms, last: A5 FF
+// ======================================================
+final int DBG_HDR = 0xA5;
+boolean dbgWaitState = false;
+int dbgLastState = -1;
+int dbgCount = 0;
+int dbgLastMs = 0;
+String dbgMsg = "no dbg yet";
+
+// keep small history
+final int DBG_HIST_MAX = 32;
+int[] dbgHistState = new int[DBG_HIST_MAX];
+int[] dbgHistMs    = new int[DBG_HIST_MAX];
+int dbgHistN = 0;
 
 // ======================================================
 // RX framed packets: FF FF LEN(2) SEQ(1) PAYLOAD LEN bytes CHK(1)
@@ -56,42 +73,53 @@ int lastPktMs = 0;
 String statusMsg = "idle";
 String verifyMsg = "";
 
-// ======================================================
-// IMPORTANT: jangan buang 0xB1 yang dikirim cepat
-// Kita masih boleh "ignore", tapi hanya sampai ketemu header FF FF.
-// ======================================================
-boolean ignoreRx = false;
-final int IGNORE_AFTER_SEND_MS = 0; // biar aman, 0
-int tSendMs = 0;
-
 // fast read
 byte[] inBuf = new byte[8192];
 int lastByteMs = 0;
 final int PARSER_TIMEOUT_MS = 120;
 
 // ======================================================
-// Winners storage (sorted by idx)
+// Storage for NODE packet (0xA1)
 // ======================================================
-boolean haveWin = false;
-int winN = 0;
+final int MAX_NODES = 64;
+final int MASK_BYTES = 8;
 
-int[] s1ByIdx = new int[256];
-int[] s2ByIdx = new int[256];
-boolean[] seenIdx = new boolean[256];
+boolean haveNodes = false;
+int nodeN = 0;
+boolean[] nodeActive = new boolean[MAX_NODES];
+float[] nodeX = new float[MAX_NODES];
+float[] nodeY = new float[MAX_NODES];
+int stepA1 = 0;
 
-boolean printedThisRun = false;
-boolean AUTO_SAVE_CSV = true;
-String CSV_NAME = "winners_fpga.csv";
+// ======================================================
+// Storage for EDGE packet (0xB1)
+// ======================================================
+boolean haveEdges = false;
+int edgeNNodes = 0;
+int edgeCount = 0;
 
+int[] edgeI = new int[2048];
+int[] edgeJ = new int[2048];
+int[] edgeAge = new int[2048];
+boolean[] edgeSeen = new boolean[2048];
+
+// base table for inverse mapping
+int[] edgeBase = new int[MAX_NODES];
+
+// ======================================================
+// UI
+// ======================================================
 int scroll = 0;
 final int LINES_PER_PAGE = 26;
+
+float viewMinX, viewMaxX, viewMinY, viewMaxY;
 
 // ======================================================
 // Setup
 // ======================================================
 void setup() {
   size(1400, 780);
-  surface.setTitle("GNG Winner Print (0xB1) - FPGA log");
+  surface.setTitle("GNG Viewer (framed A1/B1) + DEBUG FSM (A5 state)");
   textFont(createFont("Consolas", 14));
   frameRate(60);
 
@@ -116,10 +144,10 @@ void draw() {
   drawPanels();
   drawDebugBar();
 
-  // timeout rescue
+  // timeout rescue for framed parser ONLY
   if (st != RxState.FIND_FF1 && (millis() - lastByteMs) > PARSER_TIMEOUT_MS) {
     resetParser();
-    statusMsg = "Parser reset (timeout) -> resync";
+    statusMsg = "Framed parser reset (timeout) -> resync";
   }
 }
 
@@ -130,15 +158,13 @@ void keyPressed() {
   } else if (key == 's' || key == 'S') {
     sendDatasetOnce();
   } else if (key == 'p' || key == 'P') {
-    if (haveWin) printWinnersToConsole();
-    else println("No winners yet.");
-  } else if (key == 'w' || key == 'W') {
-    if (haveWin) saveWinnersCsv(CSV_NAME);
-    else println("No winners yet.");
+    printNodesToConsole();
+    printEdgesToConsole(30);
+    printDbgToConsole();
   } else if (keyCode == UP) {
     scroll = max(0, scroll - 1);
   } else if (keyCode == DOWN) {
-    scroll = min(99, scroll + 1);
+    scroll = min(2000, scroll + 1);
   }
 }
 
@@ -148,26 +174,26 @@ void keyPressed() {
 void sendDatasetOnce() {
   resetParser();
 
-  haveWin = false;
-  winN = 0;
-  printedThisRun = false;
+  // reset framed results
+  haveNodes = false;
+  haveEdges = false;
+  nodeN = 0;
+  edgeCount = 0;
+  for (int i=0;i<MAX_NODES;i++) nodeActive[i] = false;
+  for (int i=0;i<edgeSeen.length;i++) edgeSeen[i] = false;
+
+  // reset debug A5 state
+  dbgWaitState = false;
+  dbgLastState = -1;
+  dbgCount = 0;
+  dbgLastMs = 0;
+  dbgMsg = "waiting A5...";
+  dbgHistN = 0;
+
   scroll = 0;
 
-  for (int i=0;i<256;i++) {
-    s1ByIdx[i] = -1;
-    s2ByIdx[i] = -1;
-    seenIdx[i] = false;
-  }
-
-  // MULAI ignore sebentar (opsional), tapi kita akan unlock saat ketemu FF FF
-  tSendMs = millis();
-  ignoreRx = (IGNORE_AFTER_SEND_MS > 0);
-
-  statusMsg = "TX: sent 400 bytes. Waiting 0xB1...";
+  statusMsg = "TX: sent 400 bytes. Waiting A5 (FSM) or framed A1/B1...";
   myPort.write(txBuf);
-
-  // kalau IGNORE_AFTER_SEND_MS = 0, langsung listen
-  if (IGNORE_AFTER_SEND_MS == 0) ignoreRx = false;
 }
 
 // ======================================================
@@ -179,34 +205,61 @@ void serialEvent(Serial p) {
 
   lastByteMs = millis();
 
-  // kalau lagi ignore, kita scan FF FF supaya paket 0xB1 yang cepat tidak hilang
-  if (ignoreRx) {
-    // timeout ignore
-    if ((millis() - tSendMs) > IGNORE_AFTER_SEND_MS) {
-      ignoreRx = false;
-    } else {
-      // scan header
-      for (int i=0; i<n-1; i++) {
-        int b0 = inBuf[i] & 0xFF;
-        int b1 = inBuf[i+1] & 0xFF;
-        if (b0 == 0xFF && b1 == 0xFF) {
-          ignoreRx = false;
-          resetParser();
-          // feed mulai dari posisi FF pertama
-          for (int j=i; j<n; j++) feedParser(inBuf[j] & 0xFF);
-          return;
-        }
-      }
-      return; // masih ignore dan belum ketemu header
+  for (int i=0; i<n; i++) {
+    int ub = inBuf[i] & 0xFF;
+
+    // ============================
+    // DEBUG A5 STREAM PARSER
+    // only intercept when framed parser is idle
+    // ============================
+    if (dbgWaitState) {
+      dbgWaitState = false;
+      onDbgStateByte(ub);
+      continue; // do NOT feed framed parser
     }
+
+    // detect A5 header when framed parser is in resync/idle
+    if (st == RxState.FIND_FF1 && ub == DBG_HDR) {
+      dbgWaitState = true;
+      continue; // do NOT feed framed parser
+    }
+
+    // otherwise feed framed packet parser (FF FF LEN ...)
+    feedParser(ub);
+  }
+}
+
+void onDbgStateByte(int stByte) {
+  dbgLastState = stByte & 0xFF;
+  dbgCount++;
+  dbgLastMs = millis();
+
+  // push to history (ring buffer)
+  if (dbgHistN < DBG_HIST_MAX) {
+    dbgHistState[dbgHistN] = dbgLastState;
+    dbgHistMs[dbgHistN] = dbgLastMs;
+    dbgHistN++;
+  } else {
+    // shift left (simple, small array)
+    for (int k=0; k<DBG_HIST_MAX-1; k++) {
+      dbgHistState[k] = dbgHistState[k+1];
+      dbgHistMs[k]    = dbgHistMs[k+1];
+    }
+    dbgHistState[DBG_HIST_MAX-1] = dbgLastState;
+    dbgHistMs[DBG_HIST_MAX-1]    = dbgLastMs;
   }
 
-  // normal parse
-  for (int i=0; i<n; i++) feedParser(inBuf[i] & 0xFF);
+  if (dbgLastState == 0xFF) {
+    dbgMsg = "FSM END (A5 FF)";
+    statusMsg = "Got A5 FF (FSM end).";
+  } else {
+    dbgMsg = "FSM state=" + dbgLastState;
+    statusMsg = "Got A5 state=" + dbgLastState;
+  }
 }
 
 // ======================================================
-// Parser
+// Framed Parser (unchanged)
 // ======================================================
 void feedParser(int ub) {
   switch(st) {
@@ -270,98 +323,152 @@ void onGoodPacket(int seq, int len) {
   if (len < 1) return;
   int type = payload[0] & 0xFF;
 
-  if (type == PKT_TYPE_WIN) {
-    if (decodeWinnersB1(len)) {
-      verifyMsg = "0xB1 OK: N=" + winN + " (idx 0..99)";
-      statusMsg = "Got 0xB1 winners.";
-
-      if (!printedThisRun) {
-        printWinnersToConsole();
-        if (AUTO_SAVE_CSV) saveWinnersCsv(CSV_NAME);
-        printedThisRun = true;
-      }
+  if (type == PKT_TYPE_NODE) {
+    if (decodeNodesA1(len)) {
+      verifyMsg = "0xA1 OK: NN=" + nodeN + " step=" + stepA1;
+      statusMsg = "Got 0xA1 nodes.";
     } else {
-      verifyMsg = "0xB1 decode failed (len=" + len + ")";
+      verifyMsg = "0xA1 decode FAILED len=" + len;
       pktBad++;
     }
     return;
   }
 
-  if (type == PKT_TYPE_GNG) {
-    verifyMsg = "0xA1 received (ignored here), len=" + len;
+  if (type == PKT_TYPE_EDGE) {
+    if (decodeEdgesB1(len)) {
+      verifyMsg = "0xB1 OK: NN=" + edgeNNodes + " edges=" + edgeCount;
+      statusMsg = "Got 0xB1 edges.";
+    } else {
+      verifyMsg = "0xB1 decode FAILED len=" + len;
+      pktBad++;
+    }
     return;
   }
 
-  verifyMsg = "Unknown type=0x" + hex(type,2) + " len=" + len;
+  verifyMsg = "Unknown framed type=0x" + hex(type,2) + " len=" + len;
 }
 
 // ======================================================
-// Decode 0xB1
-// payload: [0]=B1 [1]=N [2..]= idx,s1,s2 repeated
+// Decode 0xA1 nodes (unchanged)
 // ======================================================
-boolean decodeWinnersB1(int len) {
+boolean decodeNodesA1(int len) {
   int p = 0;
   int type = payload[p++] & 0xFF;
-  if (type != PKT_TYPE_WIN) return false;
-  if (p + 1 > len) return false;
+  if (type != PKT_TYPE_NODE) return false;
 
-  int N = payload[p++] & 0xFF;
-  if (N <= 0 || N > 255) return false;
+  if (p + 2 + 1 + 1 + MASK_BYTES > len) return false;
 
-  int need = 2 + (N * 3);
+  int stepL = payload[p++] & 0xFF;
+  int stepH = payload[p++] & 0xFF;
+  stepA1 = stepL | (stepH << 8);
+
+  int NN = payload[p++] & 0xFF;
+  int degN = payload[p++] & 0xFF; // unused
+
+  if (NN <= 0 || NN > MAX_NODES) return false;
+  nodeN = NN;
+
+  int[] mask = new int[MASK_BYTES];
+  for (int i=0;i<MASK_BYTES;i++) mask[i] = payload[p++] & 0xFF;
+
+  int need = 1 + 2 + 1 + 1 + MASK_BYTES + (NN * 4);
   if (len < need) return false;
-  if (len != need) println("WARN: len=" + len + " expected=" + need);
 
-  winN = N;
+  for (int i=0;i<NN;i++) {
+    int xLo = payload[p++] & 0xFF;
+    int xHi = payload[p++] & 0xFF;
+    int yLo = payload[p++] & 0xFF;
+    int yHi = payload[p++] & 0xFF;
 
-  for (int i=0;i<256;i++) seenIdx[i] = false;
+    int xi = (short)(xLo | (xHi << 8));
+    int yi = (short)(yLo | (yHi << 8));
 
-  for (int i=0;i<N;i++) {
-    int idx = payload[p++] & 0xFF;
-    int s1  = payload[p++] & 0xFF;
-    int s2  = payload[p++] & 0xFF;
-
-    s1ByIdx[idx] = s1;
-    s2ByIdx[idx] = s2;
-    seenIdx[idx] = true;
+    nodeX[i] = xi / SCALE;
+    nodeY[i] = yi / SCALE;
   }
 
-  haveWin = true;
+  for (int i=0;i<MAX_NODES;i++) nodeActive[i] = false;
+  for (int i=0;i<NN;i++) {
+    int b = mask[i/8];
+    int bit = (b >> (i % 8)) & 1;
+    nodeActive[i] = (bit == 1);
+  }
+
+  haveNodes = true;
   return true;
 }
 
 // ======================================================
-// Print + CSV (sorted by idx)
+// Edge base helper (unchanged)
 // ======================================================
-void printWinnersToConsole() {
-  println("====================================================");
-  println("FPGA 0xB1 WINNERS (sorted by idx) N=" + winN);
-  println("idx | s1(winner) | s2(runner-up)");
-  println("====================================================");
-  for (int idx=0; idx<100; idx++) {
-    if (seenIdx[idx]) println(nf(idx,3) + " | " + nf(s1ByIdx[idx],3) + " | " + nf(s2ByIdx[idx],3));
-    else              println(nf(idx,3) + " |   -   |   -   (missing)");
+void buildEdgeBase(int N) {
+  int acc = 0;
+  for (int i=0;i<N;i++) {
+    edgeBase[i] = acc;
+    acc += (N - 1 - i);
   }
-  println("====================================================");
 }
 
-void saveWinnersCsv(String filename) {
-  PrintWriter out = createWriter(filename);
-  out.println("idx,s1,s2");
-  for (int idx=0; idx<100; idx++) {
-    if (seenIdx[idx]) out.println(idx + "," + s1ByIdx[idx] + "," + s2ByIdx[idx]);
-    else              out.println(idx + ",,");
-  }
-  out.flush();
-  out.close();
-  println("Saved CSV -> " + sketchPath(filename));
+int findIFromIdx(int idx, int N) {
+  int i = 0;
+  while (i+1 < N && idx >= edgeBase[i+1]) i++;
+  return i;
 }
 
 // ======================================================
-// UI
+// Decode 0xB1 edges (unchanged)
 // ======================================================
-float viewMinX, viewMaxX, viewMinY, viewMaxY;
+boolean decodeEdgesB1(int len) {
+  int p = 0;
+  int type = payload[p++] & 0xFF;
+  if (type != PKT_TYPE_EDGE) return false;
 
+  if (p + 1 + 2 > len) return false;
+
+  int NN = payload[p++] & 0xFF;
+  int ecL = payload[p++] & 0xFF;
+  int ecH = payload[p++] & 0xFF;
+  int EC = ecL | (ecH << 8);
+
+  if (NN <= 0 || NN > MAX_NODES) return false;
+  if (EC <= 0 || EC > edgeSeen.length) return false;
+
+  int need = 1 + 1 + 2 + (EC * 3);
+  if (len < need) return false;
+
+  edgeNNodes = NN;
+  edgeCount  = EC;
+
+  for (int i=0;i<edgeSeen.length;i++) edgeSeen[i] = false;
+
+  buildEdgeBase(NN);
+
+  for (int k=0;k<EC;k++) {
+    int idxL = payload[p++] & 0xFF;
+    int idxH = payload[p++] & 0xFF;
+    int age  = payload[p++] & 0xFF;
+
+    int idx = idxL | (idxH << 8);
+    if (idx < 0 || idx >= EC) continue;
+
+    int ii = findIFromIdx(idx, NN);
+    int off = idx - edgeBase[ii];
+    int jj = ii + 1 + off;
+    if (jj < 0 || jj >= NN) continue;
+
+    edgeI[idx] = ii;
+    edgeJ[idx] = jj;
+    edgeAge[idx] = age;
+    edgeSeen[idx] = true;
+  }
+
+  haveEdges = true;
+  return true;
+}
+
+// ======================================================
+// UI (sedikit ditambah: DBG info)
+// ======================================================
 void drawPanels() {
   float leftX  = 60;
   float rightX = 740;
@@ -374,34 +481,82 @@ void drawPanels() {
   drawScatter(moonsTx, leftX, panelY, panelW, panelH, 255, 5);
 
   fill(230);
-  text("0xB1 winners list (idx -> s1,s2)", rightX, 55);
-  drawScatter(moonsTx, rightX, panelY, panelW, panelH, 90, 4);
+  text("RX: framed A1/B1 (later) + DEBUG A5 state (now)", rightX, 55);
+  drawScatter(moonsTx, rightX, panelY, panelW, panelH, 70, 4);
 
-  // list box
+  // overlay nodes+edges if they exist
+  drawGraphOverlay(rightX, panelY, panelW, panelH);
+
+  // info box
   fill(0, 160);
   noStroke();
-  rect(rightX + 20, panelY + 20, panelW - 40, 430);
+  rect(rightX + 20, panelY + 20, panelW - 40, 180);
 
   fill(220);
-  if (!haveWin) {
-    text("waiting 0xB1...", rightX + 30, panelY + 45);
-  } else {
-    text("RECEIVED 0xB1: N=" + winN + "  (UP/DOWN scroll, P print, W save)", rightX + 30, panelY + 45);
-    text("Showing idx " + scroll + " .. " + min(99, scroll + LINES_PER_PAGE - 1), rightX + 30, panelY + 70);
+  int yy = (int)(panelY + 45);
 
-    int y = (int)(panelY + 100);
-    fill(200);
-    for (int idx = scroll; idx < 100 && idx < scroll + LINES_PER_PAGE; idx++) {
-      if (seenIdx[idx]) text(nf(idx,3) + ": s1=" + nf(s1ByIdx[idx],2) + "  s2=" + nf(s2ByIdx[idx],2), rightX + 30, y);
-      else              text(nf(idx,3) + ": (missing)", rightX + 30, y);
-      y += 16;
-    }
+  // DEBUG A5
+  text("DBG: " + dbgMsg + "  (count=" + dbgCount + ")", rightX + 30, yy); yy += 18;
+
+  // framed packets
+  text("Nodes: " + (haveNodes ? ("OK (NN=" + nodeN + ", step=" + stepA1 + ")") : "waiting 0xA1..."), rightX + 30, yy); yy += 18;
+  text("Edges: " + (haveEdges ? ("OK (EC=" + edgeCount + ", NN=" + edgeNNodes + ")") : "waiting 0xB1..."), rightX + 30, yy); yy += 18;
+
+  // show last few dbg states
+  yy += 8;
+  text("Last DBG states:", rightX + 30, yy); yy += 16;
+  int show = min(dbgHistN, 8);
+  for (int k=0; k<show; k++) {
+    int idx = dbgHistN - show + k;
+    int s = dbgHistState[idx];
+    text("  " + nf(k,1) + ") state=" + (s==0xFF ? "END(FF)" : str(s)), rightX + 30, yy);
+    yy += 16;
   }
 
   noFill();
   stroke(60);
   rect(leftX, panelY, panelW, panelH);
   rect(rightX, panelY, panelW, panelH);
+}
+
+void drawGraphOverlay(float x0, float y0, float w, float h) {
+  if (!haveNodes) return;
+
+  if (haveEdges) {
+    for (int idx=0; idx<edgeCount; idx++) {
+      if (!edgeSeen[idx]) continue;
+      int age = edgeAge[idx] & 0xFF;
+      if (age == 0) continue;
+
+      int i = edgeI[idx];
+      int j = edgeJ[idx];
+      if (i < 0 || j < 0 || i >= nodeN || j >= nodeN) continue;
+      if (!nodeActive[i] || !nodeActive[j]) continue;
+
+      float x1 = mapToPanelX(nodeX[i], x0, w);
+      float y1 = mapToPanelY(nodeY[i], y0, h);
+      float x2 = mapToPanelX(nodeX[j], x0, w);
+      float y2 = mapToPanelY(nodeY[j], y0, h);
+
+      int a = (int)map(constrain(age, 1, 255), 1, 255, 220, 40);
+      stroke(255, a);
+      line(x1, y1, x2, y2);
+    }
+  }
+
+  noStroke();
+  for (int i=0;i<nodeN;i++) {
+    float px = mapToPanelX(nodeX[i], x0, w);
+    float py = mapToPanelY(nodeY[i], y0, h);
+
+    if (nodeActive[i]) fill(255, 220);
+    else              fill(120, 120);
+
+    ellipse(px, py, 9, 9);
+
+    fill(220, 200);
+    text(nf(i,2), px + 6, py - 6);
+  }
 }
 
 void drawScatter(float[][] pts, float x0, float y0, float w, float h, int alpha, float dotSize) {
@@ -451,23 +606,65 @@ void drawDebugBar() {
 
   fill(220);
   text("PORT=" + PORT_NAME + " BAUD=" + BAUD +
-       " state=" + st +
+       " framed_state=" + st +
        " payload(" + payIdx + "/" + expectLen + ")", 30, height - 60);
 
   int ago = (lastPktMs == 0) ? -1 : (millis() - lastPktMs);
-  text("PKT_OK=" + pktOK + " BAD=" + pktBad + " LOST~=" + lost +
-       " RX_age(ms)=" + ago + "  " + statusMsg, 30, height - 40);
+  int dbgAgo = (dbgLastMs == 0) ? -1 : (millis() - dbgLastMs);
+
+  text("FRAMED: OK=" + pktOK + " BAD=" + pktBad + " LOST~=" + lost +
+       " RX_age(ms)=" + ago + " | DBG: last=" + (dbgLastState<0?"-":(""+dbgLastState)) +
+       " age(ms)=" + dbgAgo + " cnt=" + dbgCount, 30, height - 40);
 
   fill(180, 220, 255);
   text(verifyMsg, 30, height - 20);
 
   fill(180);
-  text("Keys: [R]=rebuild+send [S]=send [P]=print [W]=save [UP/DOWN]=scroll",
-       740, height - 20);
+  text("Keys: [R]=rebuild+send [S]=send [P]=print nodes/edges/dbg",
+       820, height - 20);
 }
 
 // ======================================================
-// Build dataset + pack
+// Debug prints
+// ======================================================
+void printDbgToConsole() {
+  println("====================================================");
+  println("DBG A5 stream: lastState=" + dbgLastState + " count=" + dbgCount + " msg=" + dbgMsg);
+  int show = min(dbgHistN, 16);
+  for (int k=0; k<show; k++) {
+    int idx = dbgHistN - show + k;
+    int s = dbgHistState[idx];
+    println("  " + k + ") state=" + (s==0xFF ? "END(FF)" : s));
+  }
+  println("====================================================");
+}
+
+void printNodesToConsole() {
+  println("====================================================");
+  println("0xA1 NODES (NN=" + nodeN + ") have=" + haveNodes);
+  for (int i=0;i<nodeN;i++) {
+    println("node " + nf(i,2) + " active=" + (nodeActive[i] ? "1" : "0") +
+            "  x=" + nf(nodeX[i],1,4) + " y=" + nf(nodeY[i],1,4));
+  }
+  println("====================================================");
+}
+
+void printEdgesToConsole(int maxPrint) {
+  println("====================================================");
+  println("0xB1 EDGES (EC=" + edgeCount + ") have=" + haveEdges);
+  int c = 0;
+  for (int idx=0; idx<edgeCount && c<maxPrint; idx++) {
+    if (!edgeSeen[idx]) continue;
+    int age = edgeAge[idx] & 0xFF;
+    if (age == 0) continue;
+    println("idx=" + idx + "  (" + edgeI[idx] + "," + edgeJ[idx] + ")  age=" + age);
+    c++;
+  }
+  println("====================================================");
+}
+
+// ======================================================
+// Build dataset + pack (unchanged)
 // ======================================================
 void buildTwoMoonsAndPack() {
   moonsTx = generateMoons(
@@ -492,7 +689,7 @@ void buildTwoMoonsAndPack() {
 }
 
 // ======================================================
-// Two-moons generator
+// Two-moons generator (unchanged)
 // ======================================================
 float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed,
                         boolean shuffle, boolean normalize01) {

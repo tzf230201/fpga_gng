@@ -24,9 +24,7 @@ architecture rtl of tang_nano_9k is
   ---------------------------------------------------------------------------
   constant DEPTH_BYTES : natural := 400;
   constant WORDS_C     : natural := DEPTH_BYTES/4; -- 100
-
   constant GNG_MAX_NODES : natural := 40;
-  constant MASK_BYTES    : natural := (GNG_MAX_NODES + 7)/8;
 
   ---------------------------------------------------------------------------
   -- UART RX
@@ -37,7 +35,7 @@ architecture rtl of tang_nano_9k is
   signal rx_err   : std_logic;
 
   ---------------------------------------------------------------------------
-  -- UART TX
+  -- UART TX (GLOBAL)
   ---------------------------------------------------------------------------
   signal tx_start : std_logic := '0';
   signal tx_data  : std_logic_vector(7 downto 0) := (others => '0');
@@ -58,9 +56,13 @@ architecture rtl of tang_nano_9k is
   signal a_raddr : unsigned(8 downto 0) := (others => '0');
   signal a_rdata : std_logic_vector(7 downto 0);
 
-  signal full_p     : std_logic;
-  signal locked     : std_logic;
-  signal full_p_dly : std_logic := '0';
+  signal full_p      : std_logic;
+  signal locked      : std_logic;
+  signal full_p_dly  : std_logic := '0';
+  signal full_p_rise : std_logic := '0';
+
+  -- NEW: clear pulse to re-arm rx_store for next upload
+  signal store_clear_p : std_logic := '0';
 
   ---------------------------------------------------------------------------
   -- BRAM_C (word32 dataset)
@@ -68,10 +70,12 @@ architecture rtl of tang_nano_9k is
   type mem_c_t is array (0 to WORDS_C-1) of std_logic_vector(31 downto 0);
   signal mem_c : mem_c_t;
 
+  -- write from copy
   signal c_we_copy    : std_logic;
   signal c_waddr_copy : unsigned(6 downto 0);
   signal c_wdata_copy : std_logic_vector(31 downto 0);
 
+  -- read for gng
   signal c_raddr_gng : unsigned(6 downto 0) := (others => '0');
   signal c_rdata_gng : std_logic_vector(31 downto 0) := (others => '0');
 
@@ -91,48 +95,34 @@ architecture rtl of tang_nano_9k is
   signal gng_busy    : std_logic;
 
   ---------------------------------------------------------------------------
-  -- GNG debug taps (read by dumper)
-  ---------------------------------------------------------------------------
-  signal dump_node_raddr : unsigned(7 downto 0) := (others => '0');
-  signal dump_node_rdata : std_logic_vector(31 downto 0);
-
-  signal dump_err_raddr  : unsigned(7 downto 0) := (others => '0');
-  signal dump_err_rdata  : std_logic_vector(31 downto 0);
-
-  -- edge debug (not dumped by this dumper)
-  signal dump_edge_raddr : unsigned(12 downto 0) := (others => '0');
-  signal dump_edge_rdata : std_logic_vector(15 downto 0);
-
-  signal dump_win_raddr  : unsigned(6 downto 0) := (others => '0');
-  signal dump_win_rdata  : std_logic_vector(15 downto 0);
-
-  ---------------------------------------------------------------------------
-  -- DUMP control
-  ---------------------------------------------------------------------------
-  signal dump_start_p : std_logic := '0';
-  signal sending      : std_logic;
-  signal send_done_p  : std_logic;
-
-  ---------------------------------------------------------------------------
   -- simple scheduler
   ---------------------------------------------------------------------------
-  type sm_t is (WAIT_DATA, RUN_GNG, WAIT_GNG, DO_DUMP, WAIT_DUMP);
+  type sm_t is (WAIT_DATA, RUN_GNG, WAIT_GNG);
   signal sm : sm_t := WAIT_DATA;
 
+  ---------------------------------------------------------------------------
+  -- debug latch for LED
+  ---------------------------------------------------------------------------
   signal full_rx_store : std_logic := '0';
-  signal step_zero : unsigned(15 downto 0) := (others => '0');
+
+  ---------------------------------------------------------------------------
+  -- system hold (prevent overwrite while busy)
+  ---------------------------------------------------------------------------
+  signal sys_hold : std_logic;
 
 begin
 
-  dump_edge_raddr <= (others => '0');
+  sys_hold <= copying or gng_busy; -- hold RX store while copy or GNG (incl dump)
 
   ---------------------------------------------------------------------------
-  -- Debug latch: remember full
+  -- Debug latch: remember full (for LED), clear when store_clear_p
   ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
       if rstn_i = '0' then
+        full_rx_store <= '0';
+      elsif store_clear_p = '1' then
         full_rx_store <= '0';
       elsif full_p = '1' then
         full_rx_store <= '1';
@@ -141,42 +131,44 @@ begin
   end process;
 
   ---------------------------------------------------------------------------
-  -- full_p delayed 1 cycle
+  -- full_p rising edge pulse
   ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
       if rstn_i = '0' then
-        full_p_dly <= '0';
+        full_p_dly  <= '0';
+        full_p_rise <= '0';
       else
-        full_p_dly <= full_p;
+        full_p_rise <= full_p and (not full_p_dly); -- 1-cycle pulse
+        full_p_dly  <= full_p;
       end if;
     end if;
   end process;
 
   ---------------------------------------------------------------------------
-  -- BRAM_A (sync write + sync read)
+  -- BRAM_A (READ-FIRST)
   ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
+      a_rdata <= mem_a(to_integer(a_raddr));
       if a_we = '1' then
         mem_a(to_integer(a_waddr)) <= a_wdata;
       end if;
-      a_rdata <= mem_a(to_integer(a_raddr));
     end if;
   end process;
 
   ---------------------------------------------------------------------------
-  -- BRAM_C (sync write + sync read)
+  -- BRAM_C (READ-FIRST)
   ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
+      c_rdata_gng <= mem_c(to_integer(c_raddr_gng));
       if c_we_copy = '1' then
         mem_c(to_integer(c_waddr_copy)) <= c_wdata_copy;
       end if;
-      c_rdata_gng <= mem_c(to_integer(c_raddr_gng));
     end if;
   end process;
 
@@ -199,7 +191,8 @@ begin
     );
 
   ---------------------------------------------------------------------------
-  -- RX STORE
+  -- RX STORE (BRAM_A)
+  -- NOTE: hold while sys_hold, clear pulse after copy_done so can accept next dataset
   ---------------------------------------------------------------------------
   u_store : entity work.rx_store_ext
     generic map ( DEPTH => DEPTH_BYTES )
@@ -208,8 +201,8 @@ begin
       rstn_i       => rstn_i,
       rx_valid_i   => rx_valid,
       rx_data_i    => rx_data,
-      hold_i       => copying,
-      clear_i      => '0',
+      hold_i       => sys_hold,
+      clear_i      => store_clear_p,
       full_o       => full_p,
 
       mem_we_o     => a_we,
@@ -231,7 +224,7 @@ begin
     port map (
       clk_i     => clk_i,
       rstn_i    => rstn_i,
-      start_i   => full_p_dly,
+      start_i   => full_p_rise,  -- pulse, not level
 
       a_raddr_o => a_raddr,
       a_rdata_i => a_rdata,
@@ -243,6 +236,23 @@ begin
       done_o    => copy_done,
       busy_o    => copying
     );
+
+  ---------------------------------------------------------------------------
+  -- store_clear_p: 1-cycle pulse after copy_done to re-arm RX store for next upload
+  ---------------------------------------------------------------------------
+  process(clk_i)
+  begin
+    if rising_edge(clk_i) then
+      if rstn_i = '0' then
+        store_clear_p <= '0';
+      else
+        store_clear_p <= '0';
+        if copy_done = '1' then
+          store_clear_p <= '1';
+        end if;
+      end if;
+    end if;
+  end process;
 
   ---------------------------------------------------------------------------
   -- have_data latch
@@ -264,18 +274,16 @@ begin
   end process;
 
   ---------------------------------------------------------------------------
-  -- Scheduler
+  -- Scheduler: upload -> run gng (incl dump inside gng) -> wait done
   ---------------------------------------------------------------------------
   process(clk_i)
   begin
     if rising_edge(clk_i) then
       if rstn_i='0' then
         sm <= WAIT_DATA;
-        gng_start_p  <= '0';
-        dump_start_p <= '0';
+        gng_start_p <= '0';
       else
-        gng_start_p  <= '0';
-        dump_start_p <= '0';
+        gng_start_p <= '0';
 
         case sm is
           when WAIT_DATA =>
@@ -291,17 +299,6 @@ begin
 
           when WAIT_GNG =>
             if gng_done_p='1' then
-              sm <= DO_DUMP;
-            end if;
-
-          when DO_DUMP =>
-            if sending='0' then
-              dump_start_p <= '1';
-              sm <= WAIT_DUMP;
-            end if;
-
-          when WAIT_DUMP =>
-            if send_done_p='1' then
               sm <= WAIT_DATA;
             end if;
 
@@ -313,15 +310,15 @@ begin
   end process;
 
   ---------------------------------------------------------------------------
-  -- GNG
+  -- GNG (reads dataset from mem_c) + dump logic INSIDE gng.vhd
+  -- GNG drives tx_start/tx_data directly, uart_tx stays global here
   ---------------------------------------------------------------------------
   u_gng : entity work.gng
     generic map (
       MAX_NODES  => GNG_MAX_NODES,
       DATA_WORDS => WORDS_C,
       INIT_X0    => 200, INIT_Y0 => 200,
-      INIT_X1    => 800, INIT_Y1 => 800,
-      EDGE_A_MAX => 50
+      INIT_X1    => 800, INIT_Y1 => 800
     )
     port map (
       clk_i   => clk_i,
@@ -334,58 +331,17 @@ begin
       gng_done_o => gng_done_p,
       gng_busy_o => gng_busy,
 
-      s1_id_o => open,
-      s2_id_o => open,
-
-      dbg_node_raddr_i => dump_node_raddr,
-      dbg_node_rdata_o => dump_node_rdata,
-
-      dbg_err_raddr_i  => dump_err_raddr,
-      dbg_err_rdata_o  => dump_err_rdata,
-
-      dbg_edge_raddr_i => dump_edge_raddr,
-      dbg_edge_rdata_o => dump_edge_rdata,
-
-      dbg_win_raddr_i  => dump_win_raddr,
-      dbg_win_rdata_o  => dump_win_rdata
-    );
-
-  ---------------------------------------------------------------------------
-  -- DUMP
-  ---------------------------------------------------------------------------
-  u_dump : entity work.gng_dump_nodes_winners_uart
-    generic map (
-      MAX_NODES  => GNG_MAX_NODES,
-      MASK_BYTES => MASK_BYTES,
-      N_SAMPLES  => WORDS_C
-    )
-    port map (
-      clk_i   => clk_i,
-      rstn_i  => rstn_i,
-      start_i => dump_start_p,
-
-      node_raddr_o => dump_node_raddr,
-      node_rdata_i => dump_node_rdata,
-
-      err_raddr_o  => dump_err_raddr,
-      err_rdata_i  => dump_err_rdata,
-
-      win_raddr_o  => dump_win_raddr,
-      win_rdata_i  => dump_win_rdata,
-
-      step_i => step_zero,
-
+      -- NEW UART handshake ports (from/to global uart_tx)
       tx_busy_i  => tx_busy,
       tx_done_i  => tx_done,
       tx_start_o => tx_start,
-      tx_data_o  => tx_data,
+      tx_data_o  => tx_data
 
-      done_o => send_done_p,
-      busy_o => sending
+      -- optional s1/s2/debug ports removed here (kalau masih ada di entity kamu, tinggal di-map open)
     );
 
   ---------------------------------------------------------------------------
-  -- UART TX
+  -- UART TX (GLOBAL, shared)
   ---------------------------------------------------------------------------
   u_tx : entity work.uart_tx
     generic map (
@@ -406,9 +362,14 @@ begin
 
   ---------------------------------------------------------------------------
   -- LEDs active-low
+  -- 0: UART TX busy (byte-level activity)
+  -- 1: copying
+  -- 2: locked (rx_store)
+  -- 3: full_rx_store latch
+  -- 4: gng_busy (incl dump)
   ---------------------------------------------------------------------------
   gpio_o <= (
-    0      => std_ulogic(not sending),
+    0      => std_ulogic(not tx_busy),
     1      => std_ulogic(not copying),
     2      => std_ulogic(not locked),
     3      => std_ulogic(not full_rx_store),
