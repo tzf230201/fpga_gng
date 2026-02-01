@@ -3,10 +3,14 @@
 // CFS ONLY does: winner finder (s1,s2,min1,min2) using active mask + node_mem
 // Edges stored as HALF adjacency matrix (upper-triangle) with 1 byte per pair:
 //   bit7 = connected flag, bit6..0 = age (0..127)
+//
 // Optimized:
-//   (1) ageEdgesFromWinner: scan only row/col of winner in half-matrix (2 loops)
-//   (4) move neighbors:     scan only row/col of winner in half-matrix (2 loops)
-//   pruneIsolatedNodes:     per node scan row/col in half-matrix (2 loops)
+//   - ageEdgesFromWinner(w):          scan only incident edges to winner (2 loops)
+//   - moveNeighbors(s1):              scan only incident edges to winner (2 loops)
+//   - deleteOldEdgesFromWinner(w):    scan only incident edges to winner (2 loops)
+//   - pruneIsolatedNodes_degree():    O(N) using degree[] counter
+//
+// IMPORTANT: degree[] MUST be kept consistent whenever an edge is connected/disconnected.
 // ================================================================================
 
 #include <neorv32.h>
@@ -70,6 +74,9 @@ typedef struct {
 } Node;
 
 static Node nodes[MAX_NODES];
+
+// Degree counter: number of connected edges incident to each node
+static uint8_t degree[MAX_NODES];
 
 static int stepCount = 0;
 static int dataIndex = 0;
@@ -137,17 +144,11 @@ static inline int edge_index_ij(int i, int j) {
   return (i * (2*MAX_NODES - i - 1)) / 2 + (j - i - 1);
 }
 
-// General mapping with swap (only used where convenient)
+// General mapping with swap (used where convenient)
 static inline int edge_index(int i, int j) {
   if (i == j) return -1;
   if (i > j) { int t = i; i = j; j = t; }
   return edge_index_ij(i, j);
-}
-
-static inline void edge_set(int a, int b, bool connected, uint8_t age) {
-  int ei = edge_index(a, b);
-  if (ei < 0) return;
-  edge_cell[ei] = (connected ? EDGE_CONN_MASK : 0u) | (age & EDGE_AGE_MASK);
 }
 
 static inline bool edge_is_connected(int a, int b) {
@@ -158,17 +159,40 @@ static inline bool edge_is_connected(int a, int b) {
 
 static void edges_init_full(void) {
   for (int i = 0; i < MAX_EDGES_FULL; i++) edge_cell[i] = 0;
+  for (int i = 0; i < MAX_NODES; i++) degree[i] = 0;
 }
 
+// Connect or reset age=0. If it was NOT connected before, increment degree endpoints.
 static inline void connectOrResetEdge(int a, int b) {
-  edge_set(a, b, true, 0);
+  int ei = edge_index(a, b);
+  if (ei < 0) return;
+
+  uint8_t was_conn = (edge_cell[ei] & EDGE_CONN_MASK);
+
+  // set connected + age=0
+  edge_cell[ei] = EDGE_CONN_MASK | 0u;
+
+  if (!was_conn) {
+    if (degree[a] < 255u) degree[a]++;
+    if (degree[b] < 255u) degree[b]++;
+  }
 }
 
+// Disconnect edge. If it WAS connected before, decrement degree endpoints.
 static inline void removeEdgePair(int a, int b) {
-  edge_set(a, b, false, 0);
+  int ei = edge_index(a, b);
+  if (ei < 0) return;
+
+  uint8_t was_conn = (edge_cell[ei] & EDGE_CONN_MASK);
+  edge_cell[ei] = 0;
+
+  if (was_conn) {
+    if (degree[a] > 0u) degree[a]--;
+    if (degree[b] > 0u) degree[b]--;
+  }
 }
 
-// ============================ OPTIMIZED ageEdgesFromWinner =======================
+// ============================ ageEdgesFromWinner (two-loop) ======================
 static void ageEdgesFromWinner(int w) {
   // i < w -> cell(i, w)
   for (int i = 0; i < w; i++) {
@@ -193,41 +217,48 @@ static void ageEdgesFromWinner(int w) {
   }
 }
 
-static void deleteOldEdges(void) {
-  for (int ei = 0; ei < MAX_EDGES_FULL; ei++) {
+// ============================ deleteOldEdgesFromWinner (two-loop) ================
+static void deleteOldEdgesFromWinner(int w) {
+  // i < w -> (i, w)
+  for (int i = 0; i < w; i++) {
+    int ei = edge_index_ij(i, w);
     uint8_t v = edge_cell[ei];
     if ((v & EDGE_CONN_MASK) == 0) continue;
+
     uint8_t age = (uint8_t)(v & EDGE_AGE_MASK);
-    if (age > (uint8_t)GNG_A_MAX) edge_cell[ei] = 0;
+    if (age > (uint8_t)GNG_A_MAX) {
+      // disconnect
+      edge_cell[ei] = 0;
+      if (degree[i] > 0u) degree[i]--;
+      if (degree[w] > 0u) degree[w]--;
+    }
+  }
+
+  // i > w -> (w, i)
+  for (int i = w + 1; i < MAX_NODES; i++) {
+    int ei = edge_index_ij(w, i);
+    uint8_t v = edge_cell[ei];
+    if ((v & EDGE_CONN_MASK) == 0) continue;
+
+    uint8_t age = (uint8_t)(v & EDGE_AGE_MASK);
+    if (age > (uint8_t)GNG_A_MAX) {
+      // disconnect
+      edge_cell[ei] = 0;
+      if (degree[i] > 0u) degree[i]--;
+      if (degree[w] > 0u) degree[w]--;
+    }
   }
 }
 
-// ============================ OPTIMIZED pruneIsolatedNodes (two-loop) ============
-static void pruneIsolatedNodes(void) {
+// ============================ pruneIsolatedNodes (degree counter) ================
+static void pruneIsolatedNodes_degree(void) {
   for (int i = 0; i < MAX_NODES; i++) {
     if (!nodes[i].active) continue;
-
-    bool has_edge = false;
-
-    // j < i -> cell(j, i)
-    for (int j = 0; j < i; j++) {
-      int ei = edge_index_ij(j, i);
-      if (edge_cell[ei] & EDGE_CONN_MASK) { has_edge = true; break; }
-    }
-
-    // j > i -> cell(i, j)
-    if (!has_edge) {
-      for (int j = i + 1; j < MAX_NODES; j++) {
-        int ei = edge_index_ij(i, j);
-        if (edge_cell[ei] & EDGE_CONN_MASK) { has_edge = true; break; }
-      }
-    }
-
-    if (!has_edge) nodes[i].active = false;
+    if (degree[i] == 0u) nodes[i].active = false;
   }
 }
 
-// Fritzke insertion (original order)
+// Fritzke insertion (still scans all nodes to find neighbor f; OK for now)
 static int insertNode_fritzke(void) {
   int q = -1;
   float maxErr = -1.0f;
@@ -240,7 +271,6 @@ static int insertNode_fritzke(void) {
   int f = -1;
   maxErr = -1.0f;
 
-  // scan neighbors of q (still simple; can be optimized later similarly)
   for (int j = 0; j < MAX_NODES; j++) {
     if (j == q) continue;
     if (!nodes[j].active) continue;
@@ -256,6 +286,7 @@ static int insertNode_fritzke(void) {
   nodes[r].y = 0.5f * (nodes[q].y + nodes[f].y);
   nodes[r].active = true;
 
+  // Update edges + degree correctly via helper funcs
   removeEdgePair(q, f);
   connectOrResetEdge(q, r);
   connectOrResetEdge(r, f);
@@ -311,7 +342,6 @@ static void sendGNGEdges(void) {
 
   uint8_t edge_count = 0;
 
-  // enumerate upper triangle pairs (i<j)
   for (int i = 0; i < MAX_NODES; i++) {
     for (int j = i + 1; j < MAX_NODES; j++) {
       int ei = edge_index_ij(i, j);
@@ -322,7 +352,7 @@ static void sendGNGEdges(void) {
       edge_count++;
 
       if (edge_count >= MAX_EDGE_PAIRS_PER_FRAME) {
-        i = MAX_NODES; // break outer
+        i = MAX_NODES;
         break;
       }
     }
@@ -467,7 +497,7 @@ static void trainOneStep(float x, float y) {
 
   if (s1 < 0 || s2 < 0) return;
 
-  // (1) age edges from winner (two-loop)
+  // (1) age edges from winner
   ageEdgesFromWinner(s1);
 
   // (2) error accumulate
@@ -478,7 +508,7 @@ static void trainOneStep(float x, float y) {
   nodes[s1].y += GNG_EPSILON_B * (y - nodes[s1].y);
   cfs_write_one_node(s1);
 
-  // (4) move neighbors (two-loop)
+  // (4) move neighbors (incident to s1 only)
   for (int i = 0; i < s1; i++) {
     if (!nodes[i].active) continue;
     int ei = edge_index_ij(i, s1);
@@ -499,19 +529,19 @@ static void trainOneStep(float x, float y) {
     cfs_write_one_node(i);
   }
 
-  // (5) connect winners (reset age=0)
+  // (5) connect winners (reset age=0) + degree update handled inside
   connectOrResetEdge(s1, s2);
 
-  // (6) remove old edges + prune
-  deleteOldEdges();
-  pruneIsolatedNodes();
+  // (6) remove old edges ONLY from winner side + prune using degree
+  deleteOldEdgesFromWinner(s1);
+  pruneIsolatedNodes_degree();
 
   stepCount++;
 
   // (7) insert every lambda
   if ((stepCount % GNG_LAMBDA) == 0) {
     (void)insertNode_fritzke();
-    pruneIsolatedNodes();
+    pruneIsolatedNodes_degree();
     cfs_sync_nodes_full();
   }
 
@@ -536,6 +566,8 @@ static void initGNG(void) {
 
   nodes[0].x=0.2f; nodes[0].y=0.2f; nodes[0].active=true;
   nodes[1].x=0.8f; nodes[1].y=0.8f; nodes[1].active=true;
+
+  // degrees already 0; first training step will connect s1-s2 and raise degrees
 }
 
 int main(void) {
