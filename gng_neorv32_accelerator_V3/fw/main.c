@@ -26,6 +26,10 @@
 //   CMD_GNG_EDGES payload:
 //     [frame_id][count][a0][b0][a1][b1]... (count pairs)
 //   Because UART len <= 255, max pairs per frame = 126.
+//
+// PROFILING (EXCLUDE UART STREAM TIME):
+//   - Measure cycles inside trainOneStep only
+//   - Send CMD_PROF (0x12) as separate frame (after trainOneStep)
 // ================================================================================
 
 #include <neorv32.h>
@@ -45,8 +49,11 @@
 
 // ---------------- Limits ----------------
 #define MAXPTS        100
-#define MAX_NODES      40
+#define MAX_NODES      20
 #define MAX_EDGES_FULL ((MAX_NODES * (MAX_NODES - 1)) / 2)
+
+// ---------------- CPU clock (for Processing conversion) ----------------
+#define CPU_HZ 27000000u
 
 // ---------------- UART protocol ----------------
 #define UART_HDR        0xFFu
@@ -55,6 +62,7 @@
 #define CMD_RUN         0x03u
 #define CMD_GNG_NODES   0x10u
 #define CMD_GNG_EDGES   0x11u
+#define CMD_PROF        0x12u
 
 #define STREAM_EVERY_N  100  // stream every N steps
 
@@ -86,7 +94,7 @@ static bool  running   = false;
 // Node CPU struct (full CPU GNG)
 typedef struct {
   float x, y;
-  float error;   // NOTE: this is "scaled error" under lazy decay
+  float error;   // NOTE: scaled error under lazy decay
   bool  active;
 } Node;
 
@@ -123,6 +131,32 @@ static float g_err_inv = 1.0f;
 
 // ============================ EDGE storage (Half adjacency matrix) ================
 static uint8_t edge_cell[MAX_EDGES_FULL];
+
+// ============================ PROF struct ========================================
+typedef struct {
+  uint32_t cyc_total;
+  uint32_t cyc_winner;     // cfs_find_winners
+  uint32_t cyc_move_w;     // move winner
+  uint32_t cyc_nb;         // age edges + move neighbors
+  uint32_t cyc_connect;    // connectOrResetEdge
+  uint32_t cyc_delete;     // deleteOldEdgesFromWinner
+  uint32_t cyc_prune;      // pruneIsolatedNodes_degree
+  uint32_t cyc_insert;     // insertNode_fritzke (only when called)
+  uint32_t cyc_renorm;     // error_renorm_if_needed (only when renorm)
+} Prof;
+
+static Prof g_prof = {0};
+
+// ============================ Cycle read (64-bit) ================================
+static inline uint64_t rdcycle64(void) {
+  uint32_t hi0, lo, hi1;
+  do {
+    hi0 = neorv32_cpu_csr_read(CSR_MCYCLEH);
+    lo  = neorv32_cpu_csr_read(CSR_MCYCLE);
+    hi1 = neorv32_cpu_csr_read(CSR_MCYCLEH);
+  } while (hi0 != hi1);
+  return ((uint64_t)hi0 << 32) | (uint64_t)lo;
+}
 
 // ============================ Utility ===========================================
 static inline float dist2(float x1, float y1, float x2, float y2) {
@@ -173,16 +207,16 @@ static void edges_init_full(void) {
 }
 
 // Lazy decay renormalization: keep g_err_inv bounded
-static inline void error_renorm_if_needed(void) {
-  if (g_err_inv <= ERR_INV_RENORM_TH) return;
+static inline bool error_renorm_if_needed(void) {
+  if (g_err_inv <= ERR_INV_RENORM_TH) return false;
 
-  // Multiply all scaled errors by (1/g_err_inv) to convert back to "true scale"
   float g = 1.0f / g_err_inv;
   for (int i = 0; i < MAX_NODES; i++) {
     if (!nodes[i].active) continue;
     nodes[i].error *= g;
   }
   g_err_inv = 1.0f;
+  return true;
 }
 
 // Connect/reset (age=0 encoded as 1). If previously disconnected, increment degree.
@@ -326,7 +360,7 @@ static int insertNode_fritzke(void) {
   connectOrResetEdge(q, r);
   connectOrResetEdge(r, f);
 
-  // NOTE: still valid under scaled errors (global scaling factor cancels)
+  // Under lazy decay, still OK (global scaling cancels)
   nodes[q].error *= GNG_ALPHA;
   nodes[f].error *= GNG_ALPHA;
   nodes[r].error  = nodes[q].error;
@@ -346,6 +380,45 @@ static void uart_send_frame(uint8_t cmd, const uint8_t *payload, uint8_t len) {
   neorv32_uart0_putc((char)len);
   for (uint8_t i = 0; i < len; i++) neorv32_uart0_putc((char)payload[i]);
   neorv32_uart0_putc((char)chk);
+}
+
+static inline void wr_u32_le(uint8_t *p, uint32_t v) {
+  p[0] = (uint8_t)(v & 0xFFu);
+  p[1] = (uint8_t)((v >> 8) & 0xFFu);
+  p[2] = (uint8_t)((v >> 16) & 0xFFu);
+  p[3] = (uint8_t)((v >> 24) & 0xFFu);
+}
+
+static void sendPROF(void) {
+  // payload:
+  // [0] frame_id
+  // [1..4]  cyc_total
+  // [5..8]  cyc_winner
+  // [9..12] cyc_move_w
+  // [13..16]cyc_nb
+  // [17..20]cyc_connect
+  // [21..24]cyc_delete
+  // [25..28]cyc_prune
+  // [29..32]cyc_insert
+  // [33..36]cyc_renorm
+  // [37..40]stepCount (optional)
+  uint8_t payload[1 + 9*4 + 4];
+  uint8_t p = 0;
+  payload[p++] = frame_id;
+
+  wr_u32_le(&payload[p], g_prof.cyc_total);   p += 4;
+  wr_u32_le(&payload[p], g_prof.cyc_winner);  p += 4;
+  wr_u32_le(&payload[p], g_prof.cyc_move_w);  p += 4;
+  wr_u32_le(&payload[p], g_prof.cyc_nb);      p += 4;
+  wr_u32_le(&payload[p], g_prof.cyc_connect); p += 4;
+  wr_u32_le(&payload[p], g_prof.cyc_delete);  p += 4;
+  wr_u32_le(&payload[p], g_prof.cyc_prune);   p += 4;
+  wr_u32_le(&payload[p], g_prof.cyc_insert);  p += 4;
+  wr_u32_le(&payload[p], g_prof.cyc_renorm);  p += 4;
+
+  wr_u32_le(&payload[p], (uint32_t)stepCount); p += 4;
+
+  uart_send_frame(CMD_PROF, payload, p);
 }
 
 static void sendGNGNodes(void) {
@@ -516,10 +589,23 @@ static bool cfs_find_winners(float x, float y, int *s1, int *s2, float *d1_out) 
 
 // ============================ GNG Step (CPU Fritzke-ish) =========================
 static void trainOneStep(float x, float y) {
+  // clear prof
+  g_prof.cyc_total = g_prof.cyc_winner = g_prof.cyc_move_w = 0;
+  g_prof.cyc_nb = g_prof.cyc_connect = g_prof.cyc_delete = 0;
+  g_prof.cyc_prune = g_prof.cyc_insert = g_prof.cyc_renorm = 0;
+
+  uint64_t t_total0 = rdcycle64();
+
   int s1=-1, s2=-1;
   float d1 = 1e30f;
 
-  if (!cfs_find_winners(x, y, &s1, &s2, &d1)) {
+  // (1) winners
+  uint64_t t0 = rdcycle64();
+  bool ok = cfs_find_winners(x, y, &s1, &s2, &d1);
+  uint64_t t1 = rdcycle64();
+  g_prof.cyc_winner = (uint32_t)(t1 - t0);
+
+  if (!ok) {
     // fallback (rare)
     float best1=1e30f, best2=1e30f;
     for (int i=0;i<MAX_NODES;i++){
@@ -531,40 +617,71 @@ static void trainOneStep(float x, float y) {
     d1 = best1;
   }
 
-  if (s1 < 0 || s2 < 0) return;
+  if (s1 < 0 || s2 < 0) {
+    uint64_t t_total1 = rdcycle64();
+    g_prof.cyc_total = (uint32_t)(t_total1 - t_total0);
+    return;
+  }
 
-  // (A) error accumulate (LAZY DECAY: scale the increment)
-  // Original: error[s1] += d1; then later error *= D (global)
-  // Lazy: keep errors scaled; add d1 * g_err_inv
+  // (A) error accumulate (LAZY DECAY: scale increment)
   nodes[s1].error += d1 * g_err_inv;
 
   // (B) move winner
+  t0 = rdcycle64();
   nodes[s1].x += GNG_EPSILON_B * (x - nodes[s1].x);
   nodes[s1].y += GNG_EPSILON_B * (y - nodes[s1].y);
   NEORV32_CFS->REG[CFS_NODE_BASE + s1] = pack_node_q15(nodes[s1].x, nodes[s1].y);
+  t1 = rdcycle64();
+  g_prof.cyc_move_w = (uint32_t)(t1 - t0);
 
-  // (C) COMBINED: age edges incident to s1 + move neighbors of s1
+  // (C) age edges + move neighbors
+  t0 = rdcycle64();
   age_edges_and_move_neighbors(s1, x, y);
+  t1 = rdcycle64();
+  g_prof.cyc_nb = (uint32_t)(t1 - t0);
 
-  // (D) connect winners (reset age=0 encoded as 1) + degree update inside
+  // (D) connect winners
+  t0 = rdcycle64();
   connectOrResetEdge(s1, s2);
+  t1 = rdcycle64();
+  g_prof.cyc_connect = (uint32_t)(t1 - t0);
 
-  // (E) delete old edges (winner-only) + prune isolated (degree)
+  // (E) delete old edges (winner-only)
+  t0 = rdcycle64();
   deleteOldEdgesFromWinner(s1);
+  t1 = rdcycle64();
+  g_prof.cyc_delete = (uint32_t)(t1 - t0);
+
+  // (F) prune isolated nodes (degree)
+  t0 = rdcycle64();
   pruneIsolatedNodes_degree();
+  t1 = rdcycle64();
+  g_prof.cyc_prune = (uint32_t)(t1 - t0);
 
   stepCount++;
 
-  // (F) insert every lambda
+  // (G) insert every lambda
   if ((stepCount % GNG_LAMBDA) == 0) {
+    t0 = rdcycle64();
     (void)insertNode_fritzke();
     pruneIsolatedNodes_degree();
     cfs_sync_nodes_full();
+    t1 = rdcycle64();
+    g_prof.cyc_insert = (uint32_t)(t1 - t0);
   }
 
-  // (G) LAZY DECAY: update global inverse scaling (instead of looping all nodes)
+  // (H) lazy decay update
   g_err_inv *= GNG_D_INV;
-  error_renorm_if_needed();
+
+  // renorm (optional)
+  t0 = rdcycle64();
+  bool did_renorm = error_renorm_if_needed();
+  t1 = rdcycle64();
+  if (did_renorm) g_prof.cyc_renorm = (uint32_t)(t1 - t0);
+  else g_prof.cyc_renorm = 0;
+
+  uint64_t t_total1 = rdcycle64();
+  g_prof.cyc_total = (uint32_t)(t_total1 - t_total0);
 }
 
 // ============================ Init ===============================================
@@ -622,12 +739,15 @@ int main(void) {
     dataIndex++;
     if (dataIndex >= dataCount) dataIndex = 0;
 
+    // compute-only (profiling inside trainOneStep)
     trainOneStep(x, y);
 
+    // stream (UART cost NOT included in g_prof)
     if ((stepCount % STREAM_EVERY_N) == 0) {
       frame_id++;
       sendGNGNodes();
       sendGNGEdges(); // Processing-compatible (old format)
+      sendPROF();     // profiling frame
     }
   }
 

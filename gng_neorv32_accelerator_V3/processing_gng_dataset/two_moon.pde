@@ -1,12 +1,29 @@
+import java.util.Arrays;
+import java.io.File;
+import java.io.PrintWriter;
+
+// IMPORTANT: avoid "Serial ambiguous"
 import processing.serial.*;
-import java.util.ArrayList;
+
+// ===============================
+// Window / layout
+// ===============================
+final int WIN_W = 1000;
+final int WIN_H = 1000;
+final int DBG_H = 140;
 
 // ===============================
 // Serial config
 // ===============================
-Serial myPort;
+processing.serial.Serial myPort;
 final String PORT_NAME = "COM1";   // <-- GANTI sesuai Serial.list()
 final int    BAUD      = 1000000;
+
+// ===============================
+// Match main.c
+// ===============================
+final int MAX_NODES = 20;
+final int CPU_HZ    = 50000000; // must match main.c (for microsecond conversion)
 
 // ===============================
 // Two-moons dataset options
@@ -29,22 +46,23 @@ boolean running  = false;
 // debug strings
 String lastTX   = "";
 String lastRX   = "";
-String lastTXT  = "";   // <-- last ASCII line from NEORV32
+String lastTXT  = "";
 
-// counts from payload
+// counts
 int gngNodeCount = 0;
 int gngEdgeCount = 0;
 int lastFrameNodes = -1;
 int lastFrameEdges = -1;
+int lastFrameProf  = -1;
 
 // ===============================
-// TIMER (seconds + milliseconds)
+// TIMER (ms)
 // ===============================
-long tStartMs    = 0;   // waktu sketch mulai
-long tRunStartMs = -1;  // waktu RUN dikirim (optional)
+long tStartMs    = 0;
+long tRunStartMs = -1;
 
 // ===============================
-// UART Binary protocol (match main.c)
+// UART Binary protocol
 // Frame: FF FF CMD LEN PAYLOAD CHK, CHK = ~(CMD + LEN + sum(payload))
 // ===============================
 final int UART_HDR       = 0xFF;
@@ -55,6 +73,7 @@ final int CMD_RUN        = 0x03;
 
 final int CMD_GNG_NODES  = 0x10;
 final int CMD_GNG_EDGES  = 0x11;
+final int CMD_PROF       = 0x12;
 
 // RX state machine
 final int RX_WAIT_H1      = 0;
@@ -71,42 +90,65 @@ int    rxIndex    = 0;
 int    rxChecksum = 0;
 byte[] rxPayload  = new byte[512];
 
-// ===============================
-// ASCII capture (for printf/puts)
-// ===============================
+// ASCII capture
 StringBuilder asciiBuf = new StringBuilder(256);
 
 // ===============================
-// GNG structures
+// GNG state (fixed arrays)
 // ===============================
-class Node {
+static class Node {
   float x, y;
-  boolean active = false;
+  boolean active;
 }
-class Edge {
+static class Edge {
   int a, b;
-  boolean active = false;
+  boolean active;
 }
 
-ArrayList<Node> gngNodes = new ArrayList<Node>();
-ArrayList<Edge> gngEdges = new ArrayList<Edge>();
+Node[] nodes = new Node[MAX_NODES];
+boolean[][] adj = new boolean[MAX_NODES][MAX_NODES];
+int[] deg = new int[MAX_NODES];
+
+Edge[] edges = new Edge[512];
+int edgesN = 0;
+
+// PROF values (cycles)
+static class Prof {
+  int cyc_total, cyc_winner, cyc_move_w, cyc_nb, cyc_connect, cyc_delete, cyc_prune, cyc_insert, cyc_renorm;
+  int stepCount;
+}
+Prof prof = new Prof();
 
 // ===============================
-// Setup / Draw
+// Logging / Saving
 // ===============================
+boolean logEnabled = true;
+boolean autoSavePng = false;
+PrintWriter csv;
+String csvPath;
+String capDir;
+
+// frame complete tracking
+int lastCompleteFrame = -1;
+
+// ===============================
+// Processing lifecycle
+// ===============================
+void settings() {
+  size(WIN_W, WIN_H);  // must be here in some Processing versions
+}
+
 void setup() {
-  size(1000, 600);
-  surface.setTitle("Two Moons → NEORV32 GNG (binary + text)");
+  surface.setTitle("GNG Eval Logger (paper style)");
 
-  // Timer start
+  for (int i=0;i<MAX_NODES;i++) nodes[i] = new Node();
+
   tStartMs = millis();
 
   println("Available serial ports:");
   println(Serial.list());
 
-  myPort = new Serial(this, PORT_NAME, BAUD);
-
-  // optional: buang data awal yang “nyangkut”
+  myPort = new processing.serial.Serial(this, PORT_NAME, BAUD);
   myPort.clear();
   delay(1200);
 
@@ -119,25 +161,47 @@ void setup() {
     MOONS_NORMALIZE01
   );
 
+  // output dirs
+  capDir = sketchPath("capture");
+  new File(capDir).mkdirs();
+
+  String logDir = sketchPath("logs");
+  new File(logDir).mkdirs();
+  csvPath = logDir + File.separator + "gng_eval_" + year() + nf(month(),2) + nf(day(),2) + "_" + nf(hour(),2) + nf(minute(),2) + nf(second(),2) + ".csv";
+
+  if (logEnabled) {
+    csv = createWriter(csvPath);
+    csv.println("# GNG Eval Logger");
+    csv.println("# PORT=" + PORT_NAME + ", BAUD=" + BAUD);
+    csv.println("# MOONS_N=" + MOONS_N + ", SEED=" + MOONS_SEED + ", NOISE=" + MOONS_NOISE_STD +
+                ", RANDOM_ANGLE=" + MOONS_RANDOM_ANGLE + ", SHUFFLE=" + MOONS_SHUFFLE + ", NORM01=" + MOONS_NORMALIZE01);
+    csv.println("run_ms,frame_id,nodes,edges,QE,TE,isolated,avg_degree,cyc_total,us_total,cyc_winner,cyc_nb,cyc_insert");
+    csv.flush();
+  }
+
   println("Uploading dataset...");
+  println("CSV: " + csvPath);
+  println("Capture dir: " + capDir);
 }
 
 void draw() {
-  background(30);
+  background(255);
 
-  // IMPORTANT: selalu baca serial, biar text seperti "READY\n" kebaca
   processSerial();
 
-  drawDataset();
-  drawGNG();
-  drawDebug();
+  if (!uploaded) uploadDataset();
+  else if (!running) sendRunCommand();
 
-  if (!uploaded) {
-    uploadDataset();
-  } else if (!running) {
-    sendRunCommand();
-  }
-  // kalau sudah running, data akan terus masuk via processSerial()
+  // plot area (keep it square inside the upper region)
+  renderPlot(g, 0, 0, width, height - DBG_H, true);
+
+  drawDebugPanel();
+}
+
+void keyPressed() {
+  if (key == 's' || key == 'S') savePlotPNG(lastCompleteFrame >= 0 ? lastCompleteFrame : 0);
+  if (key == 'p' || key == 'P') { autoSavePng = !autoSavePng; println("autoSavePng=" + autoSavePng); }
+  if (key == 'l' || key == 'L') { logEnabled = !logEnabled; println("logEnabled=" + logEnabled); }
 }
 
 // ===============================
@@ -157,7 +221,6 @@ void uploadDataset() {
   int remaining = data.length - idx;
   int count = min(BATCH_POINTS, remaining);
 
-  // payload: [count] + count*(xi,yi) where xi,yi are int16 LE scaled 1000
   byte[] payload = new byte[1 + count * 4];
   payload[0] = (byte)count;
 
@@ -177,8 +240,6 @@ void uploadDataset() {
 
   sendFrame((byte)CMD_DATA_BATCH, payload);
   lastTX = "DATA_BATCH count=" + count + " idx=" + idx;
-  println("[TX] " + lastTX);
-
   idx += count;
 }
 
@@ -186,17 +247,12 @@ void sendRunCommand() {
   sendFrame((byte)CMD_RUN, new byte[0]);
   lastTX = "RUN";
   running = true;
-
-  // Timer RUN mulai saat command RUN dikirim
   tRunStartMs = millis();
-
   println("[TX] RUN");
 }
 
 // ===============================
-// Unified serial processing:
-// - parse binary frames FF FF ...
-// - also capture ASCII lines from printf/puts
+// Serial processing (binary + ASCII)
 // ===============================
 void processSerial() {
   while (myPort.available() > 0) {
@@ -204,32 +260,24 @@ void processSerial() {
     if (bi == -1) return;
     int b = bi & 0xFF;
 
-    // If we're idle and this isn't a frame header, treat as ASCII text
     if (rxState == RX_WAIT_H1 && b != UART_HDR) {
       handleAsciiByte(b);
       continue;
     }
 
-    // Otherwise continue binary frame parser
     switch (rxState) {
       case RX_WAIT_H1:
         if (b == UART_HDR) rxState = RX_WAIT_H2;
         break;
-
       case RX_WAIT_H2:
         if (b == UART_HDR) rxState = RX_WAIT_CMD;
-        else {
-          // false alarm: we saw one 0xFF but not second
-          rxState = RX_WAIT_H1;
-        }
+        else rxState = RX_WAIT_H1;
         break;
-
       case RX_WAIT_CMD:
         rxCmd = b;
         rxChecksum = b & 0xFF;
         rxState = RX_WAIT_LEN;
         break;
-
       case RX_WAIT_LEN:
         rxLen = b;
         rxChecksum = (rxChecksum + (b & 0xFF)) & 0xFF;
@@ -238,25 +286,17 @@ void processSerial() {
         else if (rxLen > rxPayload.length) rxState = RX_WAIT_H1;
         else rxState = RX_WAIT_PAYLOAD;
         break;
-
       case RX_WAIT_PAYLOAD:
         rxPayload[rxIndex++] = (byte)b;
         rxChecksum = (rxChecksum + (b & 0xFF)) & 0xFF;
         if (rxIndex >= rxLen) rxState = RX_WAIT_CHK;
         break;
-
       case RX_WAIT_CHK: {
         int expected = (~rxChecksum) & 0xFF;
-        if (b == expected) {
-          handleFrame(rxCmd, rxPayload, rxLen);
-        } else {
-          // checksum fail (optional debug)
-          // println("[RX] checksum fail cmd=" + hex(rxCmd) + " len=" + rxLen);
-        }
+        if (b == expected) handleFrame(rxCmd, rxPayload, rxLen);
         rxState = RX_WAIT_H1;
         break;
       }
-
       default:
         rxState = RX_WAIT_H1;
         break;
@@ -265,23 +305,15 @@ void processSerial() {
 }
 
 void handleAsciiByte(int b) {
-  // ignore CR
   if (b == '\r') return;
-
-  // newline -> flush line
   if (b == '\n') {
     if (asciiBuf.length() > 0) {
-      String line = asciiBuf.toString();
+      lastTXT = asciiBuf.toString();
       asciiBuf.setLength(0);
-      lastTXT = line;
-      println("[NEORV32] " + line);
     }
     return;
   }
-
-  // keep printable chars + tab
   if ((b >= 32 && b <= 126) || b == '\t') {
-    // optional limit biar gak membengkak kalau never ends
     if (asciiBuf.length() < 400) asciiBuf.append((char)b);
   }
 }
@@ -298,25 +330,23 @@ void handleFrame(int cmd, byte[] payload, int len) {
     int nodeCount = payload[1] & 0xFF;
     gngNodeCount  = nodeCount;
 
-    int pos = 2;
-    gngNodes.clear();
+    for (int i=0;i<MAX_NODES;i++) nodes[i].active = false;
 
+    int pos = 2;
     for (int i = 0; i < nodeCount; i++) {
       if (pos + 5 > len) break;
 
       int idxNode = payload[pos++] & 0xFF;
-
       int xi = (payload[pos++] & 0xFF) | ((payload[pos++] & 0xFF) << 8);
       int yi = (payload[pos++] & 0xFF) | ((payload[pos++] & 0xFF) << 8);
-
       if (xi >= 32768) xi -= 65536;
       if (yi >= 32768) yi -= 65536;
 
-      while (gngNodes.size() <= idxNode) gngNodes.add(new Node());
-      Node n = gngNodes.get(idxNode);
-      n.x = xi / 1000.0;
-      n.y = yi / 1000.0;
-      n.active = true;
+      if (idxNode >= 0 && idxNode < MAX_NODES) {
+        nodes[idxNode].x = xi / 1000.0;
+        nodes[idxNode].y = yi / 1000.0;
+        nodes[idxNode].active = true;
+      }
     }
 
     lastFrameNodes = frameId;
@@ -330,21 +360,162 @@ void handleFrame(int cmd, byte[] payload, int len) {
     int edgeCount = payload[1] & 0xFF;
     gngEdgeCount  = edgeCount;
 
-    int pos = 2;
-    gngEdges.clear();
+    for (int i=0;i<MAX_NODES;i++) {
+      Arrays.fill(adj[i], false);
+      deg[i] = 0;
+    }
 
+    edgesN = 0;
+    int pos = 2;
     for (int i = 0; i < edgeCount; i++) {
       if (pos + 2 > len) break;
-      Edge e = new Edge();
-      e.a = payload[pos++] & 0xFF;
-      e.b = payload[pos++] & 0xFF;
-      e.active = true;
-      gngEdges.add(e);
+      int a = payload[pos++] & 0xFF;
+      int b = payload[pos++] & 0xFF;
+      if (a < 0 || a >= MAX_NODES || b < 0 || b >= MAX_NODES || a == b) continue;
+
+      adj[a][b] = true;
+      adj[b][a] = true;
+      deg[a]++;
+      deg[b]++;
+
+      if (edgesN < edges.length) {
+        if (edges[edgesN] == null) edges[edgesN] = new Edge();
+        edges[edgesN].a = a;
+        edges[edgesN].b = b;
+        edges[edgesN].active = true;
+        edgesN++;
+      }
     }
 
     lastFrameEdges = frameId;
     lastRX = "EDGES frame=" + frameId + " e=" + edgeCount;
   }
+
+  else if (cmd == CMD_PROF) {
+    if (len < 1 + 10*4) return;
+
+    int frameId = payload[0] & 0xFF;
+    int pos = 1;
+
+    prof.cyc_total   = rdU32LE(payload, pos); pos += 4;
+    prof.cyc_winner  = rdU32LE(payload, pos); pos += 4;
+    prof.cyc_move_w  = rdU32LE(payload, pos); pos += 4;
+    prof.cyc_nb      = rdU32LE(payload, pos); pos += 4;
+    prof.cyc_connect = rdU32LE(payload, pos); pos += 4;
+    prof.cyc_delete  = rdU32LE(payload, pos); pos += 4;
+    prof.cyc_prune   = rdU32LE(payload, pos); pos += 4;
+    prof.cyc_insert  = rdU32LE(payload, pos); pos += 4;
+    prof.cyc_renorm  = rdU32LE(payload, pos); pos += 4;
+    prof.stepCount   = rdU32LE(payload, pos); pos += 4;
+
+    lastFrameProf = frameId;
+    lastRX = "PROF frame=" + frameId + " cyc_total=" + prof.cyc_total;
+
+    tryCompleteFrame();
+  }
+}
+
+int rdU32LE(byte[] p, int off) {
+  return (p[off] & 0xFF) |
+         ((p[off+1] & 0xFF) << 8) |
+         ((p[off+2] & 0xFF) << 16) |
+         ((p[off+3] & 0xFF) << 24);
+}
+
+// ===============================
+// Frame complete -> metrics + CSV + autosave
+// ===============================
+void tryCompleteFrame() {
+  if (lastFrameNodes < 0 || lastFrameEdges < 0 || lastFrameProf < 0) return;
+  if (!(lastFrameNodes == lastFrameEdges && lastFrameEdges == lastFrameProf)) return;
+
+  int fid = lastFrameProf;
+  if (fid == lastCompleteFrame) return;
+
+  lastCompleteFrame = fid;
+
+  Metrics m = computeMetrics();
+
+  long runMs = (tRunStartMs >= 0) ? (millis() - tRunStartMs) : -1;
+  float usTotal = (prof.cyc_total * 1e6f) / (float)CPU_HZ;
+
+  if (logEnabled && csv != null) {
+    csv.println(
+      runMs + "," + fid + "," +
+      m.nodeActive + "," + m.edgeCount + "," +
+      nf(m.QE,1,6) + "," + nf(m.TE,1,6) + "," +
+      m.isolated + "," + nf(m.avgDegree,1,4) + "," +
+      prof.cyc_total + "," + nf(usTotal,1,3) + "," +
+      prof.cyc_winner + "," + prof.cyc_nb + "," + prof.cyc_insert
+    );
+    csv.flush();
+  }
+
+  if (autoSavePng) savePlotPNG(fid);
+}
+
+// ===============================
+// Metrics
+// ===============================
+static class Metrics {
+  int nodeActive;
+  int edgeCount;
+  float QE;
+  float TE;
+  int isolated;
+  float avgDegree;
+}
+
+Metrics computeMetrics() {
+  Metrics m = new Metrics();
+
+  int nAct = 0;
+  for (int i=0;i<MAX_NODES;i++) if (nodes[i].active) nAct++;
+  m.nodeActive = nAct;
+  m.edgeCount = edgesN;
+
+  int iso = 0;
+  int degSum = 0;
+  for (int i=0;i<MAX_NODES;i++) {
+    if (!nodes[i].active) continue;
+    degSum += deg[i];
+    if (deg[i] == 0) iso++;
+  }
+  m.isolated = iso;
+  m.avgDegree = (nAct > 0) ? ((float)degSum / (float)nAct) : 0;
+
+  float qeSum = 0;
+  int teCount = 0;
+
+  for (int k=0;k<data.length;k++) {
+    float px = data[k][0];
+    float py = data[k][1];
+
+    int s1=-1, s2=-1;
+    float best1=1e9, best2=1e9;
+
+    for (int i=0;i<MAX_NODES;i++) {
+      if (!nodes[i].active) continue;
+      float dx = px - nodes[i].x;
+      float dy = py - nodes[i].y;
+      float d2 = dx*dx + dy*dy;
+      if (d2 < best1) {
+        best2 = best1; s2 = s1;
+        best1 = d2;    s1 = i;
+      } else if (d2 < best2) {
+        best2 = d2; s2 = i;
+      }
+    }
+
+    if (s1 >= 0) qeSum += sqrt(best1);
+    if (s1 >= 0 && s2 >= 0) {
+      if (!adj[s1][s2]) teCount++;
+    }
+  }
+
+  m.QE = qeSum / (float)data.length;
+  m.TE = teCount / (float)data.length;
+  return m;
 }
 
 // ===============================
@@ -367,90 +538,272 @@ void sendFrame(byte cmd, byte[] payload) {
 }
 
 // ===============================
-// Draw routines
+// Plot rendering (paper style)
 // ===============================
-void drawDataset() {
-  fill(255);
-  noStroke();
+void renderPlot(PGraphics gg, int x0, int y0, int w, int h, boolean title) {
+  // bigger margins for larger fonts
+  int marginL = 85;
+  int marginR = 30;
+  int marginT = title ? 60 : 30;
+  int marginB = 80;
 
-  for (int i = 0; i < data.length; i++) {
-    float x = data[i][0] * 400 + 50;
-    float y = data[i][1] * 400 + 50;
-    ellipse(x, y, 6, 6);
+  int px0 = x0 + marginL;
+  int py0 = y0 + marginT;
+  int pw  = w - marginL - marginR;
+  int ph  = h - marginT - marginB;
+
+  // ---- FORCE SQUARE PLOT AREA (1:1 aspect) ----
+  int side = min(pw, ph);
+  int sx0  = px0 + (pw - side)/2;
+  int sy0  = py0 + (ph - side)/2;
+  int sw   = side;
+  int sh   = side;
+
+  // frame
+  gg.stroke(0);
+  gg.strokeWeight(1);
+  gg.noFill();
+  gg.rect(sx0, sy0, sw, sh);
+
+  // grid + ticks
+  gg.fill(0);
+  gg.textSize(14);
+  gg.textAlign(CENTER, TOP);
+
+  for (int t=0;t<=5;t++) {
+    float v = t/5.0;
+    float x = sx0 + v*sw;
+
+    gg.stroke(235);
+    gg.line(x, sy0, x, sy0+sh);
+
+    gg.stroke(0);
+    gg.line(x, sy0+sh, x, sy0+sh+6);
+    gg.text(nf(v,1,1), x, sy0+sh+10);
   }
 
-  fill(200);
-  textSize(16);
-  text("Two Moons (" + MOONS_N + " pts)  noise=" + nf(MOONS_NOISE_STD, 1, 3) +
-       "  seed=" + MOONS_SEED +
-       "  randomAngle=" + MOONS_RANDOM_ANGLE, 50, 30);
+  gg.textAlign(RIGHT, CENTER);
+  for (int t=0;t<=5;t++) {
+    float v = t/5.0;
+    float y = sy0 + (1.0-v)*sh;
+
+    gg.stroke(235);
+    gg.line(sx0, y, sx0+sw, y);
+
+    gg.stroke(0);
+    gg.line(sx0-6, y, sx0, y);
+    gg.text(nf(v,1,1), sx0-10, y);
+  }
+
+  // axis labels
+  gg.fill(0);
+  gg.textAlign(CENTER, CENTER);
+  gg.textSize(18);
+  gg.text("x (normalized)", sx0 + sw/2, sy0 + sh + 55);
+
+  gg.pushMatrix();
+  gg.translate(sx0 - 60, sy0 + sh/2);
+  gg.rotate(-HALF_PI);
+  gg.text("y (normalized)", 0, 0);
+  gg.popMatrix();
+
+  // title
+  if (title) {
+    gg.textAlign(LEFT, CENTER);
+    gg.textSize(20);
+    gg.text("GNG on Two-Moons", x0 + 450, y0 + 26);
+  }
+
+  // dataset colors
+  int cBlueR=40,  cBlueG=110, cBlueB=220;
+  int cOrgR=40, cOrgG=110, cOrgB=220;
+
+  // ---- DATASET (NO MIXING): Moon A = BLUE circle, Moon B = ORANGE square ----
+gg.stroke(255);
+gg.strokeWeight(1);
+gg.rectMode(CENTER);
+
+for (int i=0;i<data.length;i++) {
+  float x = map01x(data[i][0], sx0, sw);
+  float y = map01y(data[i][1], sy0, sh);
+
+  if (i < data.length/2) {
+    gg.fill(cBlueR, cBlueG, cBlueB);
+    gg.circle(x, y, 5);
+  } else {
+    gg.fill(cOrgR, cOrgG, cOrgB);
+    gg.rect(x, y, 5, 5);
+  }
 }
 
-void drawGNG() {
-  pushMatrix();
-  translate(500, 0);
+// 🔴 PENTING
+gg.rectMode(CORNER);
+gg.noStroke();
 
-  stroke(255);
-  strokeWeight(2);
-  for (Edge e : gngEdges) {
-    if (!e.active) continue;
-    if (e.a < 0 || e.a >= gngNodes.size()) continue;
-    if (e.b < 0 || e.b >= gngNodes.size()) continue;
-    Node a = gngNodes.get(e.a);
-    Node b = gngNodes.get(e.b);
-    if (!a.active || !b.active) continue;
+  // edges
+  gg.stroke(110);
+  gg.strokeWeight(2);
+  for (int i=0;i<edgesN;i++) {
+    int a = edges[i].a;
+    int b = edges[i].b;
+    if (a<0||a>=MAX_NODES||b<0||b>=MAX_NODES) continue;
+    if (!nodes[a].active || !nodes[b].active) continue;
 
-    line(a.x * 400 + 50, a.y * 400 + 50,
-         b.x * 400 + 50, b.y * 400 + 50);
+    float x1 = map01x(nodes[a].x, sx0, sw);
+    float y1 = map01y(nodes[a].y, sy0, sh);
+    float x2 = map01x(nodes[b].x, sx0, sw);
+    float y2 = map01y(nodes[b].y, sy0, sh);
+    gg.line(x1,y1,x2,y2);
   }
 
-  fill(0, 180, 255);
-  noStroke();
-  for (Node n : gngNodes) {
-    if (n.active) ellipse(n.x * 400 + 50, n.y * 400 + 50, 12, 12);
+  // nodes (red X)
+  gg.stroke(220, 0, 0);
+  gg.strokeWeight(3);
+  for (int i=0;i<MAX_NODES;i++) {
+    if (!nodes[i].active) continue;
+    float x = map01x(nodes[i].x, sx0, sw);
+    float y = map01y(nodes[i].y, sy0, sh);
+    float r = 8;
+    gg.line(x-r, y-r, x+r, y+r);
+    gg.line(x-r, y+r, x+r, y-r);
   }
 
-  fill(200);
-  text("NEORV32 GNG Output", 150, 30);
-  popMatrix();
+  // legend
+  drawLegend(gg, sx0, sy0, sw, sh, cBlueR,cBlueG,cBlueB, cOrgR,cOrgG,cOrgB);
 }
 
-void drawDebug() {
-  // panel debug diperbesar agar muat timer + TX/RX/TXT
-  fill(0, 0, 0, 180);
-  rect(0, height - 130, width, 130);
+void drawLegend(PGraphics gg, int sx0, int sy0, int sw, int sh,
+                int bR,int bG,int bB, int oR,int oG,int oB) {
+        
+
+  int pad  = 12;
+  int boxW = 290;
+  int boxH = 120;
+
+  // target: top-right inside square plot
+  int bx = sx0 + sw - boxW - pad;
+  int by = sy0 + pad ;   // turunkan 20 px
+
+
+  // clamp INSIDE square plot (safe for screen and saved PGraphics)
+  bx = constrain(bx, sx0 + 10, sx0 + sw - boxW - 10);
+  by = constrain(by, sy0 + 10, sy0 + sh - boxH - 10);
+
+  // legend box
+  gg.pushStyle();
+gg.rectMode(CORNER);
+
+  gg.noStroke();
+  gg.fill(255, 245);
+  gg.rect(bx, by, boxW, boxH, 8);
+
+  gg.stroke(0, 70);
+  gg.strokeWeight(1);
+  gg.noFill();
+  gg.rect(bx, by, boxW, boxH, 8);
+
+  gg.textSize(14);
+  gg.textAlign(LEFT, CENTER);
+
+  int x0 = bx + 16;
+  int y0 = by + 24;
+
+  // Moon A (circle)
+  gg.stroke(255);
+  gg.strokeWeight(1);
+  gg.fill(bR,bG,bB);
+  gg.circle(x0, y0, 9);
+  gg.noStroke();
+  gg.fill(0);
+  gg.text("Two-Moons dataset", x0 + 16, y0);
+
+//  // Moon B (square)
+  int y1 = y0 + 0;
+//  gg.stroke(255);
+//  gg.strokeWeight(1);
+//  gg.fill(oR,oG,oB);
+//  gg.circle(x0, y1, 9);
+//  gg.noStroke();
+//  gg.fill(0);
+//  gg.text("Moon B (second half)", x0 + 16, y1);
+
+  // edges
+  int y2 = y1 + 26;
+  gg.stroke(110);
+  gg.strokeWeight(2);
+  gg.line(x0-5, y2, x0+12, y2);
+  gg.noStroke();
+  gg.fill(0);
+  gg.text("GNG edges", x0 + 16, y2);
+
+  // nodes
+  int y3 = y2 + 26;
+  gg.stroke(220, 0, 0);
+  gg.strokeWeight(3);
+  float r = 6;
+  gg.line(x0-r, y3-r, x0+r, y3+r);
+  gg.line(x0-r, y3+r, x0+r, y3-r);
+  gg.noStroke();
+  gg.fill(0);
+  gg.text("GNG nodes", x0 + 16, y3);
+  gg.popStyle();
+
+}
+
+float map01x(float v, int px0, int pw) {
+  return px0 + constrain(v,0,1)*pw;
+}
+float map01y(float v, int py0, int ph) {
+  return py0 + (1.0 - constrain(v,0,1))*ph;
+}
+
+// save plot-only PNG (no debug)
+void savePlotPNG(int frameId) {
+  int outW = WIN_W-100;
+  int outH = WIN_H-100;
+
+  PGraphics pg = createGraphics(outW, outH);
+  pg.beginDraw();
+  pg.background(255);
+
+  // keep same layout as screen: plot uses (outH - DBG_H)
+  renderPlot(pg, 0, 0, outW, outH - DBG_H, true);
+
+  pg.endDraw();
+
+  String fn = capDir + File.separator + "gng_overlay_frame_" + nf(frameId, 4) + ".png";
+  pg.save(fn);
+  println("Saved: " + fn);
+}
+
+// ===============================
+// Debug panel
+// ===============================
+void drawDebugPanel() {
+  int y0 = height - DBG_H;
+  fill(0, 160);
+  noStroke();
+  rect(0, y0, width, DBG_H);
 
   long now = millis();
-
-  // Uptime (sejak sketch start)
   long upMs = now - tStartMs;
-  int upS = (int)(upMs / 1000);
-  int upRemMs = (int)(upMs % 1000);
-
-  // Run time (sejak RUN dikirim)
   long runMs = (tRunStartMs >= 0) ? (now - tRunStartMs) : -1;
-  int runS = (runMs >= 0) ? (int)(runMs / 1000) : 0;
-  int runRemMs = (runMs >= 0) ? (int)(runMs % 1000) : 0;
 
-  fill(200);
-  String runStr = (runMs >= 0) ? (runS + " s " + nf(runRemMs, 3) + " ms") : "--";
-  text("Uptime: " + upS + " s " + nf(upRemMs, 3) + " ms" +
-       "   |   Run: " + runStr,
-       10, height - 110);
+  float usTotal = (prof.cyc_total * 1e6f) / (float)CPU_HZ;
 
-  fill(0, 255, 0);
-  text("TX: " + lastTX, 10, height - 90);
+  fill(255);
+  textSize(13);
+  textAlign(LEFT, TOP);
 
-  fill(255, 200, 0);
-  text("RX: " + lastRX, 10, height - 70);
+  String runStr = (runMs >= 0) ? (runMs + " ms") : "--";
+  text("Uptime(ms): " + upMs + "  |  Run(ms): " + runStr + "  |  CSV: " + csvPath, 12, y0 + 10);
+  text("TX: " + lastTX, 12, y0 + 34);
+  text("RX: " + lastRX, 12, y0 + 54);
+  text("TXT: " + lastTXT, 12, y0 + 74);
 
-  fill(180, 180, 255);
-  text("TXT: " + lastTXT, 10, height - 50);
-
-  fill(200);
-  text("Nodes=" + gngNodeCount + "  Edges=" + gngEdgeCount +
-       "  FrameN=" + lastFrameNodes + "  FrameE=" + lastFrameEdges,
-       10, height - 30);
+  Metrics m = computeMetrics();
+  text("Nodes=" + m.nodeActive + "  Edges=" + m.edgeCount + "  Isolated=" + m.isolated + "  AvgDeg=" + nf(m.avgDegree,1,4), 12, y0 + 96);
+  text("PROF: frame=" + lastCompleteFrame + " cyc_total=" + prof.cyc_total + " (~" + nf(usTotal,1,3) + " us)  winner=" + prof.cyc_winner + "  nb=" + prof.cyc_nb + "  insert=" + prof.cyc_insert, 12, y0 + 116);
 }
 
 // ===============================
