@@ -1,16 +1,24 @@
 // ================================================================================
 // NEORV32 main.c - GNG Fritzke (CPU does full GNG)
 // CFS ONLY does: winner finder (s1,s2,min1,min2) using active mask + node_mem
-// Edges stored as HALF adjacency matrix (upper-triangle) with 1 byte per pair:
-//   bit7 = connected flag, bit6..0 = age (0..127)
 //
-// Optimized:
-//   - ageEdgesFromWinner(w):          scan only incident edges to winner (2 loops)
-//   - moveNeighbors(s1):              scan only incident edges to winner (2 loops)
-//   - deleteOldEdgesFromWinner(w):    scan only incident edges to winner (2 loops)
-//   - pruneIsolatedNodes_degree():    O(N) using degree[] counter
+// EDGE STORAGE (HALF ADJ MATRIX, NO FLAG BIT):
+//   edge_cell[ei] = 0            -> no edge (inactive)
+//   edge_cell[ei] = (age + 1)    -> edge active with true age = edge_cell - 1
 //
-// IMPORTANT: degree[] MUST be kept consistent whenever an edge is connected/disconnected.
+// Therefore:
+//   reset age to 0   -> edge_cell = 1
+//   age++            -> edge_cell++   (only if edge_cell != 0)
+//   delete old edges -> if edge_cell > (A_MAX + 1) then edge_cell = 0
+//
+// DEGREE COUNTER:
+//   degree[i] = number of active edges incident to node i
+//   prune isolated -> if degree[i] == 0 then nodes[i].active=false
+//
+// STREAMING COMPATIBILITY (KEEP OLD PROCESSING FORMAT):
+//   CMD_GNG_EDGES payload:
+//     [frame_id][count][a0][b0][a1][b1]... (count pairs)
+//   Because UART len <= 255, max pairs per frame = 126.
 // ================================================================================
 
 #include <neorv32.h>
@@ -29,16 +37,9 @@
 #define GNG_D           0.995f
 
 // ---------------- Limits ----------------
-#define MAXPTS      100
-#define MAX_NODES    40
-
-// Half adjacency matrix size (upper triangle, i<j)
+#define MAXPTS        100
+#define MAX_NODES      40
 #define MAX_EDGES_FULL ((MAX_NODES * (MAX_NODES - 1)) / 2)
-
-// UART payload limit: len is uint8_t (<=255)
-// sendGNGEdges payload: [frame_id][count][a0][b0]...[aN][bN]
-// => 2 + 2*count <= 255 => count <= 126
-#define MAX_EDGE_PAIRS_PER_FRAME 126
 
 // ---------------- UART protocol ----------------
 #define UART_HDR        0xFFu
@@ -48,7 +49,11 @@
 #define CMD_GNG_NODES   0x10u
 #define CMD_GNG_EDGES   0x11u
 
-#define STREAM_EVERY_N  10  // stream every N steps
+#define STREAM_EVERY_N  100  // stream every N steps
+
+// Old edge streaming header = 2 bytes: [frame_id][count]
+// => 2 + 2*count <= 255 => count <= 126
+#define MAX_EDGE_PAIRS_PER_FRAME 126
 
 enum { RX_WAIT_H1=0, RX_WAIT_H2, RX_WAIT_CMD, RX_WAIT_LEN, RX_WAIT_PAYLOAD, RX_WAIT_CHK };
 
@@ -75,7 +80,7 @@ typedef struct {
 
 static Node nodes[MAX_NODES];
 
-// Degree counter: number of connected edges incident to each node
+// Degree counter: number of active edges incident to each node
 static uint8_t degree[MAX_NODES];
 
 static int stepCount = 0;
@@ -102,10 +107,6 @@ static bool g_has_cfs = false;
 #define CFS_STATUS_DONE    (1u << 17)
 
 // ============================ EDGE storage (Half adjacency matrix) ================
-#define EDGE_CONN_MASK 0x80u
-#define EDGE_AGE_MASK  0x7Fu
-
-// edge_cell[edge_index(i,j)] = (connected<<7) | age(7-bit), for i<j
 static uint8_t edge_cell[MAX_EDGES_FULL];
 
 // ============================ Utility ===========================================
@@ -138,23 +139,17 @@ static int findFreeNode(void) {
   return -1;
 }
 
-// Faster variant when you ALREADY guarantee i<j (no swap)
+// edge index for i<j
 static inline int edge_index_ij(int i, int j) {
   // ASSUME i < j
   return (i * (2*MAX_NODES - i - 1)) / 2 + (j - i - 1);
 }
 
-// General mapping with swap (used where convenient)
+// general index with swap
 static inline int edge_index(int i, int j) {
   if (i == j) return -1;
-  if (i > j) { int t = i; i = j; j = t; }
+  if (i > j) { int t=i; i=j; j=t; }
   return edge_index_ij(i, j);
-}
-
-static inline bool edge_is_connected(int a, int b) {
-  int ei = edge_index(a, b);
-  if (ei < 0) return false;
-  return (edge_cell[ei] & EDGE_CONN_MASK) != 0;
 }
 
 static void edges_init_full(void) {
@@ -162,15 +157,13 @@ static void edges_init_full(void) {
   for (int i = 0; i < MAX_NODES; i++) degree[i] = 0;
 }
 
-// Connect or reset age=0. If it was NOT connected before, increment degree endpoints.
+// Connect/reset (age=0 encoded as 1). If previously disconnected, increment degree.
 static inline void connectOrResetEdge(int a, int b) {
   int ei = edge_index(a, b);
   if (ei < 0) return;
 
-  uint8_t was_conn = (edge_cell[ei] & EDGE_CONN_MASK);
-
-  // set connected + age=0
-  edge_cell[ei] = EDGE_CONN_MASK | 0u;
+  bool was_conn = (edge_cell[ei] != 0);
+  edge_cell[ei] = 1; // age=0 -> store 1
 
   if (!was_conn) {
     if (degree[a] < 255u) degree[a]++;
@@ -178,12 +171,12 @@ static inline void connectOrResetEdge(int a, int b) {
   }
 }
 
-// Disconnect edge. If it WAS connected before, decrement degree endpoints.
+// Remove edge. If previously connected, decrement degree.
 static inline void removeEdgePair(int a, int b) {
   int ei = edge_index(a, b);
   if (ei < 0) return;
 
-  uint8_t was_conn = (edge_cell[ei] & EDGE_CONN_MASK);
+  bool was_conn = (edge_cell[ei] != 0);
   edge_cell[ei] = 0;
 
   if (was_conn) {
@@ -192,57 +185,62 @@ static inline void removeEdgePair(int a, int b) {
   }
 }
 
-// ============================ ageEdgesFromWinner (two-loop) ======================
-static void ageEdgesFromWinner(int w) {
-  // i < w -> cell(i, w)
-  for (int i = 0; i < w; i++) {
-    int ei = edge_index_ij(i, w);
-    uint8_t v = edge_cell[ei];
-    if ((v & EDGE_CONN_MASK) == 0) continue;
+// ============================ COMBINED: age edges + move neighbors (winner-only) ==
+static inline void age_edges_and_move_neighbors(int s1, float x, float y) {
+  // i < s1  --> edge(i, s1)
+  for (int i = 0; i < s1; i++) {
+    if (!nodes[i].active) continue;
 
-    uint8_t age = (uint8_t)(v & EDGE_AGE_MASK);
-    if (age < 127u) age++;
-    edge_cell[ei] = EDGE_CONN_MASK | age;
+    int ei = edge_index_ij(i, s1);
+    uint8_t v = edge_cell[ei];
+    if (v == 0) continue; // not a neighbor
+
+    // age++ (cap at 255)
+    if (v < 255u) edge_cell[ei] = (uint8_t)(v + 1u);
+
+    // move neighbor
+    nodes[i].x += GNG_EPSILON_N * (x - nodes[i].x);
+    nodes[i].y += GNG_EPSILON_N * (y - nodes[i].y);
+    NEORV32_CFS->REG[CFS_NODE_BASE + i] = pack_node_q15(nodes[i].x, nodes[i].y);
   }
 
-  // i > w -> cell(w, i)
-  for (int i = w + 1; i < MAX_NODES; i++) {
-    int ei = edge_index_ij(w, i);
-    uint8_t v = edge_cell[ei];
-    if ((v & EDGE_CONN_MASK) == 0) continue;
+  // i > s1  --> edge(s1, i)
+  for (int i = s1 + 1; i < MAX_NODES; i++) {
+    if (!nodes[i].active) continue;
 
-    uint8_t age = (uint8_t)(v & EDGE_AGE_MASK);
-    if (age < 127u) age++;
-    edge_cell[ei] = EDGE_CONN_MASK | age;
+    int ei = edge_index_ij(s1, i);
+    uint8_t v = edge_cell[ei];
+    if (v == 0) continue;
+
+    if (v < 255u) edge_cell[ei] = (uint8_t)(v + 1u);
+
+    nodes[i].x += GNG_EPSILON_N * (x - nodes[i].x);
+    nodes[i].y += GNG_EPSILON_N * (y - nodes[i].y);
+    NEORV32_CFS->REG[CFS_NODE_BASE + i] = pack_node_q15(nodes[i].x, nodes[i].y);
   }
 }
 
 // ============================ deleteOldEdgesFromWinner (two-loop) ================
 static void deleteOldEdgesFromWinner(int w) {
-  // i < w -> (i, w)
+  const uint8_t TH = (uint8_t)(GNG_A_MAX + 1); // encoded threshold
+
+  // i < w
   for (int i = 0; i < w; i++) {
     int ei = edge_index_ij(i, w);
     uint8_t v = edge_cell[ei];
-    if ((v & EDGE_CONN_MASK) == 0) continue;
-
-    uint8_t age = (uint8_t)(v & EDGE_AGE_MASK);
-    if (age > (uint8_t)GNG_A_MAX) {
-      // disconnect
+    if (v == 0) continue;
+    if (v > TH) {
       edge_cell[ei] = 0;
       if (degree[i] > 0u) degree[i]--;
       if (degree[w] > 0u) degree[w]--;
     }
   }
-
-  // i > w -> (w, i)
+  // i > w
   for (int i = w + 1; i < MAX_NODES; i++) {
     int ei = edge_index_ij(w, i);
     uint8_t v = edge_cell[ei];
-    if ((v & EDGE_CONN_MASK) == 0) continue;
-
-    uint8_t age = (uint8_t)(v & EDGE_AGE_MASK);
-    if (age > (uint8_t)GNG_A_MAX) {
-      // disconnect
+    if (v == 0) continue;
+    if (v > TH) {
       edge_cell[ei] = 0;
       if (degree[i] > 0u) degree[i]--;
       if (degree[w] > 0u) degree[w]--;
@@ -250,7 +248,7 @@ static void deleteOldEdgesFromWinner(int w) {
   }
 }
 
-// ============================ pruneIsolatedNodes (degree counter) ================
+// ============================ pruneIsolatedNodes (degree) ========================
 static void pruneIsolatedNodes_degree(void) {
   for (int i = 0; i < MAX_NODES; i++) {
     if (!nodes[i].active) continue;
@@ -258,24 +256,34 @@ static void pruneIsolatedNodes_degree(void) {
   }
 }
 
-// Fritzke insertion (still scans all nodes to find neighbor f; OK for now)
+// ============================ Fritzke insertion (incident to q only) ==============
 static int insertNode_fritzke(void) {
   int q = -1;
   float maxErr = -1.0f;
-
   for (int i = 0; i < MAX_NODES; i++) {
-    if (nodes[i].active && nodes[i].error > maxErr) { maxErr = nodes[i].error; q = i; }
+    if (nodes[i].active && nodes[i].error > maxErr) {
+      maxErr = nodes[i].error;
+      q = i;
+    }
   }
   if (q < 0) return -1;
 
   int f = -1;
   maxErr = -1.0f;
 
-  for (int j = 0; j < MAX_NODES; j++) {
-    if (j == q) continue;
-    if (!nodes[j].active) continue;
-    if (!edge_is_connected(q, j)) continue;
-    if (nodes[j].error > maxErr) { maxErr = nodes[j].error; f = j; }
+  // i < q -> edge(i,q)
+  for (int i = 0; i < q; i++) {
+    if (!nodes[i].active) continue;
+    int ei = edge_index_ij(i, q);
+    if (edge_cell[ei] == 0) continue;
+    if (nodes[i].error > maxErr) { maxErr = nodes[i].error; f = i; }
+  }
+  // i > q -> edge(q,i)
+  for (int i = q + 1; i < MAX_NODES; i++) {
+    if (!nodes[i].active) continue;
+    int ei = edge_index_ij(q, i);
+    if (edge_cell[ei] == 0) continue;
+    if (nodes[i].error > maxErr) { maxErr = nodes[i].error; f = i; }
   }
   if (f < 0) return -1;
 
@@ -286,7 +294,6 @@ static int insertNode_fritzke(void) {
   nodes[r].y = 0.5f * (nodes[q].y + nodes[f].y);
   nodes[r].active = true;
 
-  // Update edges + degree correctly via helper funcs
   removeEdgePair(q, f);
   connectOrResetEdge(q, r);
   connectOrResetEdge(r, f);
@@ -316,7 +323,7 @@ static void sendGNGNodes(void) {
   uint8_t payload[2 + MAX_NODES * 5];
   uint8_t p = 0;
   payload[p++] = frame_id;
-  payload[p++] = 0;
+  payload[p++] = 0; // node_count placeholder
 
   uint8_t node_count = 0;
   for (int i = 0; i < MAX_NODES; i++) {
@@ -334,26 +341,29 @@ static void sendGNGNodes(void) {
   uart_send_frame(CMD_GNG_NODES, payload, p);
 }
 
+// OLD FORMAT (Processing-compatible): [frame_id][count][(a,b)...]
 static void sendGNGEdges(void) {
   uint8_t payload[2 + MAX_EDGE_PAIRS_PER_FRAME * 2];
   uint8_t p = 0;
-  payload[p++] = frame_id;
-  payload[p++] = 0;
+
+  payload[p++] = frame_id; // [0]
+  payload[p++] = 0;        // [1] count placeholder
 
   uint8_t edge_count = 0;
 
   for (int i = 0; i < MAX_NODES; i++) {
     for (int j = i + 1; j < MAX_NODES; j++) {
       int ei = edge_index_ij(i, j);
-      if ((edge_cell[ei] & EDGE_CONN_MASK) == 0) continue;
+      if (edge_cell[ei] == 0) continue;
 
       payload[p++] = (uint8_t)i;
       payload[p++] = (uint8_t)j;
       edge_count++;
 
       if (edge_count >= MAX_EDGE_PAIRS_PER_FRAME) {
-        i = MAX_NODES;
-        break;
+        payload[1] = edge_count;
+        uart_send_frame(CMD_GNG_EDGES, payload, p);
+        return;
       }
     }
   }
@@ -434,10 +444,6 @@ static void cfs_sync_nodes_full(void) {
   }
 }
 
-static inline void cfs_write_one_node(int i) {
-  NEORV32_CFS->REG[CFS_NODE_BASE + i] = pack_node_q15(nodes[i].x, nodes[i].y);
-}
-
 static void cfs_build_active_mask(uint32_t *lo, uint32_t *hi8) {
   uint32_t mlo = 0;
   uint32_t mhi = 0;
@@ -479,12 +485,13 @@ static bool cfs_find_winners(float x, float y, int *s1, int *s2, float *d1_out) 
   return true;
 }
 
-// ============================ GNG Step (CPU Fritzke) =============================
+// ============================ GNG Step (CPU Fritzke-ish) =========================
 static void trainOneStep(float x, float y) {
   int s1=-1, s2=-1;
   float d1 = 1e30f;
 
   if (!cfs_find_winners(x, y, &s1, &s2, &d1)) {
+    // fallback (rare)
     float best1=1e30f, best2=1e30f;
     for (int i=0;i<MAX_NODES;i++){
       if(!nodes[i].active) continue;
@@ -497,55 +504,34 @@ static void trainOneStep(float x, float y) {
 
   if (s1 < 0 || s2 < 0) return;
 
-  // (1) age edges from winner
-  ageEdgesFromWinner(s1);
-
-  // (2) error accumulate
+  // (A) error accumulate (dist^2 from CFS)
   nodes[s1].error += d1;
 
-  // (3) move winner
+  // (B) move winner
   nodes[s1].x += GNG_EPSILON_B * (x - nodes[s1].x);
   nodes[s1].y += GNG_EPSILON_B * (y - nodes[s1].y);
-  cfs_write_one_node(s1);
+  NEORV32_CFS->REG[CFS_NODE_BASE + s1] = pack_node_q15(nodes[s1].x, nodes[s1].y);
 
-  // (4) move neighbors (incident to s1 only)
-  for (int i = 0; i < s1; i++) {
-    if (!nodes[i].active) continue;
-    int ei = edge_index_ij(i, s1);
-    if ((edge_cell[ei] & EDGE_CONN_MASK) == 0) continue;
+  // (C) COMBINED: age edges incident to s1 + move neighbors of s1
+  age_edges_and_move_neighbors(s1, x, y);
 
-    nodes[i].x += GNG_EPSILON_N * (x - nodes[i].x);
-    nodes[i].y += GNG_EPSILON_N * (y - nodes[i].y);
-    cfs_write_one_node(i);
-  }
-
-  for (int i = s1 + 1; i < MAX_NODES; i++) {
-    if (!nodes[i].active) continue;
-    int ei = edge_index_ij(s1, i);
-    if ((edge_cell[ei] & EDGE_CONN_MASK) == 0) continue;
-
-    nodes[i].x += GNG_EPSILON_N * (x - nodes[i].x);
-    nodes[i].y += GNG_EPSILON_N * (y - nodes[i].y);
-    cfs_write_one_node(i);
-  }
-
-  // (5) connect winners (reset age=0) + degree update handled inside
+  // (D) connect winners (reset age=0 encoded as 1) + degree update inside
   connectOrResetEdge(s1, s2);
 
-  // (6) remove old edges ONLY from winner side + prune using degree
+  // (E) delete old edges (winner-only) + prune isolated (degree)
   deleteOldEdgesFromWinner(s1);
   pruneIsolatedNodes_degree();
 
   stepCount++;
 
-  // (7) insert every lambda
+  // (F) insert every lambda
   if ((stepCount % GNG_LAMBDA) == 0) {
     (void)insertNode_fritzke();
     pruneIsolatedNodes_degree();
     cfs_sync_nodes_full();
   }
 
-  // (8) decay errors
+  // (G) decay errors
   for (int i=0;i<MAX_NODES;i++){
     if(nodes[i].active) nodes[i].error *= GNG_D;
   }
@@ -558,7 +544,6 @@ static void initGNG(void) {
     nodes[i].error=0.0f;
     nodes[i].active=false;
   }
-
   edges_init_full();
 
   dataCount=0; dataDone=false; running=false;
@@ -566,8 +551,6 @@ static void initGNG(void) {
 
   nodes[0].x=0.2f; nodes[0].y=0.2f; nodes[0].active=true;
   nodes[1].x=0.8f; nodes[1].y=0.8f; nodes[1].active=true;
-
-  // degrees already 0; first training step will connect s1-s2 and raise degrees
 }
 
 int main(void) {
@@ -611,7 +594,7 @@ int main(void) {
     if ((stepCount % STREAM_EVERY_N) == 0) {
       frame_id++;
       sendGNGNodes();
-      sendGNGEdges();
+      sendGNGEdges(); // Processing-compatible (old format)
     }
   }
 
