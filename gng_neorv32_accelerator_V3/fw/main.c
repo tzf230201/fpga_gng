@@ -1,8 +1,12 @@
 // ================================================================================
 // NEORV32 main.c - GNG Fritzke (CPU does full GNG)
 // CFS ONLY does: winner finder (s1,s2,min1,min2) using active mask + node_mem
-// - No artificial delays
-// - Streaming every step (UART bandwidth may become bottleneck)
+// Edges stored as HALF adjacency matrix (upper-triangle) with 1 byte per pair:
+//   bit7 = connected flag, bit6..0 = age (0..127)
+// Optimized:
+//   (1) ageEdgesFromWinner: scan only row/col of winner in half-matrix (2 loops)
+//   (4) move neighbors:     scan only row/col of winner in half-matrix (2 loops)
+//   pruneIsolatedNodes:     per node scan row/col in half-matrix (2 loops)
 // ================================================================================
 
 #include <neorv32.h>
@@ -23,7 +27,14 @@
 // ---------------- Limits ----------------
 #define MAXPTS      100
 #define MAX_NODES    40
-#define MAX_EDGES    80
+
+// Half adjacency matrix size (upper triangle, i<j)
+#define MAX_EDGES_FULL ((MAX_NODES * (MAX_NODES - 1)) / 2)
+
+// UART payload limit: len is uint8_t (<=255)
+// sendGNGEdges payload: [frame_id][count][a0][b0]...[aN][bN]
+// => 2 + 2*count <= 255 => count <= 126
+#define MAX_EDGE_PAIRS_PER_FRAME 126
 
 // ---------------- UART protocol ----------------
 #define UART_HDR        0xFFu
@@ -33,7 +44,7 @@
 #define CMD_GNG_NODES   0x10u
 #define CMD_GNG_EDGES   0x11u
 
-#define STREAM_EVERY_N  10  // "no delay": stream each step
+#define STREAM_EVERY_N  10  // stream every N steps
 
 enum { RX_WAIT_H1=0, RX_WAIT_H2, RX_WAIT_CMD, RX_WAIT_LEN, RX_WAIT_PAYLOAD, RX_WAIT_CHK };
 
@@ -83,18 +94,14 @@ static bool g_has_cfs = false;
 #define CFS_STATUS_BUSY    (1u << 16)
 #define CFS_STATUS_DONE    (1u << 17)
 
-// ============================ EDGE storage in CPU (compact) ======================
-// Store edges in simple arrays (faster than scanning BRAM)
-// This is CPU-only design now.
-typedef struct {
-  uint8_t a, b;
-  uint8_t age;
-  bool active;
-} Edge;
+// ============================ EDGE storage (Half adjacency matrix) ================
+#define EDGE_CONN_MASK 0x80u
+#define EDGE_AGE_MASK  0x7Fu
 
-static Edge edges[MAX_EDGES];
+// edge_cell[edge_index(i,j)] = (connected<<7) | age(7-bit), for i<j
+static uint8_t edge_cell[MAX_EDGES_FULL];
 
-// ============================ Utility ============================
+// ============================ Utility ===========================================
 static inline float dist2(float x1, float y1, float x2, float y2) {
   float dx = x1 - x2;
   float dy = y1 - y2;
@@ -124,71 +131,98 @@ static int findFreeNode(void) {
   return -1;
 }
 
-static void edges_clear_all(void) {
-  for (int i = 0; i < MAX_EDGES; i++) {
-    edges[i].active = false;
-    edges[i].a = edges[i].b = edges[i].age = 0;
-  }
+// Faster variant when you ALREADY guarantee i<j (no swap)
+static inline int edge_index_ij(int i, int j) {
+  // ASSUME i < j
+  return (i * (2*MAX_NODES - i - 1)) / 2 + (j - i - 1);
 }
 
-static int findEdge(int a, int b) {
-  for (int i = 0; i < MAX_EDGES; i++) {
-    if (!edges[i].active) continue;
-    if ((edges[i].a == (uint8_t)a && edges[i].b == (uint8_t)b) ||
-        (edges[i].a == (uint8_t)b && edges[i].b == (uint8_t)a)) {
-      return i;
-    }
-  }
-  return -1;
+// General mapping with swap (only used where convenient)
+static inline int edge_index(int i, int j) {
+  if (i == j) return -1;
+  if (i > j) { int t = i; i = j; j = t; }
+  return edge_index_ij(i, j);
 }
 
-static void connectOrResetEdge(int a, int b) {
-  int ei = findEdge(a, b);
-  if (ei >= 0) {
-    edges[ei].age = 0;
-    edges[ei].active = true;
-    return;
-  }
-  for (int i = 0; i < MAX_EDGES; i++) {
-    if (!edges[i].active) {
-      edges[i].a = (uint8_t)a;
-      edges[i].b = (uint8_t)b;
-      edges[i].age = 0;
-      edges[i].active = true;
-      return;
-    }
-  }
+static inline void edge_set(int a, int b, bool connected, uint8_t age) {
+  int ei = edge_index(a, b);
+  if (ei < 0) return;
+  edge_cell[ei] = (connected ? EDGE_CONN_MASK : 0u) | (age & EDGE_AGE_MASK);
 }
 
-static void removeEdgePair(int a, int b) {
-  int ei = findEdge(a, b);
-  if (ei >= 0) edges[ei].active = false;
+static inline bool edge_is_connected(int a, int b) {
+  int ei = edge_index(a, b);
+  if (ei < 0) return false;
+  return (edge_cell[ei] & EDGE_CONN_MASK) != 0;
 }
 
+static void edges_init_full(void) {
+  for (int i = 0; i < MAX_EDGES_FULL; i++) edge_cell[i] = 0;
+}
+
+static inline void connectOrResetEdge(int a, int b) {
+  edge_set(a, b, true, 0);
+}
+
+static inline void removeEdgePair(int a, int b) {
+  edge_set(a, b, false, 0);
+}
+
+// ============================ OPTIMIZED ageEdgesFromWinner =======================
 static void ageEdgesFromWinner(int w) {
-  for (int i = 0; i < MAX_EDGES; i++) {
-    if (!edges[i].active) continue;
-    if ((int)edges[i].a == w || (int)edges[i].b == w) {
-      edges[i].age++;
-    }
+  // i < w -> cell(i, w)
+  for (int i = 0; i < w; i++) {
+    int ei = edge_index_ij(i, w);
+    uint8_t v = edge_cell[ei];
+    if ((v & EDGE_CONN_MASK) == 0) continue;
+
+    uint8_t age = (uint8_t)(v & EDGE_AGE_MASK);
+    if (age < 127u) age++;
+    edge_cell[ei] = EDGE_CONN_MASK | age;
+  }
+
+  // i > w -> cell(w, i)
+  for (int i = w + 1; i < MAX_NODES; i++) {
+    int ei = edge_index_ij(w, i);
+    uint8_t v = edge_cell[ei];
+    if ((v & EDGE_CONN_MASK) == 0) continue;
+
+    uint8_t age = (uint8_t)(v & EDGE_AGE_MASK);
+    if (age < 127u) age++;
+    edge_cell[ei] = EDGE_CONN_MASK | age;
   }
 }
 
 static void deleteOldEdges(void) {
-  for (int i = 0; i < MAX_EDGES; i++) {
-    if (!edges[i].active) continue;
-    if (edges[i].age > (uint8_t)GNG_A_MAX) edges[i].active = false;
+  for (int ei = 0; ei < MAX_EDGES_FULL; ei++) {
+    uint8_t v = edge_cell[ei];
+    if ((v & EDGE_CONN_MASK) == 0) continue;
+    uint8_t age = (uint8_t)(v & EDGE_AGE_MASK);
+    if (age > (uint8_t)GNG_A_MAX) edge_cell[ei] = 0;
   }
 }
 
+// ============================ OPTIMIZED pruneIsolatedNodes (two-loop) ============
 static void pruneIsolatedNodes(void) {
   for (int i = 0; i < MAX_NODES; i++) {
     if (!nodes[i].active) continue;
+
     bool has_edge = false;
-    for (int e = 0; e < MAX_EDGES; e++) {
-      if (!edges[e].active) continue;
-      if ((int)edges[e].a == i || (int)edges[e].b == i) { has_edge = true; break; }
+
+    // j < i -> cell(j, i)
+    for (int j = 0; j < i; j++) {
+      int ei = edge_index_ij(j, i);
+      if (edge_cell[ei] & EDGE_CONN_MASK) { has_edge = true; break; }
     }
+
+    // j > i -> cell(i, j)
+    if (!has_edge) {
+      for (int j = i + 1; j < MAX_NODES; j++) {
+        int ei = edge_index_ij(i, j);
+        if (edge_cell[ei] & EDGE_CONN_MASK) { has_edge = true; break; }
+      }
+    }
+
     if (!has_edge) nodes[i].active = false;
   }
 }
@@ -197,6 +231,7 @@ static void pruneIsolatedNodes(void) {
 static int insertNode_fritzke(void) {
   int q = -1;
   float maxErr = -1.0f;
+
   for (int i = 0; i < MAX_NODES; i++) {
     if (nodes[i].active && nodes[i].error > maxErr) { maxErr = nodes[i].error; q = i; }
   }
@@ -204,15 +239,13 @@ static int insertNode_fritzke(void) {
 
   int f = -1;
   maxErr = -1.0f;
-  for (int e = 0; e < MAX_EDGES; e++) {
-    if (!edges[e].active) continue;
-    int nb = -1;
-    if ((int)edges[e].a == q) nb = (int)edges[e].b;
-    else if ((int)edges[e].b == q) nb = (int)edges[e].a;
-    if (nb >= 0 && nb < MAX_NODES && nodes[nb].active && nodes[nb].error > maxErr) {
-      maxErr = nodes[nb].error;
-      f = nb;
-    }
+
+  // scan neighbors of q (still simple; can be optimized later similarly)
+  for (int j = 0; j < MAX_NODES; j++) {
+    if (j == q) continue;
+    if (!nodes[j].active) continue;
+    if (!edge_is_connected(q, j)) continue;
+    if (nodes[j].error > maxErr) { maxErr = nodes[j].error; f = j; }
   }
   if (f < 0) return -1;
 
@@ -229,12 +262,12 @@ static int insertNode_fritzke(void) {
 
   nodes[q].error *= GNG_ALPHA;
   nodes[f].error *= GNG_ALPHA;
-  nodes[r].error  = nodes[q].error; // r gets NEW q error
+  nodes[r].error  = nodes[q].error;
 
   return r;
 }
 
-// ============================ UART TX ============================
+// ============================ UART TX ===========================================
 static void uart_send_frame(uint8_t cmd, const uint8_t *payload, uint8_t len) {
   uint8_t sum = (uint8_t)(cmd + len);
   for (uint8_t i = 0; i < len; i++) sum = (uint8_t)(sum + payload[i]);
@@ -271,23 +304,35 @@ static void sendGNGNodes(void) {
 }
 
 static void sendGNGEdges(void) {
-  uint8_t payload[2 + MAX_EDGES * 2];
+  uint8_t payload[2 + MAX_EDGE_PAIRS_PER_FRAME * 2];
   uint8_t p = 0;
   payload[p++] = frame_id;
   payload[p++] = 0;
 
   uint8_t edge_count = 0;
-  for (int i = 0; i < MAX_EDGES; i++) {
-    if (!edges[i].active) continue;
-    payload[p++] = edges[i].a;
-    payload[p++] = edges[i].b;
-    edge_count++;
+
+  // enumerate upper triangle pairs (i<j)
+  for (int i = 0; i < MAX_NODES; i++) {
+    for (int j = i + 1; j < MAX_NODES; j++) {
+      int ei = edge_index_ij(i, j);
+      if ((edge_cell[ei] & EDGE_CONN_MASK) == 0) continue;
+
+      payload[p++] = (uint8_t)i;
+      payload[p++] = (uint8_t)j;
+      edge_count++;
+
+      if (edge_count >= MAX_EDGE_PAIRS_PER_FRAME) {
+        i = MAX_NODES; // break outer
+        break;
+      }
+    }
   }
+
   payload[1] = edge_count;
   uart_send_frame(CMD_GNG_EDGES, payload, p);
 }
 
-// ============================ UART RX ============================
+// ============================ UART RX ===========================================
 static void handleCommand(uint8_t cmd, const uint8_t *payload, uint8_t len) {
   if (cmd == CMD_DATA_BATCH) {
     if (len < 1) return;
@@ -352,7 +397,7 @@ static void readSerial(void) {
   }
 }
 
-// ============================ CFS helpers ============================
+// ============================ CFS helpers =======================================
 static void cfs_sync_nodes_full(void) {
   for (int i = 0; i < MAX_NODES; i++) {
     NEORV32_CFS->REG[CFS_NODE_BASE + i] = pack_node_q15(nodes[i].x, nodes[i].y);
@@ -400,17 +445,16 @@ static bool cfs_find_winners(float x, float y, int *s1, int *s2, float *d1_out) 
   *s1 = (int)(s12 & 0xFFu);
   *s2 = (int)((s12 >> 8) & 0xFFu);
 
-  *d1_out = q30_to_float(min1); // Q2.30 consistent with VHDL (NO shift)
+  *d1_out = q30_to_float(min1);
   return true;
 }
 
-// ============================ GNG Step (CPU Fritzke) ============================
+// ============================ GNG Step (CPU Fritzke) =============================
 static void trainOneStep(float x, float y) {
   int s1=-1, s2=-1;
   float d1 = 1e30f;
 
   if (!cfs_find_winners(x, y, &s1, &s2, &d1)) {
-    // fallback (rare)
     float best1=1e30f, best2=1e30f;
     for (int i=0;i<MAX_NODES;i++){
       if(!nodes[i].active) continue;
@@ -423,7 +467,7 @@ static void trainOneStep(float x, float y) {
 
   if (s1 < 0 || s2 < 0) return;
 
-  // (1) age edges from winner
+  // (1) age edges from winner (two-loop)
   ageEdgesFromWinner(s1);
 
   // (2) error accumulate
@@ -434,17 +478,25 @@ static void trainOneStep(float x, float y) {
   nodes[s1].y += GNG_EPSILON_B * (y - nodes[s1].y);
   cfs_write_one_node(s1);
 
-  // (4) move neighbors
-  for (int e=0;e<MAX_EDGES;e++){
-    if(!edges[e].active) continue;
-    int nb = -1;
-    if ((int)edges[e].a == s1) nb = (int)edges[e].b;
-    else if ((int)edges[e].b == s1) nb = (int)edges[e].a;
-    if (nb >= 0 && nb < MAX_NODES && nodes[nb].active) {
-      nodes[nb].x += GNG_EPSILON_N * (x - nodes[nb].x);
-      nodes[nb].y += GNG_EPSILON_N * (y - nodes[nb].y);
-      cfs_write_one_node(nb);
-    }
+  // (4) move neighbors (two-loop)
+  for (int i = 0; i < s1; i++) {
+    if (!nodes[i].active) continue;
+    int ei = edge_index_ij(i, s1);
+    if ((edge_cell[ei] & EDGE_CONN_MASK) == 0) continue;
+
+    nodes[i].x += GNG_EPSILON_N * (x - nodes[i].x);
+    nodes[i].y += GNG_EPSILON_N * (y - nodes[i].y);
+    cfs_write_one_node(i);
+  }
+
+  for (int i = s1 + 1; i < MAX_NODES; i++) {
+    if (!nodes[i].active) continue;
+    int ei = edge_index_ij(s1, i);
+    if ((edge_cell[ei] & EDGE_CONN_MASK) == 0) continue;
+
+    nodes[i].x += GNG_EPSILON_N * (x - nodes[i].x);
+    nodes[i].y += GNG_EPSILON_N * (y - nodes[i].y);
+    cfs_write_one_node(i);
   }
 
   // (5) connect winners (reset age=0)
@@ -469,14 +521,16 @@ static void trainOneStep(float x, float y) {
   }
 }
 
-// ============================ Init ============================
+// ============================ Init ===============================================
 static void initGNG(void) {
   for (int i=0;i<MAX_NODES;i++){
     nodes[i].x=0.0f; nodes[i].y=0.0f;
     nodes[i].error=0.0f;
     nodes[i].active=false;
   }
-  edges_clear_all();
+
+  edges_init_full();
+
   dataCount=0; dataDone=false; running=false;
   stepCount=0; dataIndex=0; frame_id=0;
 
