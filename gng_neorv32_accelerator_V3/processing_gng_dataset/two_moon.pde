@@ -23,7 +23,7 @@ final int    BAUD      = 1000000;
 // Match main.c
 // ===============================
 final int MAX_NODES = 20;
-final int CPU_HZ    = 50000000; // must match main.c (for microsecond conversion)
+final int CPU_HZ    = 24000000; // must match main.c (for microsecond conversion)
 
 // ===============================
 // Two-moons dataset options
