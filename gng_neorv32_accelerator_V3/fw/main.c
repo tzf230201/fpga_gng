@@ -15,6 +15,13 @@
 //   degree[i] = number of active edges incident to node i
 //   prune isolated -> if degree[i] == 0 then nodes[i].active=false
 //
+// LAZY DECAY (GLOBAL SCALING):
+//   - remove per-step O(N) decay loop "error *= D"
+//   - keep global scaling g_err_inv = 1 / (D^k) since last renorm
+//   - accumulate as: error[s1] += d1 * g_err_inv
+//   - each step: g_err_inv *= (1/D)
+//   - occasional renorm: error[i] *= (1/g_err_inv), then g_err_inv = 1
+//
 // STREAMING COMPATIBILITY (KEEP OLD PROCESSING FORMAT):
 //   CMD_GNG_EDGES payload:
 //     [frame_id][count][a0][b0][a1][b1]... (count pairs)
@@ -55,6 +62,11 @@
 // => 2 + 2*count <= 255 => count <= 126
 #define MAX_EDGE_PAIRS_PER_FRAME 126
 
+// ---------------- Lazy decay control ----------------
+#define GNG_D_INV (1.0f / GNG_D)
+// renorm threshold; 1e6 kira-kira renorm setiap ~2.7k step utk D=0.995
+#define ERR_INV_RENORM_TH  1.0e6f
+
 enum { RX_WAIT_H1=0, RX_WAIT_H2, RX_WAIT_CMD, RX_WAIT_LEN, RX_WAIT_PAYLOAD, RX_WAIT_CHK };
 
 static uint8_t  rx_state = RX_WAIT_H1;
@@ -74,7 +86,7 @@ static bool  running   = false;
 // Node CPU struct (full CPU GNG)
 typedef struct {
   float x, y;
-  float error;
+  float error;   // NOTE: this is "scaled error" under lazy decay
   bool  active;
 } Node;
 
@@ -87,6 +99,9 @@ static int stepCount = 0;
 static int dataIndex = 0;
 static uint8_t frame_id = 0;
 static bool g_has_cfs = false;
+
+// global scaling for lazy decay: g_err_inv = 1/(D^k) since last renorm
+static float g_err_inv = 1.0f;
 
 // ============================ CFS REG MAP (match VHDL) ============================
 #define CFS_REG_CTRL       0
@@ -155,6 +170,19 @@ static inline int edge_index(int i, int j) {
 static void edges_init_full(void) {
   for (int i = 0; i < MAX_EDGES_FULL; i++) edge_cell[i] = 0;
   for (int i = 0; i < MAX_NODES; i++) degree[i] = 0;
+}
+
+// Lazy decay renormalization: keep g_err_inv bounded
+static inline void error_renorm_if_needed(void) {
+  if (g_err_inv <= ERR_INV_RENORM_TH) return;
+
+  // Multiply all scaled errors by (1/g_err_inv) to convert back to "true scale"
+  float g = 1.0f / g_err_inv;
+  for (int i = 0; i < MAX_NODES; i++) {
+    if (!nodes[i].active) continue;
+    nodes[i].error *= g;
+  }
+  g_err_inv = 1.0f;
 }
 
 // Connect/reset (age=0 encoded as 1). If previously disconnected, increment degree.
@@ -298,6 +326,7 @@ static int insertNode_fritzke(void) {
   connectOrResetEdge(q, r);
   connectOrResetEdge(r, f);
 
+  // NOTE: still valid under scaled errors (global scaling factor cancels)
   nodes[q].error *= GNG_ALPHA;
   nodes[f].error *= GNG_ALPHA;
   nodes[r].error  = nodes[q].error;
@@ -504,8 +533,10 @@ static void trainOneStep(float x, float y) {
 
   if (s1 < 0 || s2 < 0) return;
 
-  // (A) error accumulate (dist^2 from CFS)
-  nodes[s1].error += d1;
+  // (A) error accumulate (LAZY DECAY: scale the increment)
+  // Original: error[s1] += d1; then later error *= D (global)
+  // Lazy: keep errors scaled; add d1 * g_err_inv
+  nodes[s1].error += d1 * g_err_inv;
 
   // (B) move winner
   nodes[s1].x += GNG_EPSILON_B * (x - nodes[s1].x);
@@ -531,10 +562,9 @@ static void trainOneStep(float x, float y) {
     cfs_sync_nodes_full();
   }
 
-  // (G) decay errors
-  for (int i=0;i<MAX_NODES;i++){
-    if(nodes[i].active) nodes[i].error *= GNG_D;
-  }
+  // (G) LAZY DECAY: update global inverse scaling (instead of looping all nodes)
+  g_err_inv *= GNG_D_INV;
+  error_renorm_if_needed();
 }
 
 // ============================ Init ===============================================
@@ -548,6 +578,9 @@ static void initGNG(void) {
 
   dataCount=0; dataDone=false; running=false;
   stepCount=0; dataIndex=0; frame_id=0;
+
+  // reset lazy decay scaling
+  g_err_inv = 1.0f;
 
   nodes[0].x=0.2f; nodes[0].y=0.2f; nodes[0].active=true;
   nodes[1].x=0.8f; nodes[1].y=0.8f; nodes[1].active=true;
