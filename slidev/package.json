@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "slidev slides.md",
     "build": "slidev build slides.md",
+    "build:gh": "slidev build slides.md --base /fpga_gng/",
     "export": "slidev export slides.md",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
