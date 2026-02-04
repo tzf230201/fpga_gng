@@ -19,7 +19,7 @@ This tutorial explains how to:
 This documentation is intended for the **fpga_gng/picotiny** project.
 
 ---
-
+![alt text](image.png)
 # 🧰 1. Install MSYS2
 
 Download from:

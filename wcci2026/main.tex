@@ -1,0 +1,499 @@
+% =========================
+% IJCNN 2026 Full Paper
+% GNG-Lite: Memory-Efficient Growing Neural Gas via Sparse Graph Representation
+% =========================
+\documentclass[conference]{IEEEtran}
+
+% IEEE-style citations (BibTeX)
+\usepackage{cite}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+
+% Code listing configuration
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  stringstyle=\color{red},
+  breaklines=true,
+  frame=single,
+  captionpos=b,
+  language=C
+}
+
+\begin{document}
+
+\title{Edge-Cell Graph Encoding and Fixed-Point Arithmetic for Embedded and FPGA Growing Neural Gas}
+\author{
+\IEEEauthorblockN{Anonymous Author(s)}
+\IEEEauthorblockA{Anonymous Institution(s)}
+}
+
+% BibTeX style control (prevents dashed repeated author names like "------")
+\bstctlcite{IEEEexample:BSTcontrol}
+\maketitle
+
+\begin{abstract}
+Small aerial robots, micro-UAV swarms, and field robots increasingly require on-board unsupervised adaptation under tight energy and memory budgets, often without reliable cloud connectivity. We present an embedded- and FPGA-friendly Growing Neural Gas (GNG) approach based on \textbf{edge-cell graph encoding} and \textbf{fixed-point arithmetic}, targeting deterministic memory layout and fixed-capacity static allocation. Unlike dense adjacency matrices, connectivity is stored in a \emph{compressed half-adjacency} array of 8-bit \emph{edge-cells} with an \emph{age+1} encoding: an edge is inactive if the stored value is 0, and its true age is $(v-1)$ otherwise. This removes a separate active-flag bit and enables constant-time adjacency checks. To reduce per-sample overhead, we fuse winner-incident \emph{edge aging} and \emph{neighbor adaptation} in a single scan, and we maintain per-node \emph{degree counters} so isolated-node pruning is $O(N_{\max})$ without scanning edges. On a reproducible Two Moons benchmark (400 samples; 10 epochs; fixed seeds), the proposed design matches a Float32 reference in quantization and topology error (QE = 1.1036, TE = 0.00\%) while operating with a fixed, kilobyte-scale state suitable for FPGA softcores and microcontrollers.
+
+
+\end{abstract}
+
+\begin{IEEEkeywords}
+Growing Neural Gas, fixed-point arithmetic, embedded learning, FPGA, memory optimization, topology learning
+\end{IEEEkeywords}
+
+
+% ============================================================
+\section{Introduction}
+Small aerial robots, micro-UAV swarms, and field robots increasingly require on-board unsupervised adaptation for tasks such as online map or topology formation, novelty detection, and structure discovery. In these settings, streaming raw sensory data to a cloud backend is often impractical due to intermittent connectivity and latency, so learning must execute locally with bounded per-sample time and predictable state size. % Mechanism: on-device adaptation avoids connectivity and round-trip latency limits.
+
+% \begin{figure}[t]
+% \centering
+% \includegraphics[width=0.4\textwidth]{problem.png}
+% \caption{A micro-UAV swarm performing search-and-rescue in a GPS-denied environment (collapsed building or dense forest) must build topological maps in real-time without cloud connectivity. Payload constraints limit compute to a Tang Nano 9K FPGA with 32 KB RAM for real-time performance.}
+% \label{fig:problem}
+% \end{figure}
+
+Growing Neural Gas (GNG) is a well-established unsupervised learning algorithm for topology learning and vector quantization~\cite{fritzke1995growing}. Building on earlier self-organizing methods~\cite{kohonen1982self, Kohonen1995SOM} and the growing cell structures framework~\cite{Fritzke1994GCS}, GNG incrementally adapts its graph structure to approximate the input data distribution without retraining cycles, which makes it a candidate for real-time adaptation on embedded compute targets. % Prior work: incremental graph learning supports online updates.
+
+The growing demand for edge intelligence motivates revisiting classical neural algorithms that can operate under strict limits on memory, compute, and power. In this context, GNG remains attractive because it supports continual/incremental learning without costly retraining, produces an interpretable topological structure, and can be implemented with relatively modest per-sample computation. However, deploying GNG at the edge introduces practical challenges: typical embedded targets provide only a few kilobytes of RAM, often lack a floating-point unit %(making software-emulated floating point prohibitively slow), 
+and generally avoid heap-based dynamic allocation for reliability and real-time determinism. Moreover, on FPU-less targets, integer arithmetic is typically more energy-efficient than software-emulated floating point, further strengthening the case for an integer-only design.
+
+However, conventional GNG engineering choices are often misaligned with typical microcontroller and small-FPGA constraints. Dense adjacency matrices are particularly mismatched because connectivity storage scales as $O(N^2)$, so even modest caps (e.g., $N_{\max}=32$) can make adjacency dominate the memory footprint: a $32\times 32$ matrix of 16-bit edge ages alone requires 2,048~B. Floating-point arithmetic further incurs either FPU dependency or software emulation costs, while fixed-point enables integer-only datapaths that map cleanly to softcore and RTL pipelines. % Derivation: $32\times 32\times 2$~B = 2,048~B; Mechanism: fixed-point aligns with integer datapaths.
+
+To address these constraints, we propose an embedded-oriented GNG design that combines compressed edge-cell graph storage with reduced-precision fixed-point interfacing. On a controlled Two Moons benchmark, the proposed implementation reduces the \emph{allocated} topology-state memory under fixed-capacity allocation ($N_{\max}=20$) from 1,120~B (dense 16-bit adjacency) to 530~B (edge-cells), i.e., a 52.7\% reduction (Table~\ref{tab:memory}), while preserving learning quality and yielding the same final topology (TE = 0.00\%). The main contributions are as follows: (i) an \emph{edge-cell} connectivity encoding that stores the upper-triangular adjacency with 8-bit \emph{age+1} values (0 means no edge) to reduce memory and branches, (ii) a winner-indexed \emph{fused update loop} that performs edge aging and neighbor movement together, with winner-local deletion of over-aged edges, (iii) a lightweight \emph{degree counter} that enables isolated-node pruning without scanning all edges, and (iv) fixed-capacity static allocation and reduced-precision arithmetic guidelines suitable for FPU-less targets. We further provide an embedded C prototype targeting the NEORV32 RISC-V softcore on the Tang Nano 9K FPGA.
+
+These design choices support constraints that commonly arise in edge robotics. Local learning avoids round-trip delays and reduces sustained uplink requirements by limiting continuous streaming of raw sensor data. Static buffers and integer-centric datapaths enable predictable worst-case resource usage and simplify FPGA/MCU deployment. The learned topological graph also exposes explicit neighborhood structure that can be inspected or constrained downstream.
+
+
+
+
+% ============================================================
+\section{Related Work}
+Topology-learning networks build on self-organizing approaches such as SOM~\cite{kohonen1982self,Kohonen1995SOM} and the growing cell structures framework~\cite{Fritzke1994GCS}. Fritzke introduced GNG~\cite{fritzke1995growing} to remove the fixed-topology limitation by allowing the graph to grow and rewire according to the input distribution. Several GNG variants target online and continual learning. Hamker discussed life-long learning properties~\cite{hamker2001life}, Marsland et al.\ proposed GWR to control growth via novelty criteria~\cite{marsland2002self}, Holmstr\"om introduced utility-based node management~\cite{Holmstrom2002Utility}, and Prudent et al.\ developed IGNG for streaming updates~\cite{prudent2005incremental}. Other work improves scalability through batch, hierarchical, and distributed learning, including Toda et al.~\cite{Toda2006MultipleTopo,Toda2007BatchGNG,Toda2008MultiLayer}, Siow et al.~\cite{Siow2024DBL}, MapReduce-based scaling~\cite{Ventocilla2021MapReduceGNG}, and multi-scale batch learning for motion extraction~\cite{Ardilla2023MSBLGNG}. These extensions primarily target large datasets and conventional computing resources.
+
+Implementation studies have also optimized GNG for large $N$ by accelerating nearest-neighbor search and reducing bookkeeping. Fi\v{s}er et al.\ reported substantial speedups using grid-based partitioning and evaluation strategies~\cite{Fiser2013Efficient}. In contrast, the present work targets small networks ($N\approx 15$--$32$) under kilobyte-scale RAM budgets, where memory footprint, fixed-point arithmetic, and deterministic static allocation dominate design choices. For embedded neural computation, prior work shows that reduced-precision integer arithmetic is effective when scaling and overflow are controlled. Lai et al.\ demonstrated INT8 inference with CMSIS-NN on Cortex-M~\cite{lai2018cmsis}, while Jacob et al.\ introduced quantization-aware training for accurate fixed-point deployment~\cite{jacob2018quantization}. Lin et al.\ further emphasized model--hardware co-design for IoT devices with MCUNet~\cite{Lin2020MCUNet}.
+
+Self-organizing networks have been implemented on FPGAs using fixed-point arithmetic. Coelho et al.\ demonstrated an FPGA SOM implementation and highlighted the hardware suitability of competitive learning~\cite{coelho2020fpga}. Later SOM accelerators focused on throughput via parallel architectures and memory hierarchies~\cite{Dias2021SOMFPGA,deSousa2020SOMProcessor,Yamagiwa2024ScalableSOMFPGA,Hikawa2023NestedSOMFPGA}, but these designs assume static lattice connectivity and do not address GNG-specific requirements such as sparse dynamic adjacency, edge aging, and bounded-memory growth. FPGA-oriented work has also applied GNG in specific systems and scalable architectures, including a virtual anemometer~\cite{LaTona2020VirtualAnemometer}, spike sorting~\cite{Shoaran2015SpikeSorting}, and NoC-style scaling~\cite{Derue2025SWAPGNG}. Drift-adaptive growing approaches further address recurring concept drift via prototype management~\cite{Arostegi2025AiGAS}. In contrast, our work targets a GNG implementation that prioritizes deterministic fixed-capacity allocation and memory-efficient edge-cell connectivity suitable for severely constrained embedded and FPGA softcore deployments.
+
+
+
+For graph-based self-organizing methods, Piyasena et al.~\cite{Piyasena2020GrowingSONNFPGA} implemented a dynamically growing self-organizing neural network (GWR-like) on FPGA for lifelong learning at the edge, demonstrating that structural plasticity can be realized in hardware while meeting real-time constraints on continual learning benchmarks, representing the closest hardware cousin to embedded dynamic growth. Work on compressed graph representation also provides relevant design principles: Firmli et al.~\cite{Firmli2020CSRpp} showed that compressed sparse row (CSR++) variants can reduce memory overhead for low-degree graphs, with performance trade-offs depending on graph density (1\% faster on sparse Twitter graph, 42\% slower on denser LiveJournal), while Zhou et al.~\cite{Zhou2021GNNPruning} demonstrated that adjacency pruning in graph neural networks yields 3.27$\times$ inference speedup with negligible accuracy loss (0.002 F1 drop), providing evidence that graph sparsity is a first-order lever for both memory footprint and computational efficiency. These results motivate exploring similar fixed-point and memory-aware strategies for graph-based self-organizing methods such as GNG, which share the winner-selection and local adaptation structure of SOM but introduce additional requirements such as edge aging, sparse connectivity, and dynamic growth.
+
+In application-driven work, GNG has been adopted for tasks such as landmark learning in mobile robotics ~\cite{Hernandez2005Landmarks} and accelerated 3D reconstruction using GPGPU computing ~\cite{OrtsEscolano2012GPGPU}, demonstrating its practical value in real-world perception and mapping. However, these implementations generally assume workstation-class or GPU-class resources and do not treat memory footprint and arithmetic format as primary constraints. Consequently, to the best of our knowledge, there remains limited work that systematically addresses GNG deployment on severely resource-constrained embedded systems (e.g., 2--32~KB RAM) with (i) comprehensive memory optimization of the graph structure, (ii) validated fixed-point arithmetic design, and (iii) deployment-focused engineering choices suitable for FPU-less microcontrollers and small FPGAs.
+
+
+% \begin{figure}[t]
+% \centering
+% \includegraphics[width=0.48\textwidth]{fig4_architecture.pdf}
+% \caption{GNG-Lite fixed-point architecture overview. Input data is normalized and converted to Q16.16 format. Distance calculation uses int64 intermediate values for overflow protection. Nodes (12 bytes each) and edges (6 bytes each) are stored in compact sparse structures. Weight updates preserve fixed-point precision throughout.}
+% \label{fig:architecture}
+% \end{figure}
+
+% ============================================================
+\section{Methodology}
+
+\subsection{GNG Algorithm Overview}
+The Growing Neural Gas algorithm maintains a graph $G = (V, E)$ where $V$ represents nodes with weight vectors $w_i \in \mathbb{R}^d$ and $E$ represents edges between nodes. Algorithm~\ref{alg:gng} presents the core GNG training procedure.
+
+\begin{algorithm}[t]
+\caption{Growing Neural Gas Training}
+\label{alg:gng}
+\begin{algorithmic}[1]
+\STATE Initialize two nodes with random weights
+\FOR{each training iteration $t$}
+    \STATE Sample input $\xi$ from dataset
+    \STATE Find winner $s_1$ and second winner $s_2$:
+    \STATE \quad $s_1 = \arg\min_i \|\xi - w_i\|^2$
+    \STATE \quad $s_2 = \arg\min_{i \neq s_1} \|\xi - w_i\|^2$
+    \STATE Increment age of all edges from $s_1$
+    \STATE Accumulate error: $error_{s_1} \gets error_{s_1} + \|\xi - w_{s_1}\|^2$
+    \STATE Update $s_1$: $w_{s_1} \gets w_{s_1} + \epsilon_w(\xi - w_{s_1})$
+    \FOR{each neighbor $n$ of $s_1$}
+        \STATE $w_n \gets w_n + \epsilon_n(\xi - w_n)$
+    \ENDFOR
+    \STATE Create/reset edge $(s_1, s_2)$ with age = 0
+    \STATE Remove edges with age $>$ max\_age
+	    \STATE Remove isolated nodes
+	    \IF{$t \mod \lambda == 0$ and $|V| < $ max\_nodes}
+	        \STATE Let $q = \arg\max_i error_i$ and $f = \arg\max_{n \in \mathcal{N}(q)} error_n$
+	        \STATE Insert new node $r$ between $q$ and $f$: $w_r \gets (w_q + w_f)/2$
+	        \STATE Update errors after insertion: $error_q \gets \alpha error_q$, $error_f \gets \alpha error_f$, $error_r \gets error_q$
+	    \ENDIF
+	    \STATE Decay all errors: $error_i \gets \beta \cdot error_i$
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Fixed-Point Arithmetic Design}
+We use the Q16.16 fixed-point format, allocating 16 bits to the integer part and 16 bits to the fractional part. This representation provides a signed dynamic range of approximately $[-32768,32767.99998]$ with a resolution of $2^{-16}\approx 1.5\times 10^{-5}$.
+
+\subsubsection{Conversion Functions}
+A real-valued scalar $x$ is mapped to fixed point by scaling with $2^{16}$ and rounding to the nearest integer, while conversion back to floating point applies the inverse scaling:
+\begin{align}
+\mathrm{float\_to\_fixed}(x) &= \mathrm{round}(x \cdot 2^{16}), \\
+\mathrm{fixed\_to\_float}(x) &= x \cdot 2^{-16}.
+\end{align}
+
+\subsubsection{Arithmetic Operations}
+All operations are carried out in Q16.16. Multiplication uses a wider intermediate to avoid overflow, e.g., \texttt{int64\_t tmp=(int64\_t)a*b; out=(int32\_t)(tmp >> 16)}. Division is implemented by left-shifting the numerator prior to integer division, i.e., $(a\ll 16)/b$, to retain fractional precision. For square-root evaluation (used when reporting Euclidean distances), we apply a Newton--Raphson iteration expressed in fixed-point arithmetic.
+
+
+\subsection{Memory Optimization}
+\label{sec:memory_opt}
+
+\subsubsection{Edge-Cell Graph Encoding}
+A major obstacle to deploying GNG on memory-limited embedded targets is the storage cost of the graph connectivity. Conventional software implementations often use a dense adjacency matrix of edge ages, which scales as $O(N^2)$ and dominates RAM even for moderate $N$. However, for the node budgets typical in embedded GNG deployments (e.g., $N_{\max}\!\le\!40$), we can retain constant-time adjacency checks while greatly reducing constant factors.
+
+We store edges in a \emph{compressed half-adjacency} array (upper triangle only), with one byte per potential undirected edge:
+\[
+E_{\text{cells}} = \frac{N_{\max}(N_{\max}-1)}{2}\ \text{bytes}.
+\]
+Each entry uses an \textbf{age+1} encoding:
+\begin{itemize}
+  \item \texttt{edge\_cell[idx]} $=0$ : edge is inactive (no connection),
+  \item \texttt{edge\_cell[idx]} $=v>0$ : edge is active with true age $(v-1)$.
+\end{itemize}
+This representation eliminates a separate \texttt{active} flag bit, simplifies branching (\texttt{v==0} is the only inactivity check), and supports compact over-age deletion using a single threshold comparison (\texttt{v > (A\_max+1)}).
+
+To support isolated-node pruning without scanning all edges, we maintain a per-node \textbf{degree counter} that is incremented when a new edge becomes active and decremented when an edge is deleted. A node is isolated if and only if \texttt{degree[i]==0}.
+
+\subsubsection{Static Memory Allocation}
+The proposed representation is intentionally \emph{fixed-capacity}: all arrays are allocated once at compile time and reused throughout training. This makes memory usage deterministic and suitable for FPGA softcores and microcontrollers with limited RAM and without dynamic allocation.
+
+\begin{lstlisting}[language=C,caption={Fixed-capacity node and edge storage with edge-cell encoding (simplified).},label={lst:edgecell_storage}]
+#define MAX_NODES      32
+#define MAX_EDGES_FULL ((MAX_NODES*(MAX_NODES-1))/2)
+
+typedef struct {
+  int32_t x_q16_16;   // or float in prototype
+  int32_t y_q16_16;
+  int32_t err_q16_16;
+  uint8_t active;
+} Node;
+
+static Node   nodes[MAX_NODES];
+
+// Edge-cells: 0 = no edge, (age+1) = active
+static uint8_t edge_cell[MAX_EDGES_FULL];
+
+// Degree counter for O(N) isolated-node pruning
+static uint8_t degree[MAX_NODES];
+\end{lstlisting}
+
+\subsection{Algorithm Optimizations}
+
+\subsubsection{Distance Calculation}
+A critical issue in fixed-point GNG is preventing overflow during distance evaluation. In Q16.16 arithmetic, the squared Euclidean distance requires products of signed fixed-point differences, and a naive 32-bit implementation can overflow when intermediate products exceed the \texttt{int32} range. This was observed in our initial implementation when accumulating squared terms across dimensions.
+
+To ensure numerical safety, we compute products using 64-bit intermediates and apply the appropriate Q-format rescaling before accumulation:\\
+\begin{lstlisting}[language=C, caption={Overflow-safe squared distance computation in Q16.16 using 64-bit intermediates.}, label={lst:distq1616}]
+int64_t dist_sq = 0;
+for (int i = 0; i < DIM; i++) {
+    int32_t diff = weights[node][i] - sample[i];     // Q16.16
+    int64_t prod = (int64_t)diff * (int64_t)diff;    // Q32.32
+    dist_sq += (prod >> 16);                         // back to Q16.16 (accumulated in int64)
+}
+\end{lstlisting}
+This modification eliminates overflow in intermediate multiplications and yields stable distance rankings, which is essential for correct winner/runner-up selection and, consequently, for preserving the learned topology.
+
+\subsubsection{Data Normalization}
+Fixed-point GNG requires input samples to be scaled to a bounded dynamic range compatible with Q16.16 to avoid saturation and to preserve correct winner selection and adaptation dynamics. Min--max normalization followed by affine scaling is therefore applied to map inputs to a symmetric target interval $[-s,s]$, as shown in the following equation.
+\begin{equation}
+x_{\mathrm{norm}} = \left(\frac{x-x_{\min}}{x_{\max}-x_{\min}}\right)\cdot 2s - s,
+\end{equation}
+where $s$ is chosen to provide a safety margin against overflow. In this work we set $s=10$, yielding the normalized range $[-10,10]$. Empirically, this normalization is necessary to prevent saturation and maintain topology quality. With bounded inputs, the fixed-point implementation produces results comparable to (and in some cases matching) the Float32 baseline.
+
+
+\subsection{Edge Management Strategy}
+\label{sec:edge_mgmt}
+GNG edge updates require (i) connecting the winner and runner-up with age reset, (ii) incrementing ages of edges incident to the winner, (iii) deleting edges whose age exceeds $A_{\max}$, and (iv) pruning isolated nodes. In embedded settings, both memory and predictable runtime are important, so we design edge operations around winner-local scans and fixed-capacity arrays.
+
+\subsubsection{Half-Adjacency Indexing}
+We store only the upper triangle ($i<j$) of the undirected adjacency. The pair $(i,j)$ is mapped to a linear index:
+\[
+\texttt{idx}(i,j) = \frac{i(2N_{\max}-i-1)}{2} + (j-i-1),\quad i<j,
+\]
+and $(i,j)$ is swapped if $i>j$. This yields a contiguous \texttt{edge\_cell} buffer of size $N_{\max}(N_{\max}-1)/2$ bytes.
+
+\subsubsection{Winner-Local Fused Update Loop}
+A key observation from Fritzke GNG is that \emph{only edges incident to the winner} are aged in each iteration. Therefore, only those edges can newly cross the deletion threshold in the current step. We exploit this to avoid scanning the full edge array.
+
+For a winner $s_1$, the incident edges correspond to the entries \texttt{edge\_cell[idx(i,s1)]} for all $i\neq s_1$. We implement this as two simple loops ($i<s_1$ and $i>s_1$). When a neighbor edge is active ($v\neq 0$), we:
+\begin{enumerate}
+  \item increment its encoded age (\texttt{v++}),
+  \item apply the neighbor adaptation step,
+  \item delete it immediately if \texttt{v > (A\_max+1)} and update degrees.
+\end{enumerate}
+This fuses \emph{edge aging}, \emph{neighbor movement}, and \emph{old-edge pruning} in a single, branch-light pass over at most $(N_{\max}-1)$ candidates per iteration.
+
+\begin{lstlisting}[language=C,caption={Winner-local fused update: age edges, move neighbors, and prune over-aged edges.},label={lst:fused_loop}]
+const uint8_t TH = (uint8_t)(A_MAX + 1); // encoded threshold
+
+// i < s1  -> edge(i, s1)
+for (int i = 0; i < s1; i++) {
+  int ei = idx_ij(i, s1);
+  uint8_t v = edge_cell[ei];
+  if (v == 0) continue;              // not a neighbor
+
+  if (v < 255) v++;                  // age++ (encoded)
+  edge_cell[ei] = v;
+
+  // neighbor adaptation
+  node[i] += eps_n * (x - node[i]);
+
+  // prune if too old (only possible for winner-incident edges)
+  if (v > TH) { edge_cell[ei] = 0; degree[i]--; degree[s1]--; }
+}
+
+// i > s1  -> edge(s1, i)
+for (int i = s1 + 1; i < N_MAX; i++) { /* symmetric */ }
+\end{lstlisting}
+
+After the fused loop, the winner--runner-up edge is created or reset by setting \texttt{edge\_cell[idx(s1,s2)] = 1}, and degrees are incremented only if the edge was previously inactive.
+
+\subsubsection{Degree-Assisted Isolated-Node Pruning}
+Instead of scanning all edges to check whether a node has any incident connections, we maintain \texttt{degree[i]}. Isolated nodes are removed by a single pass over nodes:
+\[
+\texttt{if nodes[i].active \&\& degree[i]==0 then deactivate}.
+\]
+This reduces pruning to $O(N_{\max})$ time with minimal memory traffic.
+
+\section{Experimental Setup}
+
+\subsection{Datasets}
+We evaluate the proposed embedded GNG design on the Two Moons dataset (400 samples), which consists of two interleaving crescent-shaped manifolds in 2D.
+
+To ensure numerical stability under fixed-point arithmetic, input features are normalized using min--max scaling followed by an affine mapping to a bounded symmetric interval. In our experiments, the Two Moons coordinates are mapped to $[-10,10]$, which provides margin against overflow and preserves resolution for fixed-point distance computations and weight updates.
+
+
+\subsection{Evaluation Metrics}
+Following established evaluation practice for topology-learning algorithms~\cite{martinetz1994topology,fritzke1995growing}, we report both representation quality and topology preservation. Let $\{x_i\}_{i=1}^{N}$ denote the input samples and let $w_{s(i)}$ be the weight vector of the best-matching unit (BMU) for $x_i$.
+
+\subsubsection{Quantization Error}
+Quantization Error (QE) measures the average reconstruction error between samples and their BMUs:
+\begin{equation}
+\mathrm{QE}=\frac{1}{N}\sum_{i=1}^{N}\left\lVert x_i-w_{s(i)}\right\rVert .
+\end{equation}
+Lower QE indicates better vector quantization and representation accuracy.
+
+\subsubsection{Topological Error}
+Topological Error (TE) evaluates whether the first and second BMUs of a sample are connected, reflecting topology preservation in the learned graph:
+\begin{equation}
+\mathrm{TE}=\frac{1}{N}\sum_{i=1}^{N} u(x_i),
+\end{equation}
+where $u(x_i)=1$ if the first and second BMUs for $x_i$ are \emph{not} linked by an edge, and $u(x_i)=0$ otherwise. Lower TE indicates better neighborhood consistency in the resulting topology.
+
+\subsubsection{System-Level Metrics}
+In addition to QE and TE, we report an implementation-oriented metric relevant to embedded deployment: \emph{memory footprint}, defined as the total number of bytes required to store the network state (nodes, edges, and associated metadata). We leave quantitative wall-clock timing (training time and BMU search time) to future work because it is highly platform-dependent.
+
+\subsection{Implementation Details}
+This section summarizes the experimental platform and the fixed hyperparameter settings used throughout the paper in Tables~\ref{tab:platform} and~\ref{tab:hyperparams}, respectively. 
+\begin{table}
+\caption{Hardware and software configuration.}
+\label{tab:platform}
+\centering
+\footnotesize
+\begin{tabular}{l l}
+\hline
+\textbf{Item} & \textbf{Specification} \\
+\hline
+Processor & NEORV32 RISC-V (RV32I), no FPU \\
+FPGA board & Sipeed Tang Nano 9K (Gowin GW1NR-9C) \\
+RAM & 32~KB \\
+Clock & 27~MHz (crystal, no PLL) \\
+Toolchain & RISCV Embedded GCC 15.2.0 \\
+Reference & Python 3.10 + NumPy 1.24 \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}
+\caption{GNG hyperparameters used in all experiments.}
+\label{tab:hyperparams}
+\centering
+\footnotesize
+\begin{tabular}{l r}
+\hline
+\textbf{Parameter} & \textbf{Value} \\
+\hline
+$N_{\max}$ (max nodes) & 20 \\
+$E_{\max}$ (max edges) & 80 \\
+$\epsilon_{\mathrm{winner}}$ & 0.03 \\
+$\epsilon_{\mathrm{neighbor}}$ & 0.001 \\
+$\alpha$ (error reduction) & 0.5 \\
+$\beta$ (global decay) & 0.995 \\
+$\lambda$ (insertion period) & 100 \\
+$\mathrm{max\_age}$ & 50 \\
+\hline
+\end{tabular}
+\end{table}
+
+
+\subsection{Baseline Comparisons}
+We compare the proposed fixed-point, edge-cell implementation against a Float32 dense-adjacency baseline under identical hyperparameters and normalized inputs. We report QE/TE and memory footprint.
+
+\begin{table}[t]
+\caption{Baselines used for comparison.}
+\label{tab:baselines}
+\centering
+\footnotesize
+\begin{tabular}{l l l}
+\hline
+\textbf{Method} & \textbf{Arithmetic} & \textbf{Graph storage} \\
+\hline
+Float32 (baseline)  & float32 & dense adjacency matrix \\
+Edge-cells (ours)     & Q16.16  & edge-cells (half adjacency, 8-bit age+1) \\
+\hline
+\end{tabular}
+\end{table}
+
+
+% ============================================================
+\section{Results}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.48\textwidth]{data.png}
+\caption{Learned topology on the Two Moons dataset after 25 epochs over 400 samples (2{,}500 iterations; inputs normalized to $[-1.0,1.0]$). The network forms a connected graph with 20 nodes (red) and 18 edges (black). This behavior is consistent with GNG's objective of topology preservation rather than explicit cluster separation~\cite{fritzke1995growing}.}
+\label{fig:gng_result}
+\end{figure}
+
+
+\subsection{Accuracy}
+Fixed-point arithmetic is evaluated in terms of representation quality and topology consistency. Figure~\ref{fig:gng_result} visualizes the final learned graph, while Table~\ref{tab:accuracy} reports quantization and topological errors on the Two Moons benchmark.
+
+\begin{table}[t]
+\centering
+\caption{Accuracy on Two Moons (25 epochs, 400 samples).}
+\label{tab:accuracy}
+\footnotesize
+\begin{tabular}{lccc}
+\hline
+\textbf{Implementation} & \textbf{QE} & \textbf{TE (\%)} & \textbf{Rel. diff. QE (\%)} \\
+\hline
+Float32 (baseline)   & 1.1036 & 0.00 & -- \\
+Q16.16 (fixed-point) & 1.1036 & 0.00 & 0.00 \\
+\hline
+\end{tabular}
+\end{table}
+
+With overflow-safe distance computation and input normalization to $[-1.0,1.0]$, the fixed-point implementation matches the Float32 baseline within numerical noise on this benchmark, indicating that reduced-precision arithmetic does not degrade topology learning under the chosen scaling.
+
+\subsection{Memory Efficiency}
+We evaluate memory usage under a fixed-capacity setting that is typical for embedded targets.
+In our implementation, the graph state is allocated for a maximum number of nodes ($N_{\max}$) and uses a sparse
+connectivity representation: an upper-triangular array of 8-bit \emph{edge-cells} where \texttt{0} denotes no edge and
+\texttt{age+1} encodes an active edge age, together with a small per-node degree counter. This preserves constant-time
+adjacency queries via index arithmetic while avoiding the $O(N_{\max}^2)$ storage cost of dense adjacency matrices.
+
+Table~\ref{tab:memory} compares the allocated state memory of a dense baseline (full $N_{\max}\times N_{\max}$ matrix of
+16-bit ages) against the proposed edge-cell representation. The main reduction comes from replacing the dense adjacency
+storage ($2N_{\max}^2$ bytes) with an upper-triangular 8-bit layout ($N_{\max}(N_{\max}-1)/2$ bytes) plus $N_{\max}$ bytes
+for degree counts. Under the fixed-capacity allocation shown in Table~\ref{tab:memory} ($N_{\max}=20$), the proposed
+representation reduces the \emph{total allocated state memory} from 1120~B to 530~B, corresponding to a 52.7\% reduction.
+
+\begin{table}[t]
+\centering
+\caption{Allocated memory footprint comparison (fixed-capacity, $N_{\max}=20$)}
+\begin{tabular}{lcc}
+\toprule
+Implementation & Edge storage & Total state memory \\
+\midrule
+Dense adjacency (baseline) & 800~B & 1120~B \\
+Edge-cells (proposed)      & 210~B & 530~B \\
+\bottomrule
+\end{tabular}
+\label{tab:memory}
+\end{table}
+
+In the current prototype, node states are maintained in 32-bit precision on the CPU, and quantization is applied only
+when interfacing with the winner-selection hardware. Therefore, the comparison above focuses on the connectivity
+representation rather than float-vs-fixed-point node storage.
+
+% \begin{figure}[t]
+% \centering
+% \includegraphics[width=0.48\textwidth]{memory.png}
+% \caption{Memory Comparison Under Fixed-Capacity Allocation ($N_{\max}=20$)}
+% \label{fig:memory_comparison}
+% \end{figure}
+
+
+
+
+\subsection{Computational Considerations}
+The edge-cell representation provides $O(1)$ adjacency queries via index arithmetic, while enabling a predictable winner-local scan of at most $(N_{\max}-1)$ candidates per iteration for edge aging and neighbor adaptation. The dominant per-sample cost in embedded deployments therefore typically remains winner selection (which can be offloaded to FPGA) and the fixed-size winner-local loops that update incident edges and neighbors. For the small-$N$ regime targeted here ($N_{\max}\le 40$), this yields deterministic runtime and memory access patterns that are friendly to FPGA softcores and microcontrollers. In addition, because only winner-incident edges are aged in Fritzke GNG, over-age deletion can be performed locally (or fused with the aging loop) without scanning unrelated edges. As a further extension, \emph{lazy} global error decay using per-node timestamps can remove the unconditional $O(N_{\max})$ decay pass; we treat this as future work alongside cycle-accurate profiling and energy measurements.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.48\textwidth]{fig2_training_progress.pdf}
+\caption{Training dynamics on Two Moons over 25 epochs. Left: node/edge growth. Right: QE convergence. The network stabilizes at approximately 20 nodes by epoch 25.}
+\label{fig:training_progress}
+\end{figure}
+
+\subsection{Embedded Prototype on Tang Nano 9K}
+A deployment-ready embedded C implementation is provided targeting a NEORV32 RV32I soft-core on the Sipeed Tang Nano 9K (Gowin GW1NR-9C). The prototype is designed for FPU-less execution and uses the fixed-capacity memory layout described in Section~\ref{sec:memory_opt}. This paper focuses on algorithmic correctness, numerical robustness, and memory layout; a full FPGA synthesis study (resource utilization and timing closure) is left as future work.
+
+\subsection{Implementation Pitfalls and Solutions}
+During validation against floating-point baselines, we identified three practical requirements that were necessary to obtain stable and correct behavior in fixed-point GNG. These issues are not specific to our implementation, but reflect common failure modes when translating self-organizing algorithms to integer arithmetic and bounded-memory systems.
+
+\subsubsection{Parameter Fidelity}
+GNG dynamics are highly sensitive to the relative scale of error accumulation and decay. In an early implementation, an incorrect global error decay parameter ($\beta=0.0005$, i.e., $10^3$ smaller than the value used in Table~\ref{tab:hyperparams}) produced pathological growth characterized by excessive node insertion and unusually dense connectivity in diagnostic runs. Restoring parameter fidelity to the original formulation~\cite{fritzke1995growing} (using $\beta=0.995$) re-established the intended insertion/pruning balance and yielded stable topologies. This observation highlights that even small-looking parameter mistakes can qualitatively alter the learned graph structure.
+
+\subsubsection{Overflow Protection}
+Fixed-point Euclidean distance evaluation can overflow if intermediate products are computed at the native word width. In Q16.16, squaring a difference produces a Q32.32 result; storing this product in \texttt{int32} may overflow before rescaling, particularly when inputs are not tightly bounded. We therefore compute products using 64-bit intermediates and only then shift back to the target scale, e.g.,
+\texttt{int64\_t sq = ((int64\_t)diff * (int64\_t)diff) >> 16}.
+This safeguard was required to eliminate overflow and to preserve correct winner/runner-up rankings. The need for wider intermediates is a general fixed-point design rule and aligns with established quantization practice in embedded inference~\cite{jacob2018quantization}.
+
+\subsubsection{Input Normalization}
+Finally, correct operation depends on mapping inputs to a dynamic range suitable for Q16.16. Raw feature ranges (e.g., $[0,1]$ or unbounded real-world scales) can lead to either precision loss (when values occupy a tiny fraction of the representable range) or overflow (when values exceed it). We therefore normalize all datasets to the symmetric interval $[-1.0,1.0]$, which provides ample headroom for intermediate computations while retaining fine resolution (Q16.16 step size $\approx 1.5\times 10^{-5}$). This reinforces a key deployment lesson: fixed-point learning systems require explicit range analysis and must enforce dynamic-range constraints at data ingestion.
+
+% ============================================================
+\section{Discussion}
+
+\subsection{Accuracy--Efficiency Trade-off}
+Our results show that a carefully implemented Q16.16 fixed-point realization can match floating-point behavior on the evaluated benchmark. Specifically, the fixed-point implementation achieves the same quantization error on normalized inputs (QE = 1.1036) and preserves the same topology (TE = 0.00\% with identical node/edge counts). In our prototype, node weights and accumulated errors are stored in 32-bit words across implementations, so the dominant memory savings originate from replacing dense adjacency storage with a edge-cells (compressed half adjacency) (Table~\ref{tab:memory}). In this setting, fixed-point mainly contributes computational practicality: integer-only arithmetic enables deployment on FPU-less platforms without observable accuracy loss.
+
+Achieving parity with floating point requires three conditions. First, intermediate products in squared-distance computation must use wider accumulators (e.g., \texttt{int64}) to avoid overflow. Second, input normalization must bound the dynamic range (here, $[-10,10]$) so that fixed-point operations remain in a safe regime. Third, the fractional precision of Q16.16 ($\approx 1.5\times 10^{-5}$) is sufficient for GNG’s update dynamics under the chosen scaling, allowing learning to proceed without quantization-induced instability.
+
+
+\subsubsection{Relation to Advanced GNG Variants}
+This work focuses on the canonical GNG algorithm to keep the embedded implementation general and comparable to standard baselines. Extensions such as batch-learning GNG~\cite{Toda2007BatchGNG}, hierarchical variants~\cite{Toda2008MultiLayer}, and utility-based mechanisms~\cite{Holmstrom2002Utility} could potentially benefit from similar fixed-point and memory-optimized design. In addition, distributed batch learning~\cite{Siow2024DBL} suggests a path toward scalable implementations on parallel or multi-core embedded systems.
+
+\subsubsection{Topology Learning versus Clustering}
+Finally, we emphasize that GNG is primarily a topology-learning method~\cite{martinetz1994topology,fritzke1995growing} rather than a clustering algorithm. Therefore, the connected graph observed in Fig.~\ref{fig:gng_result} (including edges that visually bridge the two crescents) is expected and indicates preserved neighborhood relationships along the underlying manifold. In this context, the observed TE of 0.00\% confirms that first- and second-best units remain topologically consistent, which is the main objective of GNG. For applications that require explicit cluster separation, GNG outputs can be post-processed using edge-cutting or hierarchical procedures (e.g.,~\cite{Siow2024DBL}).
+
+
+\subsection{Future Works}
+This work focuses on the standard GNG formulation for comparability and does not include explicit mechanisms for recurrent concept drift, such as storing and retrieving previously learned graph prototypes when concepts reappear, which are explored in drift-adaptive topology-learning methods~\cite{Arostegi2025AiGAS}.
+
+Future work will focus on two directions with high practical impact. The first is hardware acceleration using dedicated FPGA/ASIC blocks with saturating arithmetic and fixed-capacity memories, extending prior hardware realizations of self-organizing networks~\cite{coelho2020fpga}. The second is adaptive scaling and quantization that automatically adjusts numerical range during online learning, inspired by quantization-aware deployment practices~\cite{jacob2018quantization}. These extensions aim to improve robustness across diverse data scales while preserving the low-memory benefits of the proposed graph representation.
+
+
+
+% ============================================================
+\section{Conclusion}
+This paper presented a memory-efficient embedded GNG design based on an \emph{edge-cell} graph representation and reduced-precision arithmetic. Under fixed-capacity allocation ($N_{\max}=20$), replacing a dense 16-bit $N_{\max}\!\times\!N_{\max}$ adjacency matrix with 8-bit upper-triangular \emph{edge-cells} (age+1 encoding) and a lightweight degree counter reduces the allocated state memory by 52.7\% (1,120~B $\rightarrow$ 530~B). On the Two Moons benchmark with normalized inputs, the proposed design preserves topology-learning behavior (TE = 0.00\%) and matches a Float32 reference in our controlled setting. We also provide a validated embedded C prototype targeting the NEORV32 RV32I softcore on the Tang Nano 9K FPGA, enabling deterministic memory usage and efficient deployment on FPU-less systems.
+
+
+Our study yields several practical insights. First, sparse connectivity storage is the dominant contributor to memory savings and is broadly applicable to other topology-learning methods~\cite{martinetz1994topology}. Second, Q16.16 fixed-point arithmetic can achieve accuracy parity with Float32 while enabling integer-only computation, offering computational feasibility without increasing memory usage. Third, overflow protection via wider intermediate products is mandatory for squared-distance calculations in fixed-point implementations~\cite{jacob2018quantization,lai2018cmsis}. Fourth, input normalization to a bounded range (here $\pm 10$) is essential to maintain arithmetic safety in Q16.16. Finally, strict parameter fidelity to the original GNG specification~\cite{fritzke1995growing} is required, as small deviations can lead to pathological growth and degraded topology.
+
+Overall, these results indicate that classical self-organizing algorithms such as GNG can be made practical for severely resource-constrained edge platforms when memory layout and numerical design are treated as first-class concerns. Future work will focus on hardware acceleration and adaptive scaling mechanisms to further improve robustness and efficiency in real deployments.
+
+
+% ============================================================
+% ============================================================
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}
