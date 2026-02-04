@@ -1,0 +1,29 @@
+{
+  "name": "fpga_gng",
+  "version": "1.0.0",
+  "description": "This tutorial explains how to:",
+  "main": "index.js",
+  "scripts": {
+    "dev": "slidev slides.md",
+    "build": "slidev build slides.md",
+    "export": "slidev export slides.md",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tzf230201/fpga_gng.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/tzf230201/fpga_gng/issues"
+  },
+  "homepage": "https://github.com/tzf230201/fpga_gng#readme",
+  "devDependencies": {
+    "@slidev/cli": "^52.11.5",
+    "@slidev/theme-default": "^0.25.0",
+    "playwright-chromium": "^1.58.1"
+  }
+}

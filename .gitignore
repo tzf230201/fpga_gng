@@ -4,6 +4,8 @@ neorv32/**
 
 # VS Code settings
 .vscode/
+.idea/
+.fleet/
 
 # Build / synthesis / simulation outputs
 **/build/
@@ -11,10 +13,22 @@ neorv32/**
 **/dist/
 **/tmp/
 **/*.log
+**/*.tmp
 
 # Python
 __pycache__/
 *.pyc
+
+# Node / JS
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS files
+Thumbs.db
+.DS_Store
 
 # Research papers and reports (work in progress)
 **/IJCNN_2026_Report.md
