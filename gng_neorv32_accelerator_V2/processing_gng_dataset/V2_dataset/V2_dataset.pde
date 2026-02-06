@@ -4,7 +4,7 @@ import processing.serial.*;
 // Serial config
 // ======================================================
 Serial myPort;
-final String PORT_NAME = "COM1";
+final String PORT_NAME = "COM1";     // <-- GANTI sesuai Serial.list()
 final int    BAUD      = 1_000_000;
 
 // ======================================================
@@ -28,12 +28,13 @@ float[][] moonsTx;
 // DEBUG TLV stream from gng.vhd (tag,value)
 // Frame end marker: A9
 //
-// Includes:
-//   A5 type, A6 s1, A7 s2, A8 edge01,
-//   AA..AD err32,
-//   AE/AF x_s1 (s16 lo/hi),
-//   B0/B1 y_s1 (s16 lo/hi)   (viewer accepts B2 as alt)
-//   B3 deg_s1, B4 deg_s2, B5 edge_s1s2
+// A5 type, A6 s1, A7 s2,
+// A8 edge01,
+// B3 edge_s1s2, B4 deg_s1, B5 deg_s2,
+// AA..AD err32,
+// AE/AF x_s1, B0/B1 y_s1,
+// C0 rm_cnt, C1 iso_cnt,
+// A9 sample
 // ======================================================
 final int TAG_A5 = 0xA5;
 final int TAG_A6 = 0xA6;
@@ -50,11 +51,13 @@ final int TAG_AE = 0xAE; // x lo
 final int TAG_AF = 0xAF; // x hi
 final int TAG_B0 = 0xB0; // y lo
 final int TAG_B1 = 0xB1; // y hi
-final int TAG_B2 = 0xB2; // accept alternative
 
-final int TAG_B3 = 0xB3; // deg_s1
-final int TAG_B4 = 0xB4; // deg_s2
-final int TAG_B5 = 0xB5; // edge_s1s2
+final int TAG_B3 = 0xB3; // edge(s1,s2)
+final int TAG_B4 = 0xB4; // deg_s1
+final int TAG_B5 = 0xB5; // deg_s2
+
+final int TAG_C0 = 0xC0; // rm_cnt
+final int TAG_C1 = 0xC1; // iso_cnt
 
 boolean dbgWaitVal = false;
 int dbgTag = 0;
@@ -62,7 +65,15 @@ int dbgTag = 0;
 int dbgType = -1;
 int dbgS1   = -1;
 int dbgS2   = -1;
+
 int dbgEdge01 = -1;
+int dbgEdgeS1S2 = -1;
+int dbgDegS1 = -1;
+int dbgDegS2 = -1;
+
+int dbgRm = -1;
+int dbgIso = -1;
+
 int dbgSample = -1;
 
 int dbgErr0=-1, dbgErr1=-1, dbgErr2=-1, dbgErr3=-1;
@@ -72,18 +83,29 @@ int dbgXLo=-1, dbgXHi=-1, dbgYLo=-1, dbgYHi=-1;
 float dbgS1X = Float.NaN;
 float dbgS1Y = Float.NaN;
 
-int dbgDegS1 = -1;
-int dbgDegS2 = -1;
-int dbgEdgeS12 = -1;
-
 int dbgKVCount = 0;
 int dbgFrameCount = 0;
 int dbgLastMs = 0;
+
 String dbgMsg = "waiting TLV...";
 
-// ======================================================
-// (Optional) framed parser remains (kept idle / harmless)
-// ======================================================
+// history
+final int DBG_HIST_MAX = 32;
+int[]   hS1 = new int[DBG_HIST_MAX];
+int[]   hS2 = new int[DBG_HIST_MAX];
+int[]   hE01 = new int[DBG_HIST_MAX];
+int[]   hE12 = new int[DBG_HIST_MAX];
+int[]   hD1  = new int[DBG_HIST_MAX];
+int[]   hD2  = new int[DBG_HIST_MAX];
+int[]   hRm  = new int[DBG_HIST_MAX];
+int[]   hIso = new int[DBG_HIST_MAX];
+int[]   hSample = new int[DBG_HIST_MAX];
+long[]  hErr = new long[DBG_HIST_MAX];
+float[] hX = new float[DBG_HIST_MAX];
+float[] hY = new float[DBG_HIST_MAX];
+int hN = 0;
+
+// framed parser (idle)
 final int MAX_PAYLOAD = 4096;
 enum RxState { FIND_FF1, FIND_FF2, LEN0, LEN1, SEQ, PAYLOAD, CHK }
 RxState st = RxState.FIND_FF1;
@@ -97,20 +119,16 @@ int payIdx = 0;
 int chkCalc = 0;
 int chkRx   = 0;
 
-int pktOK = 0, pktBad = 0, badLen = 0;
-
 byte[] inBuf = new byte[8192];
 int lastByteMs = 0;
 final int PARSER_TIMEOUT_MS = 120;
 
-// ======================================================
-// UI
-// ======================================================
+// UI scaling
 float viewMinX, viewMaxX, viewMinY, viewMaxY;
 
 void setup() {
   size(1400, 780);
-  surface.setTitle("GNG Viewer (DBG TLV + deg + edge_s1s2)");
+  surface.setTitle("GNG Viewer (DBG TLV + deg + edge_s1s2 + rm/iso)");
   textFont(createFont("Consolas", 14));
   frameRate(60);
 
@@ -155,7 +173,13 @@ void sendDatasetOnce() {
   dbgWaitVal = false;
   dbgTag = 0;
 
-  dbgType = dbgS1 = dbgS2 = dbgEdge01 = dbgSample = -1;
+  dbgType = dbgS1 = dbgS2 = -1;
+  dbgEdge01 = dbgEdgeS1S2 = -1;
+  dbgDegS1 = dbgDegS2 = -1;
+  dbgRm = dbgIso = -1;
+
+  dbgSample = -1;
+
   dbgErr0=dbgErr1=dbgErr2=dbgErr3=-1;
   dbgErr32 = -1;
 
@@ -163,12 +187,11 @@ void sendDatasetOnce() {
   dbgS1X = Float.NaN;
   dbgS1Y = Float.NaN;
 
-  dbgDegS1 = dbgDegS2 = dbgEdgeS12 = -1;
-
   dbgKVCount = 0;
   dbgFrameCount = 0;
   dbgLastMs = 0;
   dbgMsg = "waiting TLV...";
+  hN = 0;
 
   myPort.write(txBuf);
 }
@@ -203,8 +226,9 @@ void serialEvent(Serial p) {
 boolean isDbgTag(int ub) {
   return (ub == TAG_A5 || ub == TAG_A6 || ub == TAG_A7 || ub == TAG_A8 || ub == TAG_A9 ||
           ub == TAG_AA || ub == TAG_AB || ub == TAG_AC || ub == TAG_AD ||
-          ub == TAG_AE || ub == TAG_AF || ub == TAG_B0 || ub == TAG_B1 || ub == TAG_B2 ||
-          ub == TAG_B3 || ub == TAG_B4 || ub == TAG_B5);
+          ub == TAG_AE || ub == TAG_AF || ub == TAG_B0 || ub == TAG_B1 ||
+          ub == TAG_B3 || ub == TAG_B4 || ub == TAG_B5 ||
+          ub == TAG_C0 || ub == TAG_C1);
 }
 
 short s16_from_lohi(int lo, int hi) {
@@ -214,12 +238,22 @@ short s16_from_lohi(int lo, int hi) {
 void onDbgTLV(int tag, int val) {
   dbgKVCount++;
   dbgLastMs = millis();
+
   val &= 0xFF;
 
   if (tag == TAG_A5) dbgType = val;
   if (tag == TAG_A6) dbgS1   = val;
   if (tag == TAG_A7) dbgS2   = val;
+
   if (tag == TAG_A8) dbgEdge01 = val;
+
+  if (tag == TAG_B3) dbgEdgeS1S2 = val;
+  if (tag == TAG_B4) dbgDegS1 = val;
+  if (tag == TAG_B5) dbgDegS2 = val;
+
+  if (tag == TAG_C0) dbgRm = val;
+  if (tag == TAG_C1) dbgIso = val;
+
   if (tag == TAG_A9) dbgSample = val;
 
   if (tag == TAG_AA) dbgErr0 = val;
@@ -232,11 +266,6 @@ void onDbgTLV(int tag, int val) {
 
   if (tag == TAG_B0) dbgYLo = val;
   if (tag == TAG_B1) dbgYHi = val;
-  if (tag == TAG_B2) dbgYHi = val;
-
-  if (tag == TAG_B3) dbgDegS1 = val;
-  if (tag == TAG_B4) dbgDegS2 = val;
-  if (tag == TAG_B5) dbgEdgeS12 = val;
 
   if (dbgErr0>=0 && dbgErr1>=0 && dbgErr2>=0 && dbgErr3>=0) {
     dbgErr32 = ((long)dbgErr3<<24) | ((long)dbgErr2<<16) | ((long)dbgErr1<<8) | (long)dbgErr0;
@@ -252,27 +281,53 @@ void onDbgTLV(int tag, int val) {
     dbgS1Y = yi / SCALE;
   }
 
-  boolean conn = (dbgEdgeS12 > 0) || (dbgDegS1 > 0);
+  boolean conn = (dbgEdgeS1S2 > 0);
 
   dbgMsg =
     "type=0x" + hex(max(dbgType,0),2) +
     " s1=" + dbgS1 + " s2=" + dbgS2 +
     " edge01=" + dbgEdge01 +
-    " edge12=" + dbgEdgeS12 +
+    " edge12=" + dbgEdgeS1S2 +
     " deg(s1,s2)=(" + dbgDegS1 + "," + dbgDegS2 + ")" +
     " conn=" + (conn ? "YES" : "NO") +
+    " rm=" + dbgRm + " iso=" + dbgIso +
     " err32=" + (dbgErr32<0 ? "--" : ("" + dbgErr32)) +
     " s1xy=(" + (Float.isNaN(dbgS1X) ? "--" : nf(dbgS1X,1,4)) + "," + (Float.isNaN(dbgS1Y) ? "--" : nf(dbgS1Y,1,4)) + ")" +
     " samp=" + dbgSample;
 
   if (tag == TAG_A9) {
     dbgFrameCount++;
+    pushHist();
   }
 }
 
-// ======================================================
-// Framed Parser (optional; minimal)
-// ======================================================
+void pushHist() {
+  int k = min(hN, DBG_HIST_MAX-1);
+  if (hN < DBG_HIST_MAX) {
+    hN++;
+  } else {
+    for (int i=0; i<DBG_HIST_MAX-1; i++) {
+      hS1[i]=hS1[i+1]; hS2[i]=hS2[i+1];
+      hE01[i]=hE01[i+1]; hE12[i]=hE12[i+1];
+      hD1[i]=hD1[i+1]; hD2[i]=hD2[i+1];
+      hRm[i]=hRm[i+1]; hIso[i]=hIso[i+1];
+      hSample[i]=hSample[i+1];
+      hErr[i]=hErr[i+1];
+      hX[i]=hX[i+1]; hY[i]=hY[i+1];
+    }
+    k = DBG_HIST_MAX-1;
+  }
+
+  hS1[k]=dbgS1; hS2[k]=dbgS2;
+  hE01[k]=dbgEdge01; hE12[k]=dbgEdgeS1S2;
+  hD1[k]=dbgDegS1; hD2[k]=dbgDegS2;
+  hRm[k]=dbgRm; hIso[k]=dbgIso;
+  hSample[k]=dbgSample;
+  hErr[k]=dbgErr32;
+  hX[k]=dbgS1X; hY[k]=dbgS1Y;
+}
+
+// framed parser minimal
 void feedParser(int ub) {
   switch(st) {
     case FIND_FF1:
@@ -289,7 +344,6 @@ void feedParser(int ub) {
     case LEN1:
       expectLen |= (ub << 8);
       if (expectLen <= 0 || expectLen > MAX_PAYLOAD) {
-        badLen++; pktBad++;
         resetParser();
       } else st = RxState.SEQ;
       break;
@@ -306,8 +360,6 @@ void feedParser(int ub) {
       break;
     case CHK:
       chkRx = ub;
-      if ((chkCalc & 0xFF) == (chkRx & 0xFF)) pktOK++;
-      else pktBad++;
       resetParser();
       break;
   }
@@ -321,9 +373,7 @@ void resetParser() {
   chkRx = 0;
 }
 
-// ======================================================
 // UI
-// ======================================================
 void drawPanels() {
   float leftX  = 60;
   float rightX = 740;
@@ -351,10 +401,40 @@ void drawPanels() {
 
   fill(0, 160);
   noStroke();
-  rect(rightX + 20, panelY + 20, panelW - 40, 200);
+  rect(rightX + 20, panelY + 20, panelW - 40, 240);
 
   fill(220);
-  text("DBG: " + dbgMsg, rightX + 30, panelY + 45);
+  int yy = (int)(panelY + 45);
+  text("DBG: " + dbgMsg + "  (frames=" + dbgFrameCount + ")", rightX + 30, yy);
+  yy += 22;
+
+  text("Last DBG frames:", rightX + 30, yy);
+  yy += 18;
+
+  int show = min(hN, 8);
+  for (int k=0; k<show; k++) {
+    int idx = hN - show + k;
+
+    String sxy = "(" + (Float.isNaN(hX[idx]) ? "--" : nf(hX[idx],1,4)) +
+                 "," + (Float.isNaN(hY[idx]) ? "--" : nf(hY[idx],1,4)) + ")";
+
+    boolean conn = (hE12[idx] > 0);
+
+    String line =
+      "  " + k + ") samp=" + hSample[idx] +
+      " s1=" + hS1[idx] +
+      " s2=" + hS2[idx] +
+      " e01=" + hE01[idx] +
+      " e12=" + hE12[idx] +
+      " deg=(" + hD1[idx] + "," + hD2[idx] + ")" +
+      " conn=" + (conn ? "Y" : "N") +
+      " rm=" + hRm[idx] + " iso=" + hIso[idx] +
+      " err=" + hErr[idx] +
+      " s1xy=" + sxy;
+
+    text(line, rightX + 30, yy);
+    yy += 16;
+  }
 
   noFill();
   stroke(60);
@@ -413,10 +493,22 @@ void drawDebugBar() {
        " payload(" + payIdx + "/" + expectLen + ")", 30, height - 60);
 
   int dbgAgo = (dbgLastMs == 0) ? -1 : (millis() - dbgLastMs);
-  text("DBG: age(ms)=" + dbgAgo + " frames=" + dbgFrameCount, 30, height - 40);
+
+  String sxy = "(" + (Float.isNaN(dbgS1X) ? "--" : nf(dbgS1X,1,4)) +
+               "," + (Float.isNaN(dbgS1Y) ? "--" : nf(dbgS1Y,1,4)) + ")";
+
+  boolean conn = (dbgEdgeS1S2 > 0);
+
+  text("DBG: age(ms)=" + dbgAgo +
+       " frames=" + dbgFrameCount +
+       " conn=" + (conn ? "YES" : "NO") +
+       " rm=" + dbgRm + " iso=" + dbgIso +
+       " lastS1xy=" + sxy,
+       30, height - 40);
 
   fill(180);
-  text("Keys: [R]=rebuild+send [S]=send", 980, height - 20);
+  text("Keys: [R]=rebuild+send [S]=send",
+       1000, height - 20);
 }
 
 // ======================================================
