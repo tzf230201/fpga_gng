@@ -25,59 +25,71 @@ byte[] txBuf = new byte[TX_BYTES];
 float[][] moonsTx;
 
 // ======================================================
-// Packet types (framed dump - old format)
+// DEBUG TLV stream from gng.vhd (tag,value)
+// Frame end marker: A9
+// Now includes:
+//   A5 type, A6 s1, A7 s2, A8 edge01,
+//   AA..AD err32,
+//   AE/AF x_s1 (s16),
+//   B0/B2 y_s1 (s16),
+//   A9 sample_idx
 // ======================================================
-final int PKT_TYPE_EDGE = 0xB1; // edges dump
-final int PKT_TYPE_NODE = 0xA1; // nodes dump
+final int TAG_A5 = 0xA5;
+final int TAG_A6 = 0xA6;
+final int TAG_A7 = 0xA7;
+final int TAG_A8 = 0xA8;
+final int TAG_A9 = 0xA9;
 
-// ======================================================
-// DEBUG TLV stream from new gng.vhd (tag,value)
-// New frame (15 bytes total):
-//   A5 type, A6 s1, A7 s2, A8 edge01, AA err32(LE4), A9 sample_idx
-// ======================================================
-final int TAG_A5 = 0xA5; // type / phase code
-final int TAG_A6 = 0xA6; // s1 id
-final int TAG_A7 = 0xA7; // s2 id
-final int TAG_A8 = 0xA8; // edge(0,1) age
-final int TAG_AA = 0xAA; // NEW: err32 little-endian 4 bytes
-final int TAG_A9 = 0xA9; // sample idx (frame end marker)
+final int TAG_AA = 0xAA;
+final int TAG_AB = 0xAB;
+final int TAG_AC = 0xAC;
+final int TAG_AD = 0xAD;
 
-// TLV parser state (supports 1B value or 4B value for AA)
+// NEW tags for s1 position
+final int TAG_AE = 0xAE; // x lo
+final int TAG_AF = 0xAF; // x hi
+final int TAG_B0 = 0xB0; // y lo
+final int TAG_B2 = 0xB2; // y hi
+
+boolean dbgWaitVal = false;
 int dbgTag = 0;
-int dbgNeed = 0;   // how many value bytes needed
-int dbgGot  = 0;
-int[] dbgValBuf = new int[4];
 
 int dbgType = -1;
 int dbgS1   = -1;
 int dbgS2   = -1;
 int dbgEdge01 = -1;
 int dbgSample = -1;
-long dbgErr32U = 0;     // unsigned view (0..2^32-1)
-boolean dbgHaveErr = false;
 
-int dbgKVCount = 0;      // count TLV items (tag+value)
-int dbgFrameCount = 0;   // count full frames (when A9 arrives)
+int dbgErr0=-1, dbgErr1=-1, dbgErr2=-1, dbgErr3=-1; // AA..AD bytes
+long dbgErr32 = -1;
+
+// NEW: raw bytes for s1 x/y
+int dbgXLo=-1, dbgXHi=-1, dbgYLo=-1, dbgYHi=-1;
+float dbgS1X = Float.NaN;  // scaled ( /SCALE )
+float dbgS1Y = Float.NaN;
+
+int dbgKVCount = 0;
+int dbgFrameCount = 0;
 int dbgLastMs = 0;
-String dbgMsg = "waiting TLV (A5/A6/A7/A8/AA/A9)...";
+String dbgMsg = "waiting TLV (A5..AD, AE/AF, B0/B2, A9)...";
 
 // history of last frames
 final int DBG_HIST_MAX = 32;
-int[]  dbgHistType   = new int[DBG_HIST_MAX];
-int[]  dbgHistS1     = new int[DBG_HIST_MAX];
-int[]  dbgHistS2     = new int[DBG_HIST_MAX];
-int[]  dbgHistEdge01 = new int[DBG_HIST_MAX];
-int[]  dbgHistSample = new int[DBG_HIST_MAX];
-long[] dbgHistErr32U = new long[DBG_HIST_MAX];
-int[]  dbgHistMs     = new int[DBG_HIST_MAX];
+int[] dbgHistType   = new int[DBG_HIST_MAX];
+int[] dbgHistS1     = new int[DBG_HIST_MAX];
+int[] dbgHistS2     = new int[DBG_HIST_MAX];
+int[] dbgHistEdge01 = new int[DBG_HIST_MAX];
+int[] dbgHistSample = new int[DBG_HIST_MAX];
+long[] dbgHistErr32 = new long[DBG_HIST_MAX];
+float[] dbgHistS1X  = new float[DBG_HIST_MAX];
+float[] dbgHistS1Y  = new float[DBG_HIST_MAX];
+int[] dbgHistMs     = new int[DBG_HIST_MAX];
 int dbgHistN = 0;
 
 // ======================================================
-// RX framed packets: FF FF LEN(2) SEQ(1) PAYLOAD LEN bytes CHK(1)
-// CHK = SUM8(payload) & 0xFF
+// (Optional) framed parser remains, but you can keep it idle
 // ======================================================
 final int MAX_PAYLOAD = 4096;
-
 enum RxState { FIND_FF1, FIND_FF2, LEN0, LEN1, SEQ, PAYLOAD, CHK }
 RxState st = RxState.FIND_FF1;
 
@@ -104,39 +116,8 @@ int lastByteMs = 0;
 final int PARSER_TIMEOUT_MS = 120;
 
 // ======================================================
-// Storage for NODE packet (0xA1)
-// ======================================================
-final int MAX_NODES = 64;
-final int MASK_BYTES = 8;
-
-boolean haveNodes = false;
-int nodeN = 0;
-boolean[] nodeActive = new boolean[MAX_NODES];
-float[] nodeX = new float[MAX_NODES];
-float[] nodeY = new float[MAX_NODES];
-int stepA1 = 0;
-
-// ======================================================
-// Storage for EDGE packet (0xB1)
-// ======================================================
-boolean haveEdges = false;
-int edgeNNodes = 0;
-int edgeCount = 0;
-
-int[] edgeI = new int[2048];
-int[] edgeJ = new int[2048];
-int[] edgeAge = new int[2048];
-boolean[] edgeSeen = new boolean[2048];
-
-// base table for inverse mapping
-int[] edgeBase = new int[MAX_NODES];
-
-// ======================================================
 // UI
 // ======================================================
-int scroll = 0;
-final int LINES_PER_PAGE = 26;
-
 float viewMinX, viewMaxX, viewMinY, viewMaxY;
 
 // ======================================================
@@ -144,7 +125,7 @@ float viewMinX, viewMaxX, viewMinY, viewMaxY;
 // ======================================================
 void setup() {
   size(1400, 780);
-  surface.setTitle("GNG Viewer (framed A1/B1) + DEBUG TLV (A5/A6/A7/A8/AA/A9)");
+  surface.setTitle("GNG Viewer (DEBUG TLV + s1 x/y)");
   textFont(createFont("Consolas", 14));
   frameRate(60);
 
@@ -183,13 +164,7 @@ void keyPressed() {
   } else if (key == 's' || key == 'S') {
     sendDatasetOnce();
   } else if (key == 'p' || key == 'P') {
-    printNodesToConsole();
-    printEdgesToConsole(30);
     printDbgToConsole();
-  } else if (keyCode == UP) {
-    scroll = max(0, scroll - 1);
-  } else if (keyCode == DOWN) {
-    scroll = min(2000, scroll + 1);
   }
 }
 
@@ -199,36 +174,30 @@ void keyPressed() {
 void sendDatasetOnce() {
   resetParser();
 
-  // reset framed results
-  haveNodes = false;
-  haveEdges = false;
-  nodeN = 0;
-  edgeCount = 0;
-  for (int i=0;i<MAX_NODES;i++) nodeActive[i] = false;
-  for (int i=0;i<edgeSeen.length;i++) edgeSeen[i] = false;
-
-  // reset debug TLV
+  // reset TLV
+  dbgWaitVal = false;
   dbgTag = 0;
-  dbgNeed = 0;
-  dbgGot = 0;
 
   dbgType = -1;
   dbgS1 = -1;
   dbgS2 = -1;
   dbgEdge01 = -1;
   dbgSample = -1;
-  dbgErr32U = 0;
-  dbgHaveErr = false;
+
+  dbgErr0=dbgErr1=dbgErr2=dbgErr3=-1;
+  dbgErr32 = -1;
+
+  dbgXLo=dbgXHi=dbgYLo=dbgYHi=-1;
+  dbgS1X = Float.NaN;
+  dbgS1Y = Float.NaN;
 
   dbgKVCount = 0;
   dbgFrameCount = 0;
   dbgLastMs = 0;
-  dbgMsg = "waiting TLV (A5/A6/A7/A8/AA/A9)...";
+  dbgMsg = "waiting TLV (A5..AD, AE/AF, B0/B2, A9)...";
   dbgHistN = 0;
 
-  scroll = 0;
-
-  statusMsg = "TX: sent 400 bytes. Waiting TLV debug or framed A1/B1...";
+  statusMsg = "TX: sent 400 bytes. Waiting TLV debug...";
   myPort.write(txBuf);
 }
 
@@ -248,74 +217,79 @@ void serialEvent(Serial p) {
     // DEBUG TLV parser (tag,value)
     // Only intercept when framed parser is idle/resync (FIND_FF1)
     // ======================================================
+    if (dbgWaitVal) {
+      dbgWaitVal = false;
+      onDbgTLV(dbgTag, ub);
+      continue;
+    }
+
     if (st == RxState.FIND_FF1) {
-
-      // If we are collecting a value (1B or 4B)
-      if (dbgNeed > 0) {
-        dbgValBuf[dbgGot++] = ub;
-        if (dbgGot >= dbgNeed) {
-          onDbgTLV(dbgTag, dbgValBuf, dbgNeed);
-          dbgNeed = 0;
-          dbgGot  = 0;
-          dbgTag  = 0;
-        }
-        continue; // do NOT feed framed parser
-      }
-
-      // Detect tag start
-      if (ub == TAG_A5 || ub == TAG_A6 || ub == TAG_A7 || ub == TAG_A8 || ub == TAG_AA || ub == TAG_A9) {
+      if (isDbgTag(ub)) {
         dbgTag = ub;
-        dbgNeed = (ub == TAG_AA) ? 4 : 1;
-        dbgGot = 0;
-        continue; // do NOT feed framed parser
+        dbgWaitVal = true;
+        continue;
       }
     }
 
-    // otherwise feed framed packet parser (FF FF LEN ...)
+    // otherwise feed framed packet parser (optional)
     feedParser(ub);
   }
 }
 
-void onDbgTLV(int tag, int[] v, int n) {
+boolean isDbgTag(int ub) {
+  return (ub == TAG_A5 || ub == TAG_A6 || ub == TAG_A7 || ub == TAG_A8 || ub == TAG_A9 ||
+          ub == TAG_AA || ub == TAG_AB || ub == TAG_AC || ub == TAG_AD ||
+          ub == TAG_AE || ub == TAG_AF || ub == TAG_B0 || ub == TAG_B2);
+}
+
+void onDbgTLV(int tag, int val) {
   dbgKVCount++;
   dbgLastMs = millis();
 
-  // Optional: when A5 arrives, treat it as "start of a new frame"
-  if (tag == TAG_A5) {
-    dbgS1 = -1;
-    dbgS2 = -1;
-    dbgEdge01 = -1;
-    dbgSample = -1;
-    dbgErr32U = 0;
-    dbgHaveErr = false;
+  val &= 0xFF;
+
+  if (tag == TAG_A5) dbgType = val;
+  if (tag == TAG_A6) dbgS1   = val;
+  if (tag == TAG_A7) dbgS2   = val;
+  if (tag == TAG_A8) dbgEdge01 = val;
+  if (tag == TAG_A9) dbgSample = val;
+
+  if (tag == TAG_AA) dbgErr0 = val;
+  if (tag == TAG_AB) dbgErr1 = val;
+  if (tag == TAG_AC) dbgErr2 = val;
+  if (tag == TAG_AD) dbgErr3 = val;
+
+  // NEW x/y bytes
+  if (tag == TAG_AE) dbgXLo = val;
+  if (tag == TAG_AF) dbgXHi = val;
+  if (tag == TAG_B0) dbgYLo = val;
+  if (tag == TAG_B2) dbgYHi = val;
+
+  // update err32 if ready
+  if (dbgErr0>=0 && dbgErr1>=0 && dbgErr2>=0 && dbgErr3>=0) {
+    dbgErr32 = ((long)dbgErr3<<24) | ((long)dbgErr2<<16) | ((long)dbgErr1<<8) | (long)dbgErr0;
+    dbgErr32 &= 0xFFFFFFFFL;
   }
 
-  if (tag == TAG_A5) dbgType = v[0] & 0xFF;
-  if (tag == TAG_A6) dbgS1   = v[0] & 0xFF;
-  if (tag == TAG_A7) dbgS2   = v[0] & 0xFF;
-  if (tag == TAG_A8) dbgEdge01 = v[0] & 0xFF;
-
-  if (tag == TAG_AA) {
-    // little-endian u32
-    long x = (long)(v[0] & 0xFF)
-           | ((long)(v[1] & 0xFF) << 8)
-           | ((long)(v[2] & 0xFF) << 16)
-           | ((long)(v[3] & 0xFF) << 24);
-    dbgErr32U = x & 0xFFFFFFFFL;
-    dbgHaveErr = true;
+  // update s1 position if ready
+  if (dbgXLo>=0 && dbgXHi>=0) {
+    short xi = (short)((dbgXHi<<8) | dbgXLo);
+    dbgS1X = xi / SCALE;
+  }
+  if (dbgYLo>=0 && dbgYHi>=0) {
+    short yi = (short)((dbgYHi<<8) | dbgYLo);
+    dbgS1Y = yi / SCALE;
   }
 
-  if (tag == TAG_A9) dbgSample = v[0] & 0xFF;
+  dbgMsg =
+    "type=0x" + hex(max(dbgType,0),2) +
+    " s1=" + dbgS1 + " s2=" + dbgS2 +
+    " edge01=" + dbgEdge01 +
+    " err32=" + (dbgErr32<0 ? "--" : ("" + dbgErr32 + " (0x" + hex((int)dbgErr32,8) + ")")) +
+    " s1xy=(" + (Float.isNaN(dbgS1X) ? "--" : nf(dbgS1X,1,4)) + "," + (Float.isNaN(dbgS1Y) ? "--" : nf(dbgS1Y,1,4)) + ")" +
+    " samp=" + dbgSample;
 
-  // Build message continuously
-  String errStr = dbgHaveErr ? ("" + dbgErr32U + " (0x" + hex((int)dbgErr32U, 8) + ")") : "-";
-  dbgMsg = "type=0x" + hex(max(dbgType,0),2) +
-           " s1=" + dbgS1 + " s2=" + dbgS2 +
-           " edge01=" + dbgEdge01 +
-           " err32=" + errStr +
-           " samp=" + dbgSample;
-
-  // A9 dianggap "end of frame"
+  // A9 = end of frame
   if (tag == TAG_A9) {
     dbgFrameCount++;
     statusMsg = "Got DBG frame: " + dbgMsg;
@@ -324,23 +298,19 @@ void onDbgTLV(int tag, int[] v, int n) {
 }
 
 void pushDbgHistory() {
-  int t = dbgType;
-  int s1 = dbgS1;
-  int s2 = dbgS2;
-  int e01 = dbgEdge01;
-  int smp = dbgSample;
-  long er = dbgHaveErr ? dbgErr32U : 0;
   int ms = dbgLastMs;
 
   if (dbgHistN < DBG_HIST_MAX) {
-    dbgHistType[dbgHistN]   = t;
-    dbgHistS1[dbgHistN]     = s1;
-    dbgHistS2[dbgHistN]     = s2;
-    dbgHistEdge01[dbgHistN] = e01;
-    dbgHistSample[dbgHistN] = smp;
-    dbgHistErr32U[dbgHistN] = er;
-    dbgHistMs[dbgHistN]     = ms;
-    dbgHistN++;
+    int k = dbgHistN++;
+    dbgHistType[k]   = dbgType;
+    dbgHistS1[k]     = dbgS1;
+    dbgHistS2[k]     = dbgS2;
+    dbgHistEdge01[k] = dbgEdge01;
+    dbgHistSample[k] = dbgSample;
+    dbgHistErr32[k]  = dbgErr32;
+    dbgHistS1X[k]    = dbgS1X;
+    dbgHistS1Y[k]    = dbgS1Y;
+    dbgHistMs[k]     = ms;
   } else {
     for (int k=0; k<DBG_HIST_MAX-1; k++) {
       dbgHistType[k]   = dbgHistType[k+1];
@@ -348,22 +318,26 @@ void pushDbgHistory() {
       dbgHistS2[k]     = dbgHistS2[k+1];
       dbgHistEdge01[k] = dbgHistEdge01[k+1];
       dbgHistSample[k] = dbgHistSample[k+1];
-      dbgHistErr32U[k] = dbgHistErr32U[k+1];
+      dbgHistErr32[k]  = dbgHistErr32[k+1];
+      dbgHistS1X[k]    = dbgHistS1X[k+1];
+      dbgHistS1Y[k]    = dbgHistS1Y[k+1];
       dbgHistMs[k]     = dbgHistMs[k+1];
     }
     int last = DBG_HIST_MAX-1;
-    dbgHistType[last]   = t;
-    dbgHistS1[last]     = s1;
-    dbgHistS2[last]     = s2;
-    dbgHistEdge01[last] = e01;
-    dbgHistSample[last] = smp;
-    dbgHistErr32U[last] = er;
+    dbgHistType[last]   = dbgType;
+    dbgHistS1[last]     = dbgS1;
+    dbgHistS2[last]     = dbgS2;
+    dbgHistEdge01[last] = dbgEdge01;
+    dbgHistSample[last] = dbgSample;
+    dbgHistErr32[last]  = dbgErr32;
+    dbgHistS1X[last]    = dbgS1X;
+    dbgHistS1Y[last]    = dbgS1Y;
     dbgHistMs[last]     = ms;
   }
 }
 
 // ======================================================
-// Framed Parser (unchanged)
+// Framed Parser (optional; kept minimal)
 // ======================================================
 void feedParser(int ub) {
   switch(st) {
@@ -401,7 +375,6 @@ void feedParser(int ub) {
       if ((chkCalc & 0xFF) == (chkRx & 0xFF)) {
         pktOK++;
         lastPktMs = millis();
-        onGoodPacket(seqRx, expectLen);
       } else pktBad++;
       resetParser();
       break;
@@ -414,160 +387,6 @@ void resetParser() {
   payIdx = 0;
   chkCalc = 0;
   chkRx = 0;
-}
-
-void onGoodPacket(int seq, int len) {
-  // seq tracking
-  if (lastSeq >= 0) {
-    int diff = (seq - lastSeq) & 0xFF;
-    if (diff != 1) lost += ((diff - 1) & 0xFF);
-  }
-  lastSeq = seq;
-
-  if (len < 1) return;
-  int type = payload[0] & 0xFF;
-
-  if (type == PKT_TYPE_NODE) {
-    if (decodeNodesA1(len)) {
-      verifyMsg = "0xA1 OK: NN=" + nodeN + " step=" + stepA1;
-      statusMsg = "Got 0xA1 nodes.";
-    } else {
-      verifyMsg = "0xA1 decode FAILED len=" + len;
-      pktBad++;
-    }
-    return;
-  }
-
-  if (type == PKT_TYPE_EDGE) {
-    if (decodeEdgesB1(len)) {
-      verifyMsg = "0xB1 OK: NN=" + edgeNNodes + " edges=" + edgeCount;
-      statusMsg = "Got 0xB1 edges.";
-    } else {
-      verifyMsg = "0xB1 decode FAILED len=" + len;
-      pktBad++;
-    }
-    return;
-  }
-
-  verifyMsg = "Unknown framed type=0x" + hex(type,2) + " len=" + len;
-}
-
-// ======================================================
-// Decode 0xA1 nodes (unchanged)
-// ======================================================
-boolean decodeNodesA1(int len) {
-  int p = 0;
-  int type = payload[p++] & 0xFF;
-  if (type != PKT_TYPE_NODE) return false;
-
-  if (p + 2 + 1 + 1 + MASK_BYTES > len) return false;
-
-  int stepL = payload[p++] & 0xFF;
-  int stepH = payload[p++] & 0xFF;
-  stepA1 = stepL | (stepH << 8);
-
-  int NN = payload[p++] & 0xFF;
-  int degN = payload[p++] & 0xFF; // unused
-
-  if (NN <= 0 || NN > MAX_NODES) return false;
-  nodeN = NN;
-
-  int[] mask = new int[MASK_BYTES];
-  for (int i=0;i<MASK_BYTES;i++) mask[i] = payload[p++] & 0xFF;
-
-  int need = 1 + 2 + 1 + 1 + MASK_BYTES + (NN * 4);
-  if (len < need) return false;
-
-  for (int i=0;i<NN;i++) {
-    int xLo = payload[p++] & 0xFF;
-    int xHi = payload[p++] & 0xFF;
-    int yLo = payload[p++] & 0xFF;
-    int yHi = payload[p++] & 0xFF;
-
-    int xi = (short)(xLo | (xHi << 8));
-    int yi = (short)(yLo | (yHi << 8));
-
-    nodeX[i] = xi / SCALE;
-    nodeY[i] = yi / SCALE;
-  }
-
-  for (int i=0;i<MAX_NODES;i++) nodeActive[i] = false;
-  for (int i=0;i<NN;i++) {
-    int b = mask[i/8];
-    int bit = (b >> (i % 8)) & 1;
-    nodeActive[i] = (bit == 1);
-  }
-
-  haveNodes = true;
-  return true;
-}
-
-// ======================================================
-// Edge base helper (unchanged)
-// ======================================================
-void buildEdgeBase(int N) {
-  int acc = 0;
-  for (int i=0;i<N;i++) {
-    edgeBase[i] = acc;
-    acc += (N - 1 - i);
-  }
-}
-
-int findIFromIdx(int idx, int N) {
-  int i = 0;
-  while (i+1 < N && idx >= edgeBase[i+1]) i++;
-  return i;
-}
-
-// ======================================================
-// Decode 0xB1 edges (unchanged)
-// ======================================================
-boolean decodeEdgesB1(int len) {
-  int p = 0;
-  int type = payload[p++] & 0xFF;
-  if (type != PKT_TYPE_EDGE) return false;
-
-  if (p + 1 + 2 > len) return false;
-
-  int NN = payload[p++] & 0xFF;
-  int ecL = payload[p++] & 0xFF;
-  int ecH = payload[p++] & 0xFF;
-  int EC = ecL | (ecH << 8);
-
-  if (NN <= 0 || NN > MAX_NODES) return false;
-  if (EC <= 0 || EC > edgeSeen.length) return false;
-
-  int need = 1 + 1 + 2 + (EC * 3);
-  if (len < need) return false;
-
-  edgeNNodes = NN;
-  edgeCount  = EC;
-
-  for (int i=0;i<edgeSeen.length;i++) edgeSeen[i] = false;
-
-  buildEdgeBase(NN);
-
-  for (int k=0;k<EC;k++) {
-    int idxL = payload[p++] & 0xFF;
-    int idxH = payload[p++] & 0xFF;
-    int age  = payload[p++] & 0xFF;
-
-    int idx = idxL | (idxH << 8);
-    if (idx < 0 || idx >= EC) continue;
-
-    int ii = findIFromIdx(idx, NN);
-    int off = idx - edgeBase[ii];
-    int jj = ii + 1 + off;
-    if (jj < 0 || jj >= NN) continue;
-
-    edgeI[idx] = ii;
-    edgeJ[idx] = jj;
-    edgeAge[idx] = age;
-    edgeSeen[idx] = true;
-  }
-
-  haveEdges = true;
-  return true;
 }
 
 // ======================================================
@@ -585,10 +404,19 @@ void drawPanels() {
   drawScatter(moonsTx, leftX, panelY, panelW, panelH, 255, 5);
 
   fill(230);
-  text("RX: framed A1/B1 (later) + DEBUG TLV (now)", rightX, 55);
+  text("RX: DEBUG TLV (now)", rightX, 55);
   drawScatter(moonsTx, rightX, panelY, panelW, panelH, 70, 4);
 
-  drawGraphOverlay(rightX, panelY, panelW, panelH);
+  // Draw current s1 position (if available)
+  if (!Float.isNaN(dbgS1X) && !Float.isNaN(dbgS1Y)) {
+    float px = mapToPanelX(dbgS1X, rightX, panelW);
+    float py = mapToPanelY(dbgS1Y, panelY, panelH);
+    noStroke();
+    fill(255, 220);
+    ellipse(px, py, 14, 14);
+    fill(255, 200);
+    text("s1", px + 10, py - 10);
+  }
 
   // info box
   fill(0, 160);
@@ -600,23 +428,20 @@ void drawPanels() {
 
   text("DBG: " + dbgMsg + "  (frames=" + dbgFrameCount + ", kv=" + dbgKVCount + ")", rightX + 30, yy); yy += 18;
 
-  text("Nodes: " + (haveNodes ? ("OK (NN=" + nodeN + ", step=" + stepA1 + ")") : "waiting 0xA1..."),
-       rightX + 30, yy); yy += 18;
-  text("Edges: " + (haveEdges ? ("OK (EC=" + edgeCount + ", NN=" + edgeNNodes + ")") : "waiting 0xB1..."),
-       rightX + 30, yy); yy += 18;
-
   yy += 8;
   text("Last DBG frames:", rightX + 30, yy); yy += 16;
 
   int show = min(dbgHistN, 8);
   for (int k=0; k<show; k++) {
     int idx = dbgHistN - show + k;
-    String line = "  " + k + ") samp=" + dbgHistSample[idx] +
-                  " s1=" + dbgHistS1[idx] +
-                  " s2=" + dbgHistS2[idx] +
-                  " edge01=" + dbgHistEdge01[idx] +
-                  " err32=" + dbgHistErr32U[idx] +
-                  " type=0x" + hex(max(dbgHistType[idx],0),2);
+    String line =
+      "  " + k + ") samp=" + dbgHistSample[idx] +
+      " s1=" + dbgHistS1[idx] +
+      " s2=" + dbgHistS2[idx] +
+      " e01=" + dbgHistEdge01[idx] +
+      " err=" + dbgHistErr32[idx] +
+      " s1xy=(" + nf(dbgHistS1X[idx],1,4) + "," + nf(dbgHistS1Y[idx],1,4) + ")" +
+      " type=0x" + hex(max(dbgHistType[idx],0),2);
     text(line, rightX + 30, yy);
     yy += 16;
   }
@@ -625,57 +450,6 @@ void drawPanels() {
   stroke(60);
   rect(leftX, panelY, panelW, panelH);
   rect(rightX, panelY, panelW, panelH);
-}
-
-void drawGraphOverlay(float x0, float y0, float w, float h) {
-  if (!haveNodes) return;
-
-  // edges
-  if (haveEdges) {
-    for (int idx=0; idx<edgeCount; idx++) {
-      if (!edgeSeen[idx]) continue;
-      int age = edgeAge[idx] & 0xFF;
-      if (age == 0) continue;
-
-      int i = edgeI[idx];
-      int j = edgeJ[idx];
-      if (i < 0 || j < 0 || i >= nodeN || j >= nodeN) continue;
-      if (!nodeActive[i] || !nodeActive[j]) continue;
-
-      float x1 = mapToPanelX(nodeX[i], x0, w);
-      float y1 = mapToPanelY(nodeY[i], y0, h);  // FIX: y0
-      float x2 = mapToPanelX(nodeX[j], x0, w);
-      float y2 = mapToPanelY(nodeY[j], y0, h);  // FIX: y0
-
-      int a = (int)map(constrain(age, 1, 255), 1, 255, 220, 40);
-      stroke(255, a);
-      line(x1, y1, x2, y2);
-    }
-  }
-
-  // nodes
-  noStroke();
-  for (int i=0;i<nodeN;i++) {
-    float px = mapToPanelX(nodeX[i], x0, w);
-    float py = mapToPanelY(nodeY[i], y0, h); // FIX: y0
-
-    if (nodeActive[i]) fill(255, 220);
-    else              fill(120, 120);
-
-    ellipse(px, py, 9, 9);
-
-    fill(220, 200);
-    text(nf(i,2), px + 6, py - 6);
-  }
-}
-
-float mapToPanelX(float x, float x0, float w) {
-  float xn = (x - viewMinX) / (viewMaxX - viewMinX);
-  return x0 + 10 + xn * (w - 20);
-}
-float mapToPanelY(float y, float y0, float h) {
-  float yn = (y - viewMinY) / (viewMaxY - viewMinY);
-  return y0 + 10 + yn * (h - 20);
 }
 
 void drawScatter(float[][] pts, float x0, float y0, float w, float h, int alpha, float dotSize) {
@@ -710,6 +484,15 @@ void drawScatter(float[][] pts, float x0, float y0, float w, float h, int alpha,
   }
 }
 
+float mapToPanelX(float x, float x0, float w) {
+  float xn = (x - viewMinX) / (viewMaxX - viewMinX);
+  return x0 + 10 + xn * (w - 20);
+}
+float mapToPanelY(float y, float y0, float h) {
+  float yn = (y - viewMinY) / (viewMaxY - viewMinY);
+  return y0 + 10 + yn * (h - 20);
+}
+
 void drawDebugBar() {
   fill(0, 180);
   rect(0, height - 90, width, 90);
@@ -719,22 +502,17 @@ void drawDebugBar() {
        " framed_state=" + st +
        " payload(" + payIdx + "/" + expectLen + ")", 30, height - 60);
 
-  int ago = (lastPktMs == 0) ? -1 : (millis() - lastPktMs);
   int dbgAgo = (dbgLastMs == 0) ? -1 : (millis() - dbgLastMs);
 
-  text("FRAMED: OK=" + pktOK + " BAD=" + pktBad + " LOST~=" + lost +
-       " RX_age(ms)=" + ago +
-       " | DBG: age(ms)=" + dbgAgo +
+  text("DBG: age(ms)=" + dbgAgo +
        " frames=" + dbgFrameCount +
-       " lastErr=" + (dbgHaveErr ? ("" + dbgErr32U) : "-"),
+       " lastErr=" + (dbgErr32<0?"--":(""+dbgErr32)) +
+       " lastS1xy=(" + (Float.isNaN(dbgS1X)?"--":nf(dbgS1X,1,4)) + "," + (Float.isNaN(dbgS1Y)?"--":nf(dbgS1Y,1,4)) + ")",
        30, height - 40);
 
-  fill(180, 220, 255);
-  text(verifyMsg, 30, height - 20);
-
   fill(180);
-  text("Keys: [R]=rebuild+send [S]=send [P]=print nodes/edges/dbg",
-       820, height - 20);
+  text("Keys: [R]=rebuild+send [S]=send [P]=print dbg",
+       920, height - 20);
 }
 
 // ======================================================
@@ -749,39 +527,16 @@ void printDbgToConsole() {
     println("  " + k + ") samp=" + dbgHistSample[idx] +
             " s1=" + dbgHistS1[idx] +
             " s2=" + dbgHistS2[idx] +
-            " edge01=" + dbgHistEdge01[idx] +
-            " err32=" + dbgHistErr32U[idx] +
+            " e01=" + dbgHistEdge01[idx] +
+            " err=" + dbgHistErr32[idx] +
+            " s1xy=(" + dbgHistS1X[idx] + "," + dbgHistS1Y[idx] + ")" +
             " type=0x" + hex(max(dbgHistType[idx],0),2));
   }
   println("====================================================");
 }
 
-void printNodesToConsole() {
-  println("====================================================");
-  println("0xA1 NODES (NN=" + nodeN + ") have=" + haveNodes);
-  for (int i=0;i<nodeN;i++) {
-    println("node " + nf(i,2) + " active=" + (nodeActive[i] ? "1" : "0") +
-            "  x=" + nf(nodeX[i],1,4) + " y=" + nf(nodeY[i],1,4));
-  }
-  println("====================================================");
-}
-
-void printEdgesToConsole(int maxPrint) {
-  println("====================================================");
-  println("0xB1 EDGES (EC=" + edgeCount + ") have=" + haveEdges);
-  int c = 0;
-  for (int idx=0; idx<edgeCount && c<maxPrint; idx++) {
-    if (!edgeSeen[idx]) continue;
-    int age = edgeAge[idx] & 0xFF;
-    if (age == 0) continue;
-    println("idx=" + idx + "  (" + edgeI[idx] + "," + edgeJ[idx] + ")  age=" + age);
-    c++;
-  }
-  println("====================================================");
-}
-
 // ======================================================
-// Build dataset + pack (unchanged)
+// Build dataset + pack
 // ======================================================
 void buildTwoMoonsAndPack() {
   moonsTx = generateMoons(
@@ -806,7 +561,7 @@ void buildTwoMoonsAndPack() {
 }
 
 // ======================================================
-// Two-moons generator (unchanged)
+// Two-moons generator
 // ======================================================
 float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed,
                         boolean shuffle, boolean normalize01) {
