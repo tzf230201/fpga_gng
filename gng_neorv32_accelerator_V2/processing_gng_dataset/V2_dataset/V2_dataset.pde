@@ -4,7 +4,7 @@ import processing.serial.*;
 // Serial config
 // ======================================================
 Serial myPort;
-final String PORT_NAME = "COM1";     // <-- GANTI sesuai Serial.list()
+final String PORT_NAME = "COM1";
 final int    BAUD      = 1_000_000;
 
 // ======================================================
@@ -32,10 +32,8 @@ float[][] moonsTx;
 //   A5 type, A6 s1, A7 s2, A8 edge01,
 //   AA..AD err32,
 //   AE/AF x_s1 (s16 lo/hi),
-//   B0/B1 y_s1 (s16 lo/hi)   <-- FIX: y_hi = B1
-//
-// NOTE: Some older builds might have used B2 for y_hi.
-//       This viewer accepts BOTH B1 and B2 to be safe.
+//   B0/B1 y_s1 (s16 lo/hi)   (viewer accepts B2 as alt)
+//   B3 deg_s1, B4 deg_s2, B5 edge_s1s2
 // ======================================================
 final int TAG_A5 = 0xA5;
 final int TAG_A6 = 0xA6;
@@ -51,8 +49,12 @@ final int TAG_AD = 0xAD;
 final int TAG_AE = 0xAE; // x lo
 final int TAG_AF = 0xAF; // x hi
 final int TAG_B0 = 0xB0; // y lo
-final int TAG_B1 = 0xB1; // y hi (FIX)
-final int TAG_B2 = 0xB2; // accept as alternative
+final int TAG_B1 = 0xB1; // y hi
+final int TAG_B2 = 0xB2; // accept alternative
+
+final int TAG_B3 = 0xB3; // deg_s1
+final int TAG_B4 = 0xB4; // deg_s2
+final int TAG_B5 = 0xB5; // edge_s1s2
 
 boolean dbgWaitVal = false;
 int dbgTag = 0;
@@ -63,31 +65,21 @@ int dbgS2   = -1;
 int dbgEdge01 = -1;
 int dbgSample = -1;
 
-int dbgErr0=-1, dbgErr1=-1, dbgErr2=-1, dbgErr3=-1; // AA..AD bytes
+int dbgErr0=-1, dbgErr1=-1, dbgErr2=-1, dbgErr3=-1;
 long dbgErr32 = -1;
 
-// raw bytes for s1 x/y
 int dbgXLo=-1, dbgXHi=-1, dbgYLo=-1, dbgYHi=-1;
-float dbgS1X = Float.NaN;  // scaled (/SCALE)
+float dbgS1X = Float.NaN;
 float dbgS1Y = Float.NaN;
+
+int dbgDegS1 = -1;
+int dbgDegS2 = -1;
+int dbgEdgeS12 = -1;
 
 int dbgKVCount = 0;
 int dbgFrameCount = 0;
 int dbgLastMs = 0;
-String dbgMsg = "waiting TLV (A5..AD, AE/AF, B0/B1, A9)...";
-
-// history of last frames
-final int DBG_HIST_MAX = 32;
-int[]   dbgHistType   = new int[DBG_HIST_MAX];
-int[]   dbgHistS1     = new int[DBG_HIST_MAX];
-int[]   dbgHistS2     = new int[DBG_HIST_MAX];
-int[]   dbgHistEdge01 = new int[DBG_HIST_MAX];
-int[]   dbgHistSample = new int[DBG_HIST_MAX];
-long[]  dbgHistErr32  = new long[DBG_HIST_MAX];
-float[] dbgHistS1X    = new float[DBG_HIST_MAX];
-float[] dbgHistS1Y    = new float[DBG_HIST_MAX];
-int[]   dbgHistMs     = new int[DBG_HIST_MAX];
-int dbgHistN = 0;
+String dbgMsg = "waiting TLV...";
 
 // ======================================================
 // (Optional) framed parser remains (kept idle / harmless)
@@ -106,12 +98,7 @@ int chkCalc = 0;
 int chkRx   = 0;
 
 int pktOK = 0, pktBad = 0, badLen = 0;
-int lastSeq = -1;
-int lost = 0;
 
-int lastPktMs = 0;
-
-// fast read
 byte[] inBuf = new byte[8192];
 int lastByteMs = 0;
 final int PARSER_TIMEOUT_MS = 120;
@@ -121,12 +108,9 @@ final int PARSER_TIMEOUT_MS = 120;
 // ======================================================
 float viewMinX, viewMaxX, viewMinY, viewMaxY;
 
-// ======================================================
-// Setup
-// ======================================================
 void setup() {
   size(1400, 780);
-  surface.setTitle("GNG Viewer (DEBUG TLV + s1 x/y) [FIX y_hi=B1]");
+  surface.setTitle("GNG Viewer (DBG TLV + deg + edge_s1s2)");
   textFont(createFont("Consolas", 14));
   frameRate(60);
 
@@ -151,7 +135,6 @@ void draw() {
   drawPanels();
   drawDebugBar();
 
-  // timeout rescue for framed parser ONLY
   if (st != RxState.FIND_FF1 && (millis() - lastByteMs) > PARSER_TIMEOUT_MS) {
     resetParser();
   }
@@ -163,27 +146,16 @@ void keyPressed() {
     sendDatasetOnce();
   } else if (key == 's' || key == 'S') {
     sendDatasetOnce();
-  } else if (key == 'p' || key == 'P') {
-    printDbgToConsole();
   }
 }
 
-// ======================================================
-// TX
-// ======================================================
 void sendDatasetOnce() {
   resetParser();
 
-  // reset TLV
   dbgWaitVal = false;
   dbgTag = 0;
 
-  dbgType = -1;
-  dbgS1 = -1;
-  dbgS2 = -1;
-  dbgEdge01 = -1;
-  dbgSample = -1;
-
+  dbgType = dbgS1 = dbgS2 = dbgEdge01 = dbgSample = -1;
   dbgErr0=dbgErr1=dbgErr2=dbgErr3=-1;
   dbgErr32 = -1;
 
@@ -191,18 +163,16 @@ void sendDatasetOnce() {
   dbgS1X = Float.NaN;
   dbgS1Y = Float.NaN;
 
+  dbgDegS1 = dbgDegS2 = dbgEdgeS12 = -1;
+
   dbgKVCount = 0;
   dbgFrameCount = 0;
   dbgLastMs = 0;
-  dbgMsg = "waiting TLV (A5..AD, AE/AF, B0/B1, A9)...";
-  dbgHistN = 0;
+  dbgMsg = "waiting TLV...";
 
   myPort.write(txBuf);
 }
 
-// ======================================================
-// Serial receive
-// ======================================================
 void serialEvent(Serial p) {
   int n = p.readBytes(inBuf);
   if (n <= 0) return;
@@ -212,14 +182,12 @@ void serialEvent(Serial p) {
   for (int i=0; i<n; i++) {
     int ub = inBuf[i] & 0xFF;
 
-    // DEBUG TLV parser (tag,value)
     if (dbgWaitVal) {
       dbgWaitVal = false;
       onDbgTLV(dbgTag, ub);
       continue;
     }
 
-    // only intercept TLV when framed parser is idle (FIND_FF1)
     if (st == RxState.FIND_FF1) {
       if (isDbgTag(ub)) {
         dbgTag = ub;
@@ -228,7 +196,6 @@ void serialEvent(Serial p) {
       }
     }
 
-    // otherwise feed framed packet parser (optional)
     feedParser(ub);
   }
 }
@@ -236,7 +203,8 @@ void serialEvent(Serial p) {
 boolean isDbgTag(int ub) {
   return (ub == TAG_A5 || ub == TAG_A6 || ub == TAG_A7 || ub == TAG_A8 || ub == TAG_A9 ||
           ub == TAG_AA || ub == TAG_AB || ub == TAG_AC || ub == TAG_AD ||
-          ub == TAG_AE || ub == TAG_AF || ub == TAG_B0 || ub == TAG_B1 || ub == TAG_B2);
+          ub == TAG_AE || ub == TAG_AF || ub == TAG_B0 || ub == TAG_B1 || ub == TAG_B2 ||
+          ub == TAG_B3 || ub == TAG_B4 || ub == TAG_B5);
 }
 
 short s16_from_lohi(int lo, int hi) {
@@ -246,7 +214,6 @@ short s16_from_lohi(int lo, int hi) {
 void onDbgTLV(int tag, int val) {
   dbgKVCount++;
   dbgLastMs = millis();
-
   val &= 0xFF;
 
   if (tag == TAG_A5) dbgType = val;
@@ -264,16 +231,18 @@ void onDbgTLV(int tag, int val) {
   if (tag == TAG_AF) dbgXHi = val;
 
   if (tag == TAG_B0) dbgYLo = val;
-  if (tag == TAG_B1) dbgYHi = val; // FIX
-  if (tag == TAG_B2) dbgYHi = val; // accept alternative
+  if (tag == TAG_B1) dbgYHi = val;
+  if (tag == TAG_B2) dbgYHi = val;
 
-  // update err32 if ready
+  if (tag == TAG_B3) dbgDegS1 = val;
+  if (tag == TAG_B4) dbgDegS2 = val;
+  if (tag == TAG_B5) dbgEdgeS12 = val;
+
   if (dbgErr0>=0 && dbgErr1>=0 && dbgErr2>=0 && dbgErr3>=0) {
     dbgErr32 = ((long)dbgErr3<<24) | ((long)dbgErr2<<16) | ((long)dbgErr1<<8) | (long)dbgErr0;
     dbgErr32 &= 0xFFFFFFFFL;
   }
 
-  // update s1 position if ready
   if (dbgXLo>=0 && dbgXHi>=0) {
     short xi = s16_from_lohi(dbgXLo, dbgXHi);
     dbgS1X = xi / SCALE;
@@ -283,57 +252,21 @@ void onDbgTLV(int tag, int val) {
     dbgS1Y = yi / SCALE;
   }
 
+  boolean conn = (dbgEdgeS12 > 0) || (dbgDegS1 > 0);
+
   dbgMsg =
     "type=0x" + hex(max(dbgType,0),2) +
     " s1=" + dbgS1 + " s2=" + dbgS2 +
     " edge01=" + dbgEdge01 +
-    " err32=" + (dbgErr32<0 ? "--" : ("" + dbgErr32 + " (0x" + hex((int)(dbgErr32 & 0xFFFFFFFFL),8) + ")")) +
+    " edge12=" + dbgEdgeS12 +
+    " deg(s1,s2)=(" + dbgDegS1 + "," + dbgDegS2 + ")" +
+    " conn=" + (conn ? "YES" : "NO") +
+    " err32=" + (dbgErr32<0 ? "--" : ("" + dbgErr32)) +
     " s1xy=(" + (Float.isNaN(dbgS1X) ? "--" : nf(dbgS1X,1,4)) + "," + (Float.isNaN(dbgS1Y) ? "--" : nf(dbgS1Y,1,4)) + ")" +
     " samp=" + dbgSample;
 
-  // A9 = end of frame
   if (tag == TAG_A9) {
     dbgFrameCount++;
-    pushDbgHistory();
-  }
-}
-
-void pushDbgHistory() {
-  int ms = dbgLastMs;
-
-  if (dbgHistN < DBG_HIST_MAX) {
-    int k = dbgHistN++;
-    dbgHistType[k]   = dbgType;
-    dbgHistS1[k]     = dbgS1;
-    dbgHistS2[k]     = dbgS2;
-    dbgHistEdge01[k] = dbgEdge01;
-    dbgHistSample[k] = dbgSample;
-    dbgHistErr32[k]  = dbgErr32;
-    dbgHistS1X[k]    = dbgS1X;
-    dbgHistS1Y[k]    = dbgS1Y;
-    dbgHistMs[k]     = ms;
-  } else {
-    for (int k=0; k<DBG_HIST_MAX-1; k++) {
-      dbgHistType[k]   = dbgHistType[k+1];
-      dbgHistS1[k]     = dbgHistS1[k+1];
-      dbgHistS2[k]     = dbgHistS2[k+1];
-      dbgHistEdge01[k] = dbgHistEdge01[k+1];
-      dbgHistSample[k] = dbgHistSample[k+1];
-      dbgHistErr32[k]  = dbgHistErr32[k+1];
-      dbgHistS1X[k]    = dbgHistS1X[k+1];
-      dbgHistS1Y[k]    = dbgHistS1Y[k+1];
-      dbgHistMs[k]     = dbgHistMs[k+1];
-    }
-    int last = DBG_HIST_MAX-1;
-    dbgHistType[last]   = dbgType;
-    dbgHistS1[last]     = dbgS1;
-    dbgHistS2[last]     = dbgS2;
-    dbgHistEdge01[last] = dbgEdge01;
-    dbgHistSample[last] = dbgSample;
-    dbgHistErr32[last]  = dbgErr32;
-    dbgHistS1X[last]    = dbgS1X;
-    dbgHistS1Y[last]    = dbgS1Y;
-    dbgHistMs[last]     = ms;
   }
 }
 
@@ -373,10 +306,8 @@ void feedParser(int ub) {
       break;
     case CHK:
       chkRx = ub;
-      if ((chkCalc & 0xFF) == (chkRx & 0xFF)) {
-        pktOK++;
-        lastPktMs = millis();
-      } else pktBad++;
+      if ((chkCalc & 0xFF) == (chkRx & 0xFF)) pktOK++;
+      else pktBad++;
       resetParser();
       break;
   }
@@ -408,7 +339,6 @@ void drawPanels() {
   text("RX: DEBUG TLV (now)", rightX, 55);
   drawScatter(moonsTx, rightX, panelY, panelW, panelH, 70, 4);
 
-  // Draw current s1 position (if available)
   if (!Float.isNaN(dbgS1X) && !Float.isNaN(dbgS1Y)) {
     float px = mapToPanelX(dbgS1X, rightX, panelW);
     float py = mapToPanelY(dbgS1Y, panelY, panelH);
@@ -419,39 +349,12 @@ void drawPanels() {
     text("s1", px + 10, py - 10);
   }
 
-  // info box
   fill(0, 160);
   noStroke();
-  rect(rightX + 20, panelY + 20, panelW - 40, 240);
+  rect(rightX + 20, panelY + 20, panelW - 40, 200);
 
   fill(220);
-  int yy = (int)(panelY + 45);
-
-  text("DBG: " + dbgMsg + "  (frames=" + dbgFrameCount + ", kv=" + dbgKVCount + ")", rightX + 30, yy);
-  yy += 22;
-
-  text("Last DBG frames:", rightX + 30, yy);
-  yy += 18;
-
-  int show = min(dbgHistN, 8);
-  for (int k=0; k<show; k++) {
-    int idx = dbgHistN - show + k;
-
-    String sxy = "(" + (Float.isNaN(dbgHistS1X[idx]) ? "--" : nf(dbgHistS1X[idx],1,4)) +
-                 "," + (Float.isNaN(dbgHistS1Y[idx]) ? "--" : nf(dbgHistS1Y[idx],1,4)) + ")";
-
-    String line =
-      "  " + k + ") samp=" + dbgHistSample[idx] +
-      " s1=" + dbgHistS1[idx] +
-      " s2=" + dbgHistS2[idx] +
-      " e01=" + dbgHistEdge01[idx] +
-      " err=" + dbgHistErr32[idx] +
-      " s1xy=" + sxy +
-      " type=0x" + hex(max(dbgHistType[idx],0),2);
-
-    text(line, rightX + 30, yy);
-    yy += 16;
-  }
+  text("DBG: " + dbgMsg, rightX + 30, panelY + 45);
 
   noFill();
   stroke(60);
@@ -510,39 +413,10 @@ void drawDebugBar() {
        " payload(" + payIdx + "/" + expectLen + ")", 30, height - 60);
 
   int dbgAgo = (dbgLastMs == 0) ? -1 : (millis() - dbgLastMs);
-
-  String sxy = "(" + (Float.isNaN(dbgS1X) ? "--" : nf(dbgS1X,1,4)) +
-               "," + (Float.isNaN(dbgS1Y) ? "--" : nf(dbgS1Y,1,4)) + ")";
-
-  text("DBG: age(ms)=" + dbgAgo +
-       " frames=" + dbgFrameCount +
-       " lastErr=" + (dbgErr32<0 ? "--" : ("" + dbgErr32)) +
-       " lastS1xy=" + sxy,
-       30, height - 40);
+  text("DBG: age(ms)=" + dbgAgo + " frames=" + dbgFrameCount, 30, height - 40);
 
   fill(180);
-  text("Keys: [R]=rebuild+send [S]=send [P]=print dbg",
-       920, height - 20);
-}
-
-// ======================================================
-// Debug prints
-// ======================================================
-void printDbgToConsole() {
-  println("====================================================");
-  println("DBG TLV: frames=" + dbgFrameCount + " kv=" + dbgKVCount + " last=" + dbgMsg);
-  int show = min(dbgHistN, 16);
-  for (int k=0; k<show; k++) {
-    int idx = dbgHistN - show + k;
-    println("  " + k + ") samp=" + dbgHistSample[idx] +
-            " s1=" + dbgHistS1[idx] +
-            " s2=" + dbgHistS2[idx] +
-            " e01=" + dbgHistEdge01[idx] +
-            " err=" + dbgHistErr32[idx] +
-            " s1xy=(" + dbgHistS1X[idx] + "," + dbgHistS1Y[idx] + ")" +
-            " type=0x" + hex(max(dbgHistType[idx],0),2));
-  }
-  println("====================================================");
+  text("Keys: [R]=rebuild+send [S]=send", 980, height - 20);
 }
 
 // ======================================================
