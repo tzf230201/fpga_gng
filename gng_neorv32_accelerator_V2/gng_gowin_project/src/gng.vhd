@@ -1,5 +1,5 @@
 -- gng.vhd  (FULL)
--- Features implemented:
+-- Implemented:
 --  - init: clear node/edge BRAM, seed node0/node1, connect edge(0,1)=1 and degree=1
 --  - main loop:
 --      sample read (sync 1-cycle)
@@ -7,18 +7,19 @@
 --      error accumulation: err(s1) += (best_d2 >> ERR_SHIFT)
 --      move winner: eps_w = 0.3 (Q8)
 --      age edges incident to s1 and move neighbors: eps_n = 0.001 (Q16)
---      remove old edges (age > EDGE_MAX_AGE) + update degrees
---      remove isolated nodes (degree==0) => active=0  (for non-s1 nodes)
+--      prune old edges (incident to s1): if age > AGE_MAX => remove edge and update degree/iso
 --      connectOrResetEdge(s1,s2): edge(s1,s2)=1; if newly connected -> degree++ both
---      send DEBUG TLV over UART:
---        A5 type(0x10), A6 s1, A7 s2,
---        A8 edge01,
---        B3 edge_s1s2,
---        B4 deg_s1, B5 deg_s2,
---        AA..AD err32 (LSB..MSB),
---        AE/AF x_s1 (s16 lo/hi), B0/B1 y_s1 (s16 lo/hi),
---        C0 rm_cnt, C1 iso_cnt,
---        A9 sample_idx
+--      insert_node_every_lambda (LAMBDA):
+--          find free slot r (inactive),
+--          read node s2,
+--          create node r at midpoint of (s1,s2),
+--          remove edge(s1,s2), add edge(s1,r) and edge(r,s2),
+--          node_count++
+--      send DEBUG TLV over UART (A9 end marker)
+--
+-- Notes:
+--  - edge encoding: 0=no edge, 1..255=connected, age=(val-1)
+--  - pruning condition uses encoded val: prune when (val-1) > AGE_MAX  <=> val > AGE_MAX+1
 --
 library ieee;
 use ieee.std_logic_1164.all;
@@ -40,8 +41,11 @@ entity gng is
     -- error scaling: err += (best_d2 >> ERR_SHIFT)
     ERR_SHIFT : natural := 4;
 
-    -- REMOVE OLD EDGE threshold (actual age, not stored+1)
-    EDGE_MAX_AGE : natural := 50
+    -- pruning: remove edge if age > AGE_MAX
+    AGE_MAX   : natural := 50;
+
+    -- insertion period (every LAMBDA iterations)
+    LAMBDA    : natural := 50
   );
   port (
     clk_i   : in  std_logic;
@@ -75,6 +79,8 @@ architecture rtl of gng is
 
   ---------------------------------------------------------------------------
   -- Winner epsilon = 0.3 (Q8)
+  -- eps_q8 = round(0.3 * 256) = 77
+  -- delta = (dx * eps_q8) >> 8
   ---------------------------------------------------------------------------
   constant EPS_WIN_Q8   : integer := 77;
   constant EPS_WIN_SH   : natural := 8;
@@ -82,20 +88,19 @@ architecture rtl of gng is
   ---------------------------------------------------------------------------
   -- Neighbor epsilon = 0.001 (Q16)
   -- eps_q16 = round(0.001 * 65536) = 66
+  -- delta = (dx * eps_q16) >> 16
   ---------------------------------------------------------------------------
   constant EPS_N_Q16  : integer := 66;
   constant EPS_N_SH   : natural := 16;
 
   ---------------------------------------------------------------------------
-  -- Edge age threshold in stored format:
-  -- edge_mem: 0 = no edge, 1..255 = connected, stored_age = actual_age + 1
-  -- remove if actual_age > EDGE_MAX_AGE
-  -- => remove if stored_age > (EDGE_MAX_AGE + 1)
-  ---------------------------------------------------------------------------
-  constant EDGE_MAX_STORED : unsigned(7 downto 0) := to_unsigned(EDGE_MAX_AGE + 1, 8);
-
-  ---------------------------------------------------------------------------
   -- Node packing in BRAM (80-bit)
+  -- [15:0]   x (s16)
+  -- [31:16]  y (s16)
+  -- [32]     active (1)
+  -- [40:33]  degree (u8)
+  -- [72:41]  error (u32)
+  -- [79:73]  padding
   ---------------------------------------------------------------------------
   constant NODE_W : natural := 80;
 
@@ -164,6 +169,8 @@ architecture rtl of gng is
 
   ---------------------------------------------------------------------------
   -- Edge memory: upper triangle 1D (age 8-bit)
+  -- 0 = no edge
+  -- 1..255 = connected, age stored as value (age=0 represented by 1)
   ---------------------------------------------------------------------------
   constant EDGE_N : natural := (MAX_NODES * (MAX_NODES - 1)) / 2;
 
@@ -248,18 +255,14 @@ architecture rtl of gng is
     P_UPD_WAIT,
     P_UPD_WR,
 
-    -- age edges incident to s1 + move neighbors + remove old edge
+    -- age edges incident to s1 + move neighbors + prune + iso
     P_NB_SETUP,
     P_NB_NODE_REQ,
     P_NB_NODE_WAIT,
     P_NB_NODE_EVAL,
     P_NB_EDGE_WAIT,
     P_NB_EDGE_EVAL,
-
-    -- if an old edge removed: need extra RMW to dec degree(s1)
-    P_RM_S1_RD,
-    P_RM_S1_WAIT,
-    P_RM_S1_WR,
+    P_NB_S1_WR,
 
     -- connect/reset edge(s1,s2) + degree updates if new
     P_CONN_SETUP,
@@ -272,17 +275,21 @@ architecture rtl of gng is
     P_CONN_DEGB_WAIT,
     P_CONN_DEGB_WR,
 
-    -- debug reads
-    P_DBG_EDGE01_REQ,
-    P_DBG_EDGE01_WAIT,
-    P_DBG_EDGES1S2_REQ,
-    P_DBG_EDGES1S2_WAIT,
-    P_DBG_DEG_S1_RD,
-    P_DBG_DEG_S1_WAIT,
-    P_DBG_DEG_S2_RD,
-    P_DBG_DEG_S2_WAIT,
+    -- insert node every lambda
+    P_INS_CHECK,
+    P_INS_FIND_REQ,
+    P_INS_FIND_WAIT,
+    P_INS_FIND_EVAL,
+    P_INS_S2_RD,
+    P_INS_S2_WAIT,
+    P_INS_WRITE_R,
+    P_INS_CLR_E_S1S2,
+    P_INS_SET_E_S1R,
+    P_INS_SET_E_RS2,
 
-    -- TX TLV
+    -- debug edge01 read then TX TLV
+    P_DBG_EDGE_REQ,
+    P_DBG_EDGE_WAIT,
     P_TX_PREP,
     P_TX_SEND,
     P_TX_WAIT,
@@ -298,6 +305,12 @@ architecture rtl of gng is
 
   -- sample index
   signal samp_i : natural range 0 to DATA_WORDS-1 := 0;
+
+  -- iteration counter (for LAMBDA)
+  signal iter_cnt : natural range 0 to 65535 := 0;
+
+  -- active node count (for debug + insertion guard)
+  signal node_count : u8 := to_unsigned(0,8);
 
   -- 100ms delay counter
   constant DELAY_TICKS : natural := (CLOCK_HZ/1000) * DBG_DELAY_MS;
@@ -325,6 +338,19 @@ architecture rtl of gng is
   signal dbg_s1x : s16 := (others => '0');
   signal dbg_s1y : s16 := (others => '0');
 
+  -- debug: deg(s1), deg(s2)
+  signal dbg_deg_s1 : u8 := (others => '0');
+  signal dbg_deg_s2 : u8 := (others => '0');
+
+  -- shadow degree for pruning updates
+  signal s1_deg_shadow : u8 := (others => '0');
+  signal s1_act_shadow : std_logic := '0';
+
+  -- prune/iso flags
+  signal rm_flag  : std_logic := '0';
+  signal iso_flag : std_logic := '0';
+  signal iso_id_dbg : unsigned(7 downto 0) := (others => '0');
+
   -- neighbor loop regs
   signal nb_i : natural range 0 to MAX_NODES-1 := 0;
   signal nb_edge_idx : natural range 0 to EDGE_N-1 := 0;
@@ -340,19 +366,20 @@ architecture rtl of gng is
   signal conn_b   : unsigned(7 downto 0) := (others => '0');
   signal conn_idx : natural range 0 to EDGE_N-1 := 0;
 
-  -- debug: edge01 and edge(s1,s2) + deg(s1,s2)
-  signal dbg_e01    : std_logic_vector(7 downto 0) := (others => '0');
-  signal dbg_es1s2  : std_logic_vector(7 downto 0) := (others => '0');
-  signal dbg_deg_s1 : std_logic_vector(7 downto 0) := (others => '0');
-  signal dbg_deg_s2 : std_logic_vector(7 downto 0) := (others => '0');
+  -- debug: edge01 after update
+  signal dbg_e01 : std_logic_vector(7 downto 0) := (others => '0');
 
-  -- removal counters for this iteration
-  signal rm_cnt  : u8 := (others => '0');
-  signal iso_cnt : u8 := (others => '0');
+  -- debug: edge(s1,s2) BEFORE reset (age value)
+  signal dbg_edge_s1s2_pre : std_logic_vector(7 downto 0) := (others => '0');
 
-  -- removal continuation
-  signal rm_after_conn : std_logic := '0';
-  signal rm_next_nb    : natural range 0 to MAX_NODES-1 := 0;
+  -- insertion regs
+  signal ins_flag  : std_logic := '0';
+  signal ins_scan  : natural range 0 to MAX_NODES-1 := 0;
+  signal ins_rid   : unsigned(7 downto 0) := (others => '0');
+  signal ins_s1_id : unsigned(7 downto 0) := (others => '0');
+  signal ins_s2_id : unsigned(7 downto 0) := (others => '0');
+  signal ins_s2x   : s16 := (others => '0');
+  signal ins_s2y   : s16 := (others => '0');
 
   -- UART TX helper
   signal tx_inflight : std_logic := '0';
@@ -368,21 +395,31 @@ architecture rtl of gng is
   constant B_A7 : std_logic_vector(7 downto 0) := x"A7";
   constant B_A8 : std_logic_vector(7 downto 0) := x"A8";
   constant B_A9 : std_logic_vector(7 downto 0) := x"A9";
+
   constant B_AA : std_logic_vector(7 downto 0) := x"AA";
   constant B_AB : std_logic_vector(7 downto 0) := x"AB";
   constant B_AC : std_logic_vector(7 downto 0) := x"AC";
   constant B_AD : std_logic_vector(7 downto 0) := x"AD";
+
   constant B_AE : std_logic_vector(7 downto 0) := x"AE"; -- x lo
   constant B_AF : std_logic_vector(7 downto 0) := x"AF"; -- x hi
   constant B_B0 : std_logic_vector(7 downto 0) := x"B0"; -- y lo
   constant B_B1 : std_logic_vector(7 downto 0) := x"B1"; -- y hi
 
-  constant B_B3 : std_logic_vector(7 downto 0) := x"B3"; -- edge(s1,s2)
-  constant B_B4 : std_logic_vector(7 downto 0) := x"B4"; -- deg_s1
-  constant B_B5 : std_logic_vector(7 downto 0) := x"B5"; -- deg_s2
+  -- extra debug tags
+  constant B_C0 : std_logic_vector(7 downto 0) := x"C0"; -- node_count
+  constant B_C1 : std_logic_vector(7 downto 0) := x"C1"; -- ins_flag
+  constant B_C2 : std_logic_vector(7 downto 0) := x"C2"; -- ins_rid
+  constant B_C3 : std_logic_vector(7 downto 0) := x"C3"; -- ins_s1
+  constant B_C4 : std_logic_vector(7 downto 0) := x"C4"; -- ins_s2
 
-  constant B_C0 : std_logic_vector(7 downto 0) := x"C0"; -- rm_cnt
-  constant B_C1 : std_logic_vector(7 downto 0) := x"C1"; -- iso_cnt
+  constant B_C6 : std_logic_vector(7 downto 0) := x"C6"; -- edge(s1,s2) pre-reset (age+1 or 0)
+
+  constant B_D0 : std_logic_vector(7 downto 0) := x"D0"; -- deg_s1
+  constant B_D1 : std_logic_vector(7 downto 0) := x"D1"; -- deg_s2
+  constant B_D2 : std_logic_vector(7 downto 0) := x"D2"; -- rm_flag
+  constant B_D3 : std_logic_vector(7 downto 0) := x"D3"; -- iso_flag
+  constant B_D4 : std_logic_vector(7 downto 0) := x"D4"; -- iso_id
 
 begin
 
@@ -460,17 +497,25 @@ begin
     variable nx_nb_new : signed(17 downto 0);
     variable ny_nb_new : signed(17 downto 0);
 
+    -- insertion midpoint
+    variable sumx : signed(16 downto 0);
+    variable sumy : signed(16 downto 0);
+    variable midx18 : signed(17 downto 0);
+    variable midy18 : signed(17 downto 0);
+
     variable age_u  : unsigned(7 downto 0);
     variable age_new_u : unsigned(7 downto 0);
 
-    variable deg_nb_new : u8;
-    variable act_nb_new : std_logic;
+    variable nb_deg2 : u8;
+    variable nb_act2 : std_logic;
 
     constant D2_INF : unsigned(34 downto 0) := (others => '1');
 
     variable i1, i2 : integer;
     variable idxe   : natural;
     variable idx01  : natural;
+
+    constant PRUNE_TH : unsigned(7 downto 0) := to_unsigned(AGE_MAX + 1, 8); -- encoded threshold
   begin
     if rising_edge(clk_i) then
       if rstn_i = '0' then
@@ -488,6 +533,9 @@ begin
         init_e <= 0;
 
         samp_i <= 0;
+        iter_cnt <= 0;
+        node_count <= to_unsigned(0,8);
+
         delay_cnt <= 0;
 
         scan_i <= 0;
@@ -503,12 +551,16 @@ begin
         dbg_s1x <= (others => '0');
         dbg_s1y <= (others => '0');
         dbg_e01 <= (others => '0');
-        dbg_es1s2 <= (others => '0');
+        dbg_edge_s1s2_pre <= (others => '0');
         dbg_deg_s1 <= (others => '0');
         dbg_deg_s2 <= (others => '0');
 
-        rm_cnt  <= (others => '0');
-        iso_cnt <= (others => '0');
+        s1_deg_shadow <= (others => '0');
+        s1_act_shadow <= '0';
+
+        rm_flag <= '0';
+        iso_flag <= '0';
+        iso_id_dbg <= (others => '0');
 
         nb_i <= 0;
         nb_edge_idx <= 0;
@@ -522,8 +574,13 @@ begin
         conn_b <= (others => '0');
         conn_idx <= 0;
 
-        rm_after_conn <= '0';
-        rm_next_nb <= 0;
+        ins_flag <= '0';
+        ins_scan <= 0;
+        ins_rid <= (others => '0');
+        ins_s1_id <= (others => '0');
+        ins_s2_id <= (others => '0');
+        ins_s2x <= (others => '0');
+        ins_s2y <= (others => '0');
 
         done_p <= '0';
 
@@ -656,7 +713,10 @@ begin
                             (others => '0')
                           );
 
+            node_count <= to_unsigned(2,8);
+
             samp_i <= 0;
+            iter_cnt <= 0;
             delay_cnt <= integer(DELAY_TICKS);
             ph <= P_WAIT_100MS;
 
@@ -762,11 +822,19 @@ begin
             ph <= P_UPD_WR;
 
           when P_UPD_WR =>
+            -- clear per-iteration flags
+            rm_flag  <= '0';
+            iso_flag <= '0';
+            ins_flag <= '0';
+
             w   := node_rdata;
             act := get_act(w);
             deg := get_deg(w);
             nx  := get_x(w);
             ny  := get_y(w);
+
+            s1_act_shadow <= act;
+            s1_deg_shadow <= deg;
 
             cur_err := get_err(w);
 
@@ -795,6 +863,7 @@ begin
             dbg_s1x <= sat_s16(nx_new);
             dbg_s1y <= sat_s16(ny_new);
 
+            -- write updated s1 (pos+err, deg may be updated later again in P_NB_S1_WR)
             node_we    <= '1';
             node_waddr <= s1_id;
             node_wdata <= pack_node(
@@ -805,11 +874,7 @@ begin
                             new_err
                           );
 
-            -- reset counters each iteration
-            rm_cnt  <= (others => '0');
-            iso_cnt <= (others => '0');
-
-            -- next: age edges + move neighbors
+            -- next: age edges + move neighbors + prune
             nb_i <= 0;
             ph <= P_NB_SETUP;
 
@@ -833,7 +898,7 @@ begin
             w   := node_rdata;
             act := get_act(w);
 
-            -- capture fields into regs
+            -- capture fields into regs for next states
             nb_act <= act;
             nb_deg <= get_deg(w);
             nb_x   <= get_x(w);
@@ -843,7 +908,7 @@ begin
             if (nb_i = to_integer(s1_id)) or (act = '0') then
               -- skip
               if nb_i = MAX_NODES-1 then
-                ph <= P_CONN_SETUP;
+                ph <= P_NB_S1_WR;
               else
                 nb_i <= nb_i + 1;
                 ph <= P_NB_NODE_REQ;
@@ -877,72 +942,67 @@ begin
                 age_new_u := age_u + 1;
               end if;
 
-              -- move neighbor toward current s1 (eps_n=0.001 Q16)
-              dx_n := resize(dbg_s1x, 17) - resize(nb_x, 17);
-              dy_n := resize(dbg_s1y, 17) - resize(nb_y, 17);
-
-              mulx_n := dx_n * to_signed(EPS_N_Q16, 18);
-              muly_n := dy_n * to_signed(EPS_N_Q16, 18);
-
-              delx_n := resize(shift_right(mulx_n, EPS_N_SH), 17);
-              dely_n := resize(shift_right(muly_n, EPS_N_SH), 17);
-
-              nx_nb_new := resize(nb_x, 18) + resize(delx_n, 18);
-              ny_nb_new := resize(nb_y, 18) + resize(dely_n, 18);
-
-              -- if too old => remove edge (set 0) + degree updates
-              if (age_new_u > EDGE_MAX_STORED) then
+              -- PRUNE if encoded value > AGE_MAX+1
+              if age_new_u > PRUNE_TH then
                 -- remove edge
                 edge_we    <= '1';
                 edge_waddr <= to_unsigned(nb_edge_idx, 13);
                 edge_wdata <= x"00";
+                rm_flag    <= '1';
 
-                -- rm_cnt++
-                if rm_cnt < to_unsigned(255,8) then
-                  rm_cnt <= rm_cnt + 1;
+                -- update degrees
+                if s1_deg_shadow > to_unsigned(0,8) then
+                  s1_deg_shadow <= s1_deg_shadow - 1;
                 end if;
 
-                -- neighbor degree--
-                deg_nb_new := nb_deg;
-                if deg_nb_new > to_unsigned(0,8) then
-                  deg_nb_new := deg_nb_new - 1;
+                nb_deg2 := nb_deg;
+                if nb_deg2 > to_unsigned(0,8) then
+                  nb_deg2 := nb_deg2 - 1;
                 end if;
 
-                act_nb_new := nb_act;
-                if deg_nb_new = to_unsigned(0,8) then
-                  act_nb_new := '0';
-                  if iso_cnt < to_unsigned(255,8) then
-                    iso_cnt <= iso_cnt + 1;
+                nb_act2 := nb_act;
+                if nb_deg2 = to_unsigned(0,8) then
+                  -- isolated => deactivate
+                  nb_act2 := '0';  -- FIX: ganti <= jadi :=
+                  iso_flag <= '1';
+                  iso_id_dbg <= to_unsigned(nb_i, 8);
+
+                  if node_count > to_unsigned(0,8) then
+                    node_count <= node_count - 1;
                   end if;
                 end if;
 
+
+                -- write neighbor with updated deg/act (no move)
                 node_we    <= '1';
                 node_waddr <= to_unsigned(nb_i, 8);
                 node_wdata <= pack_node(
-                                sat_s16(nx_nb_new),
-                                sat_s16(ny_nb_new),
-                                act_nb_new,
-                                deg_nb_new,
+                                nb_x,
+                                nb_y,
+                                nb_act2,
+                                nb_deg2,
                                 nb_err
                               );
 
-                -- after this, do RMW on s1 to degree--
-                if nb_i = MAX_NODES-1 then
-                  rm_after_conn <= '1';
-                else
-                  rm_after_conn <= '0';
-                  rm_next_nb <= nb_i + 1;
-                end if;
-
-                ph <= P_RM_S1_RD;
-
               else
-                -- keep edge with new age
+                -- keep edge (write new age)
                 edge_we    <= '1';
                 edge_waddr <= to_unsigned(nb_edge_idx, 13);
                 edge_wdata <= std_logic_vector(age_new_u);
 
-                -- neighbor position update only (degree unchanged)
+                -- move neighbor toward current s1 (eps_n=0.001 Q16)
+                dx_n := resize(dbg_s1x, 17) - resize(nb_x, 17);
+                dy_n := resize(dbg_s1y, 17) - resize(nb_y, 17);
+
+                mulx_n := dx_n * to_signed(EPS_N_Q16, 18);
+                muly_n := dy_n * to_signed(EPS_N_Q16, 18);
+
+                delx_n := resize(shift_right(mulx_n, EPS_N_SH), 17);
+                dely_n := resize(shift_right(muly_n, EPS_N_SH), 17);
+
+                nx_nb_new := resize(nb_x, 18) + resize(delx_n, 18);
+                ny_nb_new := resize(nb_y, 18) + resize(dely_n, 18);
+
                 node_we    <= '1';
                 node_waddr <= to_unsigned(nb_i, 8);
                 node_wdata <= pack_node(
@@ -952,71 +1012,43 @@ begin
                                 nb_deg,
                                 nb_err
                               );
-
-                -- next neighbor
-                if nb_i = MAX_NODES-1 then
-                  ph <= P_CONN_SETUP;
-                else
-                  nb_i <= nb_i + 1;
-                  ph <= P_NB_NODE_REQ;
-                end if;
-              end if;
-
-            else
-              -- no edge, next neighbor
-              if nb_i = MAX_NODES-1 then
-                ph <= P_CONN_SETUP;
-              else
-                nb_i <= nb_i + 1;
-                ph <= P_NB_NODE_REQ;
               end if;
             end if;
 
-          -------------------------------------------------------------------
-          -- After deleting an old edge(s1,nb): decrement degree(s1)
-          -------------------------------------------------------------------
-          when P_RM_S1_RD =>
-            node_raddr <= s1_id;
-            ph <= P_RM_S1_WAIT;
-
-          when P_RM_S1_WAIT =>
-            ph <= P_RM_S1_WR;
-
-          when P_RM_S1_WR =>
-            w   := node_rdata;
-            act := get_act(w);
-            deg := get_deg(w);
-
-            if act = '1' then
-              if deg > to_unsigned(0,8) then
-                deg := deg - 1;
-              end if;
-
-              -- IMPORTANT: do NOT deactivate s1 here even if degree becomes 0
-              node_we    <= '1';
-              node_waddr <= s1_id;
-              node_wdata <= pack_node(
-                              get_x(w),
-                              get_y(w),
-                              act,
-                              deg,
-                              get_err(w)
-                            );
-            end if;
-
-            if rm_after_conn = '1' then
-              ph <= P_CONN_SETUP;
+            -- next neighbor
+            if nb_i = MAX_NODES-1 then
+              ph <= P_NB_S1_WR;
             else
-              nb_i <= rm_next_nb;
+              nb_i <= nb_i + 1;
               ph <= P_NB_NODE_REQ;
             end if;
+
+          -------------------------------------------------------------------
+          -- Write s1 with updated degree shadow (after pruning)
+          -------------------------------------------------------------------
+          when P_NB_S1_WR =>
+            dbg_deg_s1 <= s1_deg_shadow;
+
+            node_we    <= '1';
+            node_waddr <= s1_id;
+            node_wdata <= pack_node(
+                            dbg_s1x,
+                            dbg_s1y,
+                            s1_act_shadow,
+                            s1_deg_shadow,
+                            dbg_err32
+                          );
+
+            ph <= P_CONN_SETUP;
 
           -------------------------------------------------------------------
           -- connectOrResetEdge(s1,s2): edge=1; if newly connected => degree++
           -------------------------------------------------------------------
           when P_CONN_SETUP =>
             if (s2_valid = '0') or (s1_id = s2_id) then
-              ph <= P_DBG_EDGE01_REQ;
+              dbg_edge_s1s2_pre <= (others => '0');
+              dbg_deg_s2 <= (others => '0');
+              ph <= P_INS_CHECK;
             else
               conn_a <= s1_id;
               conn_b <= s2_id;
@@ -1029,12 +1061,23 @@ begin
                 idxe := edge_idx(i2, i1, MAX_NODES);
               end if;
 
-              conn_idx  <= idxe;
+              conn_idx   <= idxe;
+
+              -- request BOTH: edge(s1,s2) and node(s2) for dbg_deg_s2
               edge_raddr <= to_unsigned(idxe, 13);
+              node_raddr <= s2_id;
+
               ph <= P_CONN_EDGE_WAIT;
             end if;
 
           when P_CONN_EDGE_WAIT =>
+            -- capture edge(s1,s2) BEFORE reset (age+1 encoding)
+            dbg_edge_s1s2_pre <= edge_rdata;
+
+            -- capture deg(s2) for debug (pre-update)
+            w := node_rdata;
+            dbg_deg_s2 <= get_deg(w);
+
             ph <= P_CONN_EDGE_WR;
 
           when P_CONN_EDGE_WR =>
@@ -1047,7 +1090,7 @@ begin
             if edge_rdata = x"00" then
               ph <= P_CONN_DEGA_RD;
             else
-              ph <= P_DBG_EDGE01_REQ;
+              ph <= P_INS_CHECK;
             end if;
 
           -- degree[a]++
@@ -1077,6 +1120,8 @@ begin
                               deg,
                               get_err(w)
                             );
+
+              dbg_deg_s1 <= deg;
             end if;
 
             ph <= P_CONN_DEGB_RD;
@@ -1108,100 +1153,182 @@ begin
                               deg,
                               get_err(w)
                             );
+
+              dbg_deg_s2 <= deg;
             end if;
 
-            ph <= P_DBG_EDGE01_REQ;
+            ph <= P_INS_CHECK;
 
           -------------------------------------------------------------------
-          -- Debug reads
+          -- insert_node_every_lambda
           -------------------------------------------------------------------
-          when P_DBG_EDGE01_REQ =>
+          when P_INS_CHECK =>
+            -- insert when iter_cnt mod LAMBDA == LAMBDA-1  (i.e., every LAMBDA loops)
+            if (LAMBDA /= 0) and ((iter_cnt mod LAMBDA) = (LAMBDA-1)) and
+               (s2_valid = '1') and (s1_id /= s2_id) and
+               (node_count < to_unsigned(MAX_NODES,8)) then
+              ins_s1_id <= s1_id;
+              ins_s2_id <= s2_id;
+              ins_scan  <= 0;
+              ph <= P_INS_FIND_REQ;
+            else
+              ph <= P_DBG_EDGE_REQ;
+            end if;
+
+          when P_INS_FIND_REQ =>
+            node_raddr <= to_unsigned(ins_scan, 8);
+            ph <= P_INS_FIND_WAIT;
+
+          when P_INS_FIND_WAIT =>
+            ph <= P_INS_FIND_EVAL;
+
+          when P_INS_FIND_EVAL =>
+            w := node_rdata;
+            act := get_act(w);
+
+            if act = '0' then
+              ins_rid <= to_unsigned(ins_scan, 8);
+              ph <= P_INS_S2_RD;
+            else
+              if ins_scan = MAX_NODES-1 then
+                ph <= P_DBG_EDGE_REQ; -- no free slot
+              else
+                ins_scan <= ins_scan + 1;
+                ph <= P_INS_FIND_REQ;
+              end if;
+            end if;
+
+          when P_INS_S2_RD =>
+            node_raddr <= ins_s2_id;
+            ph <= P_INS_S2_WAIT;
+
+          when P_INS_S2_WAIT =>
+            w := node_rdata;
+            ins_s2x <= get_x(w);
+            ins_s2y <= get_y(w);
+            ph <= P_INS_WRITE_R;
+
+          when P_INS_WRITE_R =>
+            -- midpoint r = (s1 + s2)/2  (use dbg_s1x/dbg_s1y after move)
+            sumx := resize(dbg_s1x, 17) + resize(ins_s2x, 17);
+            sumy := resize(dbg_s1y, 17) + resize(ins_s2y, 17);
+
+            midx18 := resize(shift_right(sumx, 1), 18);
+            midy18 := resize(shift_right(sumy, 1), 18);
+
+            node_we    <= '1';
+            node_waddr <= ins_rid;
+            node_wdata <= pack_node(
+                            sat_s16(midx18),
+                            sat_s16(midy18),
+                            '1',
+                            to_unsigned(2,8),
+                            (others => '0')
+                          );
+
+            node_count <= node_count + 1;
+
+            ins_flag <= '1';
+
+            ph <= P_INS_CLR_E_S1S2;
+
+          when P_INS_CLR_E_S1S2 =>
+            i1 := to_integer(ins_s1_id);
+            i2 := to_integer(ins_s2_id);
+            if i1 < i2 then
+              idxe := edge_idx(i1, i2, MAX_NODES);
+            else
+              idxe := edge_idx(i2, i1, MAX_NODES);
+            end if;
+
+            edge_we    <= '1';
+            edge_waddr <= to_unsigned(idxe, 13);
+            edge_wdata <= x"00";
+            ph <= P_INS_SET_E_S1R;
+
+          when P_INS_SET_E_S1R =>
+            i1 := to_integer(ins_s1_id);
+            i2 := to_integer(ins_rid);
+            if i1 < i2 then
+              idxe := edge_idx(i1, i2, MAX_NODES);
+            else
+              idxe := edge_idx(i2, i1, MAX_NODES);
+            end if;
+
+            edge_we    <= '1';
+            edge_waddr <= to_unsigned(idxe, 13);
+            edge_wdata <= x"01";
+            ph <= P_INS_SET_E_RS2;
+
+          when P_INS_SET_E_RS2 =>
+            i1 := to_integer(ins_rid);
+            i2 := to_integer(ins_s2_id);
+            if i1 < i2 then
+              idxe := edge_idx(i1, i2, MAX_NODES);
+            else
+              idxe := edge_idx(i2, i1, MAX_NODES);
+            end if;
+
+            edge_we    <= '1';
+            edge_waddr <= to_unsigned(idxe, 13);
+            edge_wdata <= x"01";
+            ph <= P_DBG_EDGE_REQ;
+
+          -------------------------------------------------------------------
+          -- Debug: read edge(0,1) after updates
+          -------------------------------------------------------------------
+          when P_DBG_EDGE_REQ =>
             idx01 := edge_idx(0, 1, MAX_NODES);
             edge_raddr <= to_unsigned(idx01, 13);
-            ph <= P_DBG_EDGE01_WAIT;
+            ph <= P_DBG_EDGE_WAIT;
 
-          when P_DBG_EDGE01_WAIT =>
+          when P_DBG_EDGE_WAIT =>
             dbg_e01 <= edge_rdata;
-            ph <= P_DBG_EDGES1S2_REQ;
-
-          when P_DBG_EDGES1S2_REQ =>
-            if (s2_valid = '0') or (s1_id = s2_id) then
-              dbg_es1s2 <= (others => '0');
-              ph <= P_DBG_DEG_S1_RD;
-            else
-              i1 := to_integer(s1_id);
-              i2 := to_integer(s2_id);
-              if i1 < i2 then
-                idxe := edge_idx(i1, i2, MAX_NODES);
-              else
-                idxe := edge_idx(i2, i1, MAX_NODES);
-              end if;
-
-              edge_raddr <= to_unsigned(idxe, 13);
-              ph <= P_DBG_EDGES1S2_WAIT;
-            end if;
-
-          when P_DBG_EDGES1S2_WAIT =>
-            dbg_es1s2 <= edge_rdata;
-            ph <= P_DBG_DEG_S1_RD;
-
-          when P_DBG_DEG_S1_RD =>
-            node_raddr <= s1_id;
-            ph <= P_DBG_DEG_S1_WAIT;
-
-          when P_DBG_DEG_S1_WAIT =>
-            dbg_deg_s1 <= std_logic_vector(get_deg(node_rdata));
-            ph <= P_DBG_DEG_S2_RD;
-
-          when P_DBG_DEG_S2_RD =>
-            node_raddr <= s2_id;
-            ph <= P_DBG_DEG_S2_WAIT;
-
-          when P_DBG_DEG_S2_WAIT =>
-            dbg_deg_s2 <= std_logic_vector(get_deg(node_rdata));
             ph <= P_TX_PREP;
 
           -------------------------------------------------------------------
-          -- Prepare TLV debug frame
+          -- Prepare TLV debug frame (48 bytes)
           -------------------------------------------------------------------
           when P_TX_PREP =>
-            -- Layout (36 bytes):
-            -- A5 type, A6 s1, A7 s2,
-            -- A8 edge01, B3 edge_s1s2,
-            -- B4 deg_s1, B5 deg_s2,
-            -- AA..AD err32,
-            -- AE/AF x_s1, B0/B1 y_s1,
-            -- C0 rm_cnt, C1 iso_cnt,
-            -- A9 sample
+            -- A5 type, A6 s1, A7 s2, A8 edge01
             tx_buf(0)  <= B_A5;  tx_buf(1)  <= x"10";
-
             tx_buf(2)  <= B_A6;  tx_buf(3)  <= std_logic_vector(resize(s1_id, 8));
             tx_buf(4)  <= B_A7;  tx_buf(5)  <= std_logic_vector(resize(s2_id, 8));
-
             tx_buf(6)  <= B_A8;  tx_buf(7)  <= dbg_e01;
 
-            tx_buf(8)  <= B_B3;  tx_buf(9)  <= dbg_es1s2;
+            -- C6 edge(s1,s2) pre-reset
+            tx_buf(8)  <= B_C6;  tx_buf(9)  <= dbg_edge_s1s2_pre;
 
-            tx_buf(10) <= B_B4;  tx_buf(11) <= dbg_deg_s1;
-            tx_buf(12) <= B_B5;  tx_buf(13) <= dbg_deg_s2;
+            -- deg + rm/iso
+            tx_buf(10) <= B_D0;  tx_buf(11) <= std_logic_vector(dbg_deg_s1);
+            tx_buf(12) <= B_D1;  tx_buf(13) <= std_logic_vector(dbg_deg_s2);
+            tx_buf(14) <= B_D2;  tx_buf(15) <= (7 downto 1 => '0') & rm_flag;
+            tx_buf(16) <= B_D3;  tx_buf(17) <= (7 downto 1 => '0') & iso_flag;
+            tx_buf(18) <= B_D4;  tx_buf(19) <= std_logic_vector(resize(iso_id_dbg, 8));
 
-            tx_buf(14) <= B_AA;  tx_buf(15) <= std_logic_vector(dbg_err32(7 downto 0));
-            tx_buf(16) <= B_AB;  tx_buf(17) <= std_logic_vector(dbg_err32(15 downto 8));
-            tx_buf(18) <= B_AC;  tx_buf(19) <= std_logic_vector(dbg_err32(23 downto 16));
-            tx_buf(20) <= B_AD;  tx_buf(21) <= std_logic_vector(dbg_err32(31 downto 24));
+            -- err32
+            tx_buf(20) <= B_AA;  tx_buf(21) <= std_logic_vector(dbg_err32(7 downto 0));
+            tx_buf(22) <= B_AB;  tx_buf(23) <= std_logic_vector(dbg_err32(15 downto 8));
+            tx_buf(24) <= B_AC;  tx_buf(25) <= std_logic_vector(dbg_err32(23 downto 16));
+            tx_buf(26) <= B_AD;  tx_buf(27) <= std_logic_vector(dbg_err32(31 downto 24));
 
-            tx_buf(22) <= B_AE;  tx_buf(23) <= std_logic_vector(dbg_s1x(7 downto 0));
-            tx_buf(24) <= B_AF;  tx_buf(25) <= std_logic_vector(dbg_s1x(15 downto 8));
+            -- s1 x/y
+            tx_buf(28) <= B_AE;  tx_buf(29) <= std_logic_vector(dbg_s1x(7 downto 0));
+            tx_buf(30) <= B_AF;  tx_buf(31) <= std_logic_vector(dbg_s1x(15 downto 8));
+            tx_buf(32) <= B_B0;  tx_buf(33) <= std_logic_vector(dbg_s1y(7 downto 0));
+            tx_buf(34) <= B_B1;  tx_buf(35) <= std_logic_vector(dbg_s1y(15 downto 8));
 
-            tx_buf(26) <= B_B0;  tx_buf(27) <= std_logic_vector(dbg_s1y(7 downto 0));
-            tx_buf(28) <= B_B1;  tx_buf(29) <= std_logic_vector(dbg_s1y(15 downto 8));
+            -- node_count + insertion info
+            tx_buf(36) <= B_C0;  tx_buf(37) <= std_logic_vector(node_count);
+            tx_buf(38) <= B_C1;  tx_buf(39) <= (7 downto 1 => '0') & ins_flag;
+            tx_buf(40) <= B_C2;  tx_buf(41) <= std_logic_vector(resize(ins_rid, 8));
+            tx_buf(42) <= B_C3;  tx_buf(43) <= std_logic_vector(resize(ins_s1_id, 8));
+            tx_buf(44) <= B_C4;  tx_buf(45) <= std_logic_vector(resize(ins_s2_id, 8));
 
-            tx_buf(30) <= B_C0;  tx_buf(31) <= std_logic_vector(rm_cnt);
-            tx_buf(32) <= B_C1;  tx_buf(33) <= std_logic_vector(iso_cnt);
+            -- A9 end + sample
+            tx_buf(46) <= B_A9;  tx_buf(47) <= std_logic_vector(to_unsigned(samp_i mod 256, 8));
 
-            tx_buf(34) <= B_A9;  tx_buf(35) <= std_logic_vector(to_unsigned(samp_i mod 256, 8));
-
-            tx_len <= 36;
+            tx_len <= 48;
             tx_idx <= 0;
             ph <= P_TX_SEND;
 
@@ -1235,6 +1362,12 @@ begin
               samp_i <= 0;
             else
               samp_i <= samp_i + 1;
+            end if;
+
+            if iter_cnt = 65535 then
+              iter_cnt <= 0;
+            else
+              iter_cnt <= iter_cnt + 1;
             end if;
 
             delay_cnt <= integer(DELAY_TICKS);
