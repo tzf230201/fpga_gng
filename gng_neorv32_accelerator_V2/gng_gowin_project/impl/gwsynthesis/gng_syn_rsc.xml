@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Module name="tang_nano_9k" Register="8" Lut="11" T_Register="165(8)" T_Lut="346(11)">
- <SubModule name="u_rx" Register="40" Lut="88" T_Register="40(40)" T_Lut="88(88)"/>
- <SubModule name="u_store" Register="13" Lut="18" T_Register="13(13)" T_Lut="18(18)"/>
- <SubModule name="u_copy_8to32" Register="17" Lut="28" T_Register="17(17)" T_Lut="28(28)"/>
- <SubModule name="u_gng" Register="42" Lut="108" T_Register="42(42)" T_Lut="108(108)"/>
- <SubModule name="u_tx" Register="45" Lut="93" T_Register="45(45)" T_Lut="93(93)"/>
+<Module name="tang_nano_9k" Register="8" Lut="11" Bsram="2" T_Register="568(8)" T_Alu="157(0)" T_Lut="827(11)" T_MULT18X18="2(0)" T_Bsram="5(2)">
+ <SubModule name="u_rx" Register="48" Lut="114" T_Register="48(48)" T_Lut="114(114)"/>
+ <SubModule name="u_store" Register="31" Lut="18" T_Register="31(31)" T_Lut="18(18)"/>
+ <SubModule name="u_copy_8to32" Register="98" Lut="50" T_Register="98(98)" T_Lut="50(50)"/>
+ <SubModule name="u_gng" Register="335" Alu="157" Lut="537" MULT18X18="2" Bsram="3" T_Register="335(335)" T_Alu="157(157)" T_Lut="537(537)" T_MULT18X18="2(2)" T_Bsram="3(3)"/>
+ <SubModule name="u_tx" Register="48" Lut="97" T_Register="48(48)" T_Lut="97(97)"/>
 </Module>

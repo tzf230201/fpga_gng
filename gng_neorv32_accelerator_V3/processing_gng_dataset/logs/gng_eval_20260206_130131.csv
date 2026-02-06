@@ -1,0 +1,4 @@
+# GNG Eval Logger
+# PORT=COM1, BAUD=1000000
+# MOONS_N=100, SEED=1234, NOISE=0.06, RANDOM_ANGLE=false, SHUFFLE=true, NORM01=true
+run_ms,frame_id,nodes,edges,QE,TE,isolated,avg_degree,cyc_total,us_total,cyc_winner,cyc_nb,cyc_insert
