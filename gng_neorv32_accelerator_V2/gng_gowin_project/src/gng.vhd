@@ -23,7 +23,7 @@ entity gng is
     rstn_i  : in  std_logic;
     start_i : in  std_logic;
 
-    -- dataset stream (word32: x16|y16)
+    -- dataset stream (word32: y16|x16 OR x16|y16 sesuai packing kamu.receiver
     data_raddr_o : out unsigned(6 downto 0);
     data_rdata_i : in  std_logic_vector(31 downto 0);
 
@@ -82,32 +82,33 @@ architecture rtl of gng is
     return w;
   end function;
 
-  function get_x(w : std_logic_vector) return s16 is
+  function get_x(w : std_logic_vector(NODE_W-1 downto 0)) return s16 is
   begin
     return signed(w(X_H downto X_L));
   end function;
 
-  function get_y(w : std_logic_vector) return s16 is
+  function get_y(w : std_logic_vector(NODE_W-1 downto 0)) return s16 is
   begin
     return signed(w(Y_H downto Y_L));
   end function;
 
-  function get_act(w : std_logic_vector) return std_logic is
+  function get_act(w : std_logic_vector(NODE_W-1 downto 0)) return std_logic is
   begin
     return w(ACT_B);
   end function;
 
-  function get_deg(w : std_logic_vector) return u8 is
+  function get_deg(w : std_logic_vector(NODE_W-1 downto 0)) return u8 is
   begin
     return unsigned(w(DEG_H downto DEG_L));
   end function;
 
-  function get_err(w : std_logic_vector) return u32 is
+  function get_err(w : std_logic_vector(NODE_W-1 downto 0)) return u32 is
   begin
     return unsigned(w(ERR_H downto ERR_L));
   end function;
 
-  function set_err(w : std_logic_vector; err : u32) return std_logic_vector is
+  function set_err(w : std_logic_vector(NODE_W-1 downto 0); err : u32)
+    return std_logic_vector is
     variable ww : std_logic_vector(NODE_W-1 downto 0) := w;
   begin
     ww(ERR_H downto ERR_L) := std_logic_vector(err);
@@ -237,23 +238,29 @@ architecture rtl of gng is
   -- done pulse each loop
   signal done_p : std_logic := '0';
 
+  -- IMPORTANT: prevent rewriting node1 (err reset) each time samp_i wraps
+  signal patched_node1 : std_logic := '0';
+
+  -- debug latched error (new error after update)
+  signal dbg_err32 : u32 := (others => '0');
+
+  ---------------------------------------------------------------------------
   -- UART TX helper
-  type tx_sm_t is (TX_IDLE, TX_GO, TX_WA);
-  signal txsm : tx_sm_t := TX_IDLE;
-
+  ---------------------------------------------------------------------------
   signal tx_inflight : std_logic := '0';
-  signal tx_idx      : natural range 0 to 9 := 0; -- send up to 10 bytes
-  signal tx_len      : natural range 0 to 10 := 0;
+  signal tx_idx      : natural range 0 to 14 := 0; -- 15 bytes
+  signal tx_len      : natural range 0 to 15 := 0;
 
-  type tx_buf_t is array (0 to 9) of std_logic_vector(7 downto 0);
+  type tx_buf_t is array (0 to 14) of std_logic_vector(7 downto 0);
   signal tx_buf : tx_buf_t := (others => (others => '0'));
 
-  -- constants for debug bytes
+  -- constants for debug TLV tags
   constant B_A5 : std_logic_vector(7 downto 0) := x"A5";
   constant B_A6 : std_logic_vector(7 downto 0) := x"A6";
   constant B_A7 : std_logic_vector(7 downto 0) := x"A7";
   constant B_A8 : std_logic_vector(7 downto 0) := x"A8";
   constant B_A9 : std_logic_vector(7 downto 0) := x"A9";
+  constant B_AA : std_logic_vector(7 downto 0) := x"AA";
 
 begin
 
@@ -341,11 +348,13 @@ begin
 
         done_p <= '0';
 
+        patched_node1 <= '0';
+        dbg_err32 <= (others => '0');
+
         -- UART default
         tx_start_o <= '0';
         tx_data_o  <= (others => '0');
         tx_inflight <= '0';
-        txsm <= TX_IDLE;
         tx_idx <= 0;
         tx_len <= 0;
 
@@ -356,7 +365,6 @@ begin
         done_p  <= '0';
 
         tx_start_o <= '0'; -- pulse
-        -- tx_data_o will be set when starting
 
         -- clear tx inflight robustly
         if tx_inflight = '1' then
@@ -375,6 +383,10 @@ begin
             if start_i = '1' then
               started <= '1';
               init_n <= 0;
+              init_e <= 0;
+              samp_i <= 0;
+              patched_node1 <= '0';
+              dbg_err32 <= (others => '0');
               ph <= P_INIT_CLR_NODE;
             end if;
 
@@ -438,19 +450,17 @@ begin
             ph <= P_INIT_SEED_EDGE;
 
           -------------------------------------------------------------------
-          -- INIT edge(0,1) + degree(0/1)=1
-          -- (degree ditulis lewat overwrite node0/node1 sekali lagi)
+          -- INIT edge(0,1) + set degree(0)=1
+          -- node1 degree akan dipatch SEKALI di P_WAIT_100MS (patched_node1 flag)
           -------------------------------------------------------------------
           when P_INIT_SEED_EDGE =>
             idx01 := edge_idx(0, 1, MAX_NODES);
 
-            -- write edge age
             edge_we    <= '1';
             edge_waddr <= to_unsigned(idx01, 13);
             edge_wdata <= std_logic_vector(to_unsigned(1, 8));
 
-            -- also set degrees to 1 (2 writes over 2 cycles)
-            -- cycle 1: node0 degree=1
+            -- set node0 degree=1
             node_we    <= '1';
             node_waddr <= to_unsigned(0, 8);
             node_wdata <= pack_node(
@@ -461,23 +471,15 @@ begin
                             (others => '0')
                           );
 
-            -- prepare next cycle to update node1 degree in next phase
-            ph <= P_WAIT_100MS;
             delay_cnt <= integer(DELAY_TICKS);
-
-            -- do node1 degree update “inline” next cycle by forcing an extra write:
-            -- easiest: reuse P_WAIT_100MS first cycle to write node1 degree
-            -- (lihat di P_WAIT_100MS)
-
-            samp_i <= 0;
+            ph <= P_WAIT_100MS;
 
           -------------------------------------------------------------------
-          -- Delay 100ms between loops; also fix node1 degree on first entry
+          -- Delay 100ms between loops; also patch node1 degree exactly once
           -------------------------------------------------------------------
           when P_WAIT_100MS =>
-            -- one-time patch: if node1 degree still 0, set it to 1
-            -- (safe even if already 1; we rewrite same values)
-            if samp_i = 0 and delay_cnt = integer(DELAY_TICKS) then
+            -- patch node1 degree only once per run (avoid periodic err reset)
+            if patched_node1 = '0' then
               node_we    <= '1';
               node_waddr <= to_unsigned(1, 8);
               node_wdata <= pack_node(
@@ -487,6 +489,7 @@ begin
                               to_unsigned(1,8),
                               (others => '0')
                             );
+              patched_node1 <= '1';
             end if;
 
             if delay_cnt <= 0 then
@@ -529,7 +532,6 @@ begin
             ph <= P_WIN_WAIT;
 
           when P_WIN_WAIT =>
-            -- wait 1 cycle for node_rdata to be valid
             ph <= P_WIN_EVAL;
 
           -------------------------------------------------------------------
@@ -582,11 +584,13 @@ begin
 
           when P_ERR_WR =>
             w := node_rdata;
-
             cur_err := get_err(w);
 
             -- add_err = best_d2 >> ERR_SHIFT (resize to 32)
             add_err := resize(shift_right(best_d2, ERR_SHIFT), 32);
+
+            -- latch updated error for debug TX
+            dbg_err32 <= cur_err + add_err;
 
             node_we    <= '1';
             node_waddr <= s1_id;
@@ -606,12 +610,13 @@ begin
             ph <= P_TX_PREP;
 
           -------------------------------------------------------------------
-          -- Prepare TX buffer
+          -- Prepare TX buffer (TLV):
+          -- A5 <type>, A6 <s1>, A7 <s2>, A8 <edge01>,
+          -- AA <err32 LSB..MSB>, A9 <sample>
           -------------------------------------------------------------------
           when P_TX_PREP =>
-            -- bytes: A5 phase, A6 s1, A7 s2, A8 edge01, A9 sample_idx
             tx_buf(0) <= B_A5;
-            tx_buf(1) <= std_logic_vector(to_unsigned(16#10#, 8)); -- phase code "0x10 = WINNER_DONE"
+            tx_buf(1) <= std_logic_vector(to_unsigned(16#10#, 8)); -- type "WINNER_DONE"
 
             tx_buf(2) <= B_A6;
             tx_buf(3) <= std_logic_vector(resize(s1_id, 8));
@@ -622,10 +627,16 @@ begin
             tx_buf(6) <= B_A8;
             tx_buf(7) <= edge_rdata;
 
-            tx_buf(8) <= B_A9;
-            tx_buf(9) <= std_logic_vector(to_unsigned(samp_i mod 256, 8));
+            tx_buf(8)  <= B_AA;
+            tx_buf(9)  <= std_logic_vector(dbg_err32(7 downto 0));
+            tx_buf(10) <= std_logic_vector(dbg_err32(15 downto 8));
+            tx_buf(11) <= std_logic_vector(dbg_err32(23 downto 16));
+            tx_buf(12) <= std_logic_vector(dbg_err32(31 downto 24));
 
-            tx_len <= 10;
+            tx_buf(13) <= B_A9;
+            tx_buf(14) <= std_logic_vector(to_unsigned(samp_i mod 256, 8));
+
+            tx_len <= 15;
             tx_idx <= 0;
             ph <= P_TX_SEND;
 
@@ -643,7 +654,6 @@ begin
           when P_TX_WAIT =>
             if (tx_done_i = '1') or (tx_inflight = '0') then
               if tx_idx = tx_len-1 then
-                -- end of debug frame: one loop done
                 done_p <= '1';
                 ph <= P_NEXT;
               else

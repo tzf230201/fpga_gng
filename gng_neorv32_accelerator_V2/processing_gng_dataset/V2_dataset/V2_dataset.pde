@@ -25,44 +25,51 @@ byte[] txBuf = new byte[TX_BYTES];
 float[][] moonsTx;
 
 // ======================================================
-// Packet types (framed dump - your old format)
+// Packet types (framed dump - old format)
 // ======================================================
 final int PKT_TYPE_EDGE = 0xB1; // edges dump
 final int PKT_TYPE_NODE = 0xA1; // nodes dump
 
 // ======================================================
 // DEBUG TLV stream from new gng.vhd (tag,value)
-// sends per frame (10 bytes):
-//   A5 type, A6 s1, A7 s2, A8 edge01, A9 sample_idx
+// New frame (15 bytes total):
+//   A5 type, A6 s1, A7 s2, A8 edge01, AA err32(LE4), A9 sample_idx
 // ======================================================
 final int TAG_A5 = 0xA5; // type / phase code
 final int TAG_A6 = 0xA6; // s1 id
 final int TAG_A7 = 0xA7; // s2 id
 final int TAG_A8 = 0xA8; // edge(0,1) age
+final int TAG_AA = 0xAA; // NEW: err32 little-endian 4 bytes
 final int TAG_A9 = 0xA9; // sample idx (frame end marker)
 
-boolean dbgWaitVal = false;
+// TLV parser state (supports 1B value or 4B value for AA)
 int dbgTag = 0;
+int dbgNeed = 0;   // how many value bytes needed
+int dbgGot  = 0;
+int[] dbgValBuf = new int[4];
 
 int dbgType = -1;
 int dbgS1   = -1;
 int dbgS2   = -1;
 int dbgEdge01 = -1;
 int dbgSample = -1;
+long dbgErr32U = 0;     // unsigned view (0..2^32-1)
+boolean dbgHaveErr = false;
 
-int dbgKVCount = 0;      // count tag/value pairs
+int dbgKVCount = 0;      // count TLV items (tag+value)
 int dbgFrameCount = 0;   // count full frames (when A9 arrives)
 int dbgLastMs = 0;
-String dbgMsg = "waiting TLV (A5/A6/A7/A8/A9)...";
+String dbgMsg = "waiting TLV (A5/A6/A7/A8/AA/A9)...";
 
 // history of last frames
 final int DBG_HIST_MAX = 32;
-int[] dbgHistType   = new int[DBG_HIST_MAX];
-int[] dbgHistS1     = new int[DBG_HIST_MAX];
-int[] dbgHistS2     = new int[DBG_HIST_MAX];
-int[] dbgHistEdge01 = new int[DBG_HIST_MAX];
-int[] dbgHistSample = new int[DBG_HIST_MAX];
-int[] dbgHistMs     = new int[DBG_HIST_MAX];
+int[]  dbgHistType   = new int[DBG_HIST_MAX];
+int[]  dbgHistS1     = new int[DBG_HIST_MAX];
+int[]  dbgHistS2     = new int[DBG_HIST_MAX];
+int[]  dbgHistEdge01 = new int[DBG_HIST_MAX];
+int[]  dbgHistSample = new int[DBG_HIST_MAX];
+long[] dbgHistErr32U = new long[DBG_HIST_MAX];
+int[]  dbgHistMs     = new int[DBG_HIST_MAX];
 int dbgHistN = 0;
 
 // ======================================================
@@ -137,7 +144,7 @@ float viewMinX, viewMaxX, viewMinY, viewMaxY;
 // ======================================================
 void setup() {
   size(1400, 780);
-  surface.setTitle("GNG Viewer (framed A1/B1) + DEBUG TLV (A5/A6/A7/A8/A9)");
+  surface.setTitle("GNG Viewer (framed A1/B1) + DEBUG TLV (A5/A6/A7/A8/AA/A9)");
   textFont(createFont("Consolas", 14));
   frameRate(60);
 
@@ -201,19 +208,22 @@ void sendDatasetOnce() {
   for (int i=0;i<edgeSeen.length;i++) edgeSeen[i] = false;
 
   // reset debug TLV
-  dbgWaitVal = false;
   dbgTag = 0;
+  dbgNeed = 0;
+  dbgGot = 0;
 
   dbgType = -1;
   dbgS1 = -1;
   dbgS2 = -1;
   dbgEdge01 = -1;
   dbgSample = -1;
+  dbgErr32U = 0;
+  dbgHaveErr = false;
 
   dbgKVCount = 0;
   dbgFrameCount = 0;
   dbgLastMs = 0;
-  dbgMsg = "waiting TLV (A5/A6/A7/A8/A9)...";
+  dbgMsg = "waiting TLV (A5/A6/A7/A8/AA/A9)...";
   dbgHistN = 0;
 
   scroll = 0;
@@ -238,16 +248,25 @@ void serialEvent(Serial p) {
     // DEBUG TLV parser (tag,value)
     // Only intercept when framed parser is idle/resync (FIND_FF1)
     // ======================================================
-    if (dbgWaitVal) {
-      dbgWaitVal = false;
-      onDbgTLV(dbgTag, ub);
-      continue; // do NOT feed framed parser
-    }
-
     if (st == RxState.FIND_FF1) {
-      if (ub == TAG_A5 || ub == TAG_A6 || ub == TAG_A7 || ub == TAG_A8 || ub == TAG_A9) {
+
+      // If we are collecting a value (1B or 4B)
+      if (dbgNeed > 0) {
+        dbgValBuf[dbgGot++] = ub;
+        if (dbgGot >= dbgNeed) {
+          onDbgTLV(dbgTag, dbgValBuf, dbgNeed);
+          dbgNeed = 0;
+          dbgGot  = 0;
+          dbgTag  = 0;
+        }
+        continue; // do NOT feed framed parser
+      }
+
+      // Detect tag start
+      if (ub == TAG_A5 || ub == TAG_A6 || ub == TAG_A7 || ub == TAG_A8 || ub == TAG_AA || ub == TAG_A9) {
         dbgTag = ub;
-        dbgWaitVal = true;
+        dbgNeed = (ub == TAG_AA) ? 4 : 1;
+        dbgGot = 0;
         continue; // do NOT feed framed parser
       }
     }
@@ -257,27 +276,49 @@ void serialEvent(Serial p) {
   }
 }
 
-void onDbgTLV(int tag, int val) {
+void onDbgTLV(int tag, int[] v, int n) {
   dbgKVCount++;
   dbgLastMs = millis();
 
-  if (tag == TAG_A5) dbgType = val & 0xFF;
-  if (tag == TAG_A6) dbgS1   = val & 0xFF;
-  if (tag == TAG_A7) dbgS2   = val & 0xFF;
-  if (tag == TAG_A8) dbgEdge01 = val & 0xFF;
-  if (tag == TAG_A9) dbgSample = val & 0xFF;
+  // Optional: when A5 arrives, treat it as "start of a new frame"
+  if (tag == TAG_A5) {
+    dbgS1 = -1;
+    dbgS2 = -1;
+    dbgEdge01 = -1;
+    dbgSample = -1;
+    dbgErr32U = 0;
+    dbgHaveErr = false;
+  }
+
+  if (tag == TAG_A5) dbgType = v[0] & 0xFF;
+  if (tag == TAG_A6) dbgS1   = v[0] & 0xFF;
+  if (tag == TAG_A7) dbgS2   = v[0] & 0xFF;
+  if (tag == TAG_A8) dbgEdge01 = v[0] & 0xFF;
+
+  if (tag == TAG_AA) {
+    // little-endian u32
+    long x = (long)(v[0] & 0xFF)
+           | ((long)(v[1] & 0xFF) << 8)
+           | ((long)(v[2] & 0xFF) << 16)
+           | ((long)(v[3] & 0xFF) << 24);
+    dbgErr32U = x & 0xFFFFFFFFL;
+    dbgHaveErr = true;
+  }
+
+  if (tag == TAG_A9) dbgSample = v[0] & 0xFF;
 
   // Build message continuously
+  String errStr = dbgHaveErr ? ("" + dbgErr32U + " (0x" + hex((int)dbgErr32U, 8) + ")") : "-";
   dbgMsg = "type=0x" + hex(max(dbgType,0),2) +
            " s1=" + dbgS1 + " s2=" + dbgS2 +
            " edge01=" + dbgEdge01 +
+           " err32=" + errStr +
            " samp=" + dbgSample;
 
   // A9 dianggap "end of frame"
   if (tag == TAG_A9) {
     dbgFrameCount++;
     statusMsg = "Got DBG frame: " + dbgMsg;
-
     pushDbgHistory();
   }
 }
@@ -288,6 +329,7 @@ void pushDbgHistory() {
   int s2 = dbgS2;
   int e01 = dbgEdge01;
   int smp = dbgSample;
+  long er = dbgHaveErr ? dbgErr32U : 0;
   int ms = dbgLastMs;
 
   if (dbgHistN < DBG_HIST_MAX) {
@@ -296,6 +338,7 @@ void pushDbgHistory() {
     dbgHistS2[dbgHistN]     = s2;
     dbgHistEdge01[dbgHistN] = e01;
     dbgHistSample[dbgHistN] = smp;
+    dbgHistErr32U[dbgHistN] = er;
     dbgHistMs[dbgHistN]     = ms;
     dbgHistN++;
   } else {
@@ -305,6 +348,7 @@ void pushDbgHistory() {
       dbgHistS2[k]     = dbgHistS2[k+1];
       dbgHistEdge01[k] = dbgHistEdge01[k+1];
       dbgHistSample[k] = dbgHistSample[k+1];
+      dbgHistErr32U[k] = dbgHistErr32U[k+1];
       dbgHistMs[k]     = dbgHistMs[k+1];
     }
     int last = DBG_HIST_MAX-1;
@@ -313,6 +357,7 @@ void pushDbgHistory() {
     dbgHistS2[last]     = s2;
     dbgHistEdge01[last] = e01;
     dbgHistSample[last] = smp;
+    dbgHistErr32U[last] = er;
     dbgHistMs[last]     = ms;
   }
 }
@@ -548,7 +593,7 @@ void drawPanels() {
   // info box
   fill(0, 160);
   noStroke();
-  rect(rightX + 20, panelY + 20, panelW - 40, 210);
+  rect(rightX + 20, panelY + 20, panelW - 40, 230);
 
   fill(220);
   int yy = (int)(panelY + 45);
@@ -570,6 +615,7 @@ void drawPanels() {
                   " s1=" + dbgHistS1[idx] +
                   " s2=" + dbgHistS2[idx] +
                   " edge01=" + dbgHistEdge01[idx] +
+                  " err32=" + dbgHistErr32U[idx] +
                   " type=0x" + hex(max(dbgHistType[idx],0),2);
     text(line, rightX + 30, yy);
     yy += 16;
@@ -584,6 +630,7 @@ void drawPanels() {
 void drawGraphOverlay(float x0, float y0, float w, float h) {
   if (!haveNodes) return;
 
+  // edges
   if (haveEdges) {
     for (int idx=0; idx<edgeCount; idx++) {
       if (!edgeSeen[idx]) continue;
@@ -596,9 +643,9 @@ void drawGraphOverlay(float x0, float y0, float w, float h) {
       if (!nodeActive[i] || !nodeActive[j]) continue;
 
       float x1 = mapToPanelX(nodeX[i], x0, w);
-      float y1 = mapToPanelY(nodeY[i], y0, h);
+      float y1 = mapToPanelY(nodeY[i], y0, h);  // FIX: y0
       float x2 = mapToPanelX(nodeX[j], x0, w);
-      float y2 = mapToPanelY(nodeY[j], y0, h);
+      float y2 = mapToPanelY(nodeY[j], y0, h);  // FIX: y0
 
       int a = (int)map(constrain(age, 1, 255), 1, 255, 220, 40);
       stroke(255, a);
@@ -606,10 +653,11 @@ void drawGraphOverlay(float x0, float y0, float w, float h) {
     }
   }
 
+  // nodes
   noStroke();
   for (int i=0;i<nodeN;i++) {
     float px = mapToPanelX(nodeX[i], x0, w);
-    float py = mapToPanelY(nodeY[i], y0, h);
+    float py = mapToPanelY(nodeY[i], y0, h); // FIX: y0
 
     if (nodeActive[i]) fill(255, 220);
     else              fill(120, 120);
@@ -621,8 +669,6 @@ void drawGraphOverlay(float x0, float y0, float w, float h) {
   }
 }
 
-// NOTE: fix typo: mapToPanelY call above should pass y0, not x0
-// I will keep the correct function and correct call below:
 float mapToPanelX(float x, float x0, float w) {
   float xn = (x - viewMinX) / (viewMaxX - viewMinX);
   return x0 + 10 + xn * (w - 20);
@@ -678,8 +724,9 @@ void drawDebugBar() {
 
   text("FRAMED: OK=" + pktOK + " BAD=" + pktBad + " LOST~=" + lost +
        " RX_age(ms)=" + ago +
-       " | DBG: " + dbgMsg + " age(ms)=" + dbgAgo +
-       " frames=" + dbgFrameCount,
+       " | DBG: age(ms)=" + dbgAgo +
+       " frames=" + dbgFrameCount +
+       " lastErr=" + (dbgHaveErr ? ("" + dbgErr32U) : "-"),
        30, height - 40);
 
   fill(180, 220, 255);
@@ -703,6 +750,7 @@ void printDbgToConsole() {
             " s1=" + dbgHistS1[idx] +
             " s2=" + dbgHistS2[idx] +
             " edge01=" + dbgHistEdge01[idx] +
+            " err32=" + dbgHistErr32U[idx] +
             " type=0x" + hex(max(dbgHistType[idx],0),2));
   }
   println("====================================================");
