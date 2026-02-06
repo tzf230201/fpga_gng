@@ -27,12 +27,15 @@ float[][] moonsTx;
 // ======================================================
 // DEBUG TLV stream from gng.vhd (tag,value)
 // Frame end marker: A9
-// Now includes:
+//
+// Includes:
 //   A5 type, A6 s1, A7 s2, A8 edge01,
 //   AA..AD err32,
-//   AE/AF x_s1 (s16),
-//   B0/B2 y_s1 (s16),
-//   A9 sample_idx
+//   AE/AF x_s1 (s16 lo/hi),
+//   B0/B1 y_s1 (s16 lo/hi)   <-- FIX: y_hi = B1
+//
+// NOTE: Some older builds might have used B2 for y_hi.
+//       This viewer accepts BOTH B1 and B2 to be safe.
 // ======================================================
 final int TAG_A5 = 0xA5;
 final int TAG_A6 = 0xA6;
@@ -45,11 +48,11 @@ final int TAG_AB = 0xAB;
 final int TAG_AC = 0xAC;
 final int TAG_AD = 0xAD;
 
-// NEW tags for s1 position
 final int TAG_AE = 0xAE; // x lo
 final int TAG_AF = 0xAF; // x hi
 final int TAG_B0 = 0xB0; // y lo
-final int TAG_B2 = 0xB2; // y hi
+final int TAG_B1 = 0xB1; // y hi (FIX)
+final int TAG_B2 = 0xB2; // accept as alternative
 
 boolean dbgWaitVal = false;
 int dbgTag = 0;
@@ -63,31 +66,31 @@ int dbgSample = -1;
 int dbgErr0=-1, dbgErr1=-1, dbgErr2=-1, dbgErr3=-1; // AA..AD bytes
 long dbgErr32 = -1;
 
-// NEW: raw bytes for s1 x/y
+// raw bytes for s1 x/y
 int dbgXLo=-1, dbgXHi=-1, dbgYLo=-1, dbgYHi=-1;
-float dbgS1X = Float.NaN;  // scaled ( /SCALE )
+float dbgS1X = Float.NaN;  // scaled (/SCALE)
 float dbgS1Y = Float.NaN;
 
 int dbgKVCount = 0;
 int dbgFrameCount = 0;
 int dbgLastMs = 0;
-String dbgMsg = "waiting TLV (A5..AD, AE/AF, B0/B2, A9)...";
+String dbgMsg = "waiting TLV (A5..AD, AE/AF, B0/B1, A9)...";
 
 // history of last frames
 final int DBG_HIST_MAX = 32;
-int[] dbgHistType   = new int[DBG_HIST_MAX];
-int[] dbgHistS1     = new int[DBG_HIST_MAX];
-int[] dbgHistS2     = new int[DBG_HIST_MAX];
-int[] dbgHistEdge01 = new int[DBG_HIST_MAX];
-int[] dbgHistSample = new int[DBG_HIST_MAX];
-long[] dbgHistErr32 = new long[DBG_HIST_MAX];
-float[] dbgHistS1X  = new float[DBG_HIST_MAX];
-float[] dbgHistS1Y  = new float[DBG_HIST_MAX];
-int[] dbgHistMs     = new int[DBG_HIST_MAX];
+int[]   dbgHistType   = new int[DBG_HIST_MAX];
+int[]   dbgHistS1     = new int[DBG_HIST_MAX];
+int[]   dbgHistS2     = new int[DBG_HIST_MAX];
+int[]   dbgHistEdge01 = new int[DBG_HIST_MAX];
+int[]   dbgHistSample = new int[DBG_HIST_MAX];
+long[]  dbgHistErr32  = new long[DBG_HIST_MAX];
+float[] dbgHistS1X    = new float[DBG_HIST_MAX];
+float[] dbgHistS1Y    = new float[DBG_HIST_MAX];
+int[]   dbgHistMs     = new int[DBG_HIST_MAX];
 int dbgHistN = 0;
 
 // ======================================================
-// (Optional) framed parser remains, but you can keep it idle
+// (Optional) framed parser remains (kept idle / harmless)
 // ======================================================
 final int MAX_PAYLOAD = 4096;
 enum RxState { FIND_FF1, FIND_FF2, LEN0, LEN1, SEQ, PAYLOAD, CHK }
@@ -107,8 +110,6 @@ int lastSeq = -1;
 int lost = 0;
 
 int lastPktMs = 0;
-String statusMsg = "idle";
-String verifyMsg = "";
 
 // fast read
 byte[] inBuf = new byte[8192];
@@ -125,7 +126,7 @@ float viewMinX, viewMaxX, viewMinY, viewMaxY;
 // ======================================================
 void setup() {
   size(1400, 780);
-  surface.setTitle("GNG Viewer (DEBUG TLV + s1 x/y)");
+  surface.setTitle("GNG Viewer (DEBUG TLV + s1 x/y) [FIX y_hi=B1]");
   textFont(createFont("Consolas", 14));
   frameRate(60);
 
@@ -153,7 +154,6 @@ void draw() {
   // timeout rescue for framed parser ONLY
   if (st != RxState.FIND_FF1 && (millis() - lastByteMs) > PARSER_TIMEOUT_MS) {
     resetParser();
-    statusMsg = "Framed parser reset (timeout) -> resync";
   }
 }
 
@@ -194,10 +194,9 @@ void sendDatasetOnce() {
   dbgKVCount = 0;
   dbgFrameCount = 0;
   dbgLastMs = 0;
-  dbgMsg = "waiting TLV (A5..AD, AE/AF, B0/B2, A9)...";
+  dbgMsg = "waiting TLV (A5..AD, AE/AF, B0/B1, A9)...";
   dbgHistN = 0;
 
-  statusMsg = "TX: sent 400 bytes. Waiting TLV debug...";
   myPort.write(txBuf);
 }
 
@@ -213,16 +212,14 @@ void serialEvent(Serial p) {
   for (int i=0; i<n; i++) {
     int ub = inBuf[i] & 0xFF;
 
-    // ======================================================
     // DEBUG TLV parser (tag,value)
-    // Only intercept when framed parser is idle/resync (FIND_FF1)
-    // ======================================================
     if (dbgWaitVal) {
       dbgWaitVal = false;
       onDbgTLV(dbgTag, ub);
       continue;
     }
 
+    // only intercept TLV when framed parser is idle (FIND_FF1)
     if (st == RxState.FIND_FF1) {
       if (isDbgTag(ub)) {
         dbgTag = ub;
@@ -239,7 +236,11 @@ void serialEvent(Serial p) {
 boolean isDbgTag(int ub) {
   return (ub == TAG_A5 || ub == TAG_A6 || ub == TAG_A7 || ub == TAG_A8 || ub == TAG_A9 ||
           ub == TAG_AA || ub == TAG_AB || ub == TAG_AC || ub == TAG_AD ||
-          ub == TAG_AE || ub == TAG_AF || ub == TAG_B0 || ub == TAG_B2);
+          ub == TAG_AE || ub == TAG_AF || ub == TAG_B0 || ub == TAG_B1 || ub == TAG_B2);
+}
+
+short s16_from_lohi(int lo, int hi) {
+  return (short)((lo & 0xFF) | ((hi & 0xFF) << 8));
 }
 
 void onDbgTLV(int tag, int val) {
@@ -259,11 +260,12 @@ void onDbgTLV(int tag, int val) {
   if (tag == TAG_AC) dbgErr2 = val;
   if (tag == TAG_AD) dbgErr3 = val;
 
-  // NEW x/y bytes
   if (tag == TAG_AE) dbgXLo = val;
   if (tag == TAG_AF) dbgXHi = val;
+
   if (tag == TAG_B0) dbgYLo = val;
-  if (tag == TAG_B2) dbgYHi = val;
+  if (tag == TAG_B1) dbgYHi = val; // FIX
+  if (tag == TAG_B2) dbgYHi = val; // accept alternative
 
   // update err32 if ready
   if (dbgErr0>=0 && dbgErr1>=0 && dbgErr2>=0 && dbgErr3>=0) {
@@ -273,11 +275,11 @@ void onDbgTLV(int tag, int val) {
 
   // update s1 position if ready
   if (dbgXLo>=0 && dbgXHi>=0) {
-    short xi = (short)((dbgXHi<<8) | dbgXLo);
+    short xi = s16_from_lohi(dbgXLo, dbgXHi);
     dbgS1X = xi / SCALE;
   }
   if (dbgYLo>=0 && dbgYHi>=0) {
-    short yi = (short)((dbgYHi<<8) | dbgYLo);
+    short yi = s16_from_lohi(dbgYLo, dbgYHi);
     dbgS1Y = yi / SCALE;
   }
 
@@ -285,14 +287,13 @@ void onDbgTLV(int tag, int val) {
     "type=0x" + hex(max(dbgType,0),2) +
     " s1=" + dbgS1 + " s2=" + dbgS2 +
     " edge01=" + dbgEdge01 +
-    " err32=" + (dbgErr32<0 ? "--" : ("" + dbgErr32 + " (0x" + hex((int)dbgErr32,8) + ")")) +
+    " err32=" + (dbgErr32<0 ? "--" : ("" + dbgErr32 + " (0x" + hex((int)(dbgErr32 & 0xFFFFFFFFL),8) + ")")) +
     " s1xy=(" + (Float.isNaN(dbgS1X) ? "--" : nf(dbgS1X,1,4)) + "," + (Float.isNaN(dbgS1Y) ? "--" : nf(dbgS1Y,1,4)) + ")" +
     " samp=" + dbgSample;
 
   // A9 = end of frame
   if (tag == TAG_A9) {
     dbgFrameCount++;
-    statusMsg = "Got DBG frame: " + dbgMsg;
     pushDbgHistory();
   }
 }
@@ -337,7 +338,7 @@ void pushDbgHistory() {
 }
 
 // ======================================================
-// Framed Parser (optional; kept minimal)
+// Framed Parser (optional; minimal)
 // ======================================================
 void feedParser(int ub) {
   switch(st) {
@@ -421,27 +422,33 @@ void drawPanels() {
   // info box
   fill(0, 160);
   noStroke();
-  rect(rightX + 20, panelY + 20, panelW - 40, 230);
+  rect(rightX + 20, panelY + 20, panelW - 40, 240);
 
   fill(220);
   int yy = (int)(panelY + 45);
 
-  text("DBG: " + dbgMsg + "  (frames=" + dbgFrameCount + ", kv=" + dbgKVCount + ")", rightX + 30, yy); yy += 18;
+  text("DBG: " + dbgMsg + "  (frames=" + dbgFrameCount + ", kv=" + dbgKVCount + ")", rightX + 30, yy);
+  yy += 22;
 
-  yy += 8;
-  text("Last DBG frames:", rightX + 30, yy); yy += 16;
+  text("Last DBG frames:", rightX + 30, yy);
+  yy += 18;
 
   int show = min(dbgHistN, 8);
   for (int k=0; k<show; k++) {
     int idx = dbgHistN - show + k;
+
+    String sxy = "(" + (Float.isNaN(dbgHistS1X[idx]) ? "--" : nf(dbgHistS1X[idx],1,4)) +
+                 "," + (Float.isNaN(dbgHistS1Y[idx]) ? "--" : nf(dbgHistS1Y[idx],1,4)) + ")";
+
     String line =
       "  " + k + ") samp=" + dbgHistSample[idx] +
       " s1=" + dbgHistS1[idx] +
       " s2=" + dbgHistS2[idx] +
       " e01=" + dbgHistEdge01[idx] +
       " err=" + dbgHistErr32[idx] +
-      " s1xy=(" + nf(dbgHistS1X[idx],1,4) + "," + nf(dbgHistS1Y[idx],1,4) + ")" +
+      " s1xy=" + sxy +
       " type=0x" + hex(max(dbgHistType[idx],0),2);
+
     text(line, rightX + 30, yy);
     yy += 16;
   }
@@ -504,10 +511,13 @@ void drawDebugBar() {
 
   int dbgAgo = (dbgLastMs == 0) ? -1 : (millis() - dbgLastMs);
 
+  String sxy = "(" + (Float.isNaN(dbgS1X) ? "--" : nf(dbgS1X,1,4)) +
+               "," + (Float.isNaN(dbgS1Y) ? "--" : nf(dbgS1Y,1,4)) + ")";
+
   text("DBG: age(ms)=" + dbgAgo +
        " frames=" + dbgFrameCount +
-       " lastErr=" + (dbgErr32<0?"--":(""+dbgErr32)) +
-       " lastS1xy=(" + (Float.isNaN(dbgS1X)?"--":nf(dbgS1X,1,4)) + "," + (Float.isNaN(dbgS1Y)?"--":nf(dbgS1Y,1,4)) + ")",
+       " lastErr=" + (dbgErr32<0 ? "--" : ("" + dbgErr32)) +
+       " lastS1xy=" + sxy,
        30, height - 40);
 
   fill(180);

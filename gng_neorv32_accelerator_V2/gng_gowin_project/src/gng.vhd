@@ -49,13 +49,20 @@ architecture rtl of gng is
   subtype u32 is unsigned(31 downto 0);
 
   ---------------------------------------------------------------------------
-  -- Winner epsilon = 0.3 (Q8)
-  -- eps_q8 = round(0.3 * 256) = 77
-  -- delta = (dx * eps_q8) >> 8
+  -- Winner epsilon = 0.3 (Q8) => round(0.3*256)=77
+  --   delta = (dx * eps_q8) >> 8
   ---------------------------------------------------------------------------
-  constant EPS_WIN_Q8   : integer := 77;
-  constant EPS_WIN_SH   : natural := 8;
-  constant EPS_Q8_S9    : signed(8 downto 0) := to_signed(EPS_WIN_Q8, 9); -- 9-bit
+  constant EPS_WIN_Q8 : integer := 77;
+  constant EPS_WIN_SH : natural := 8;
+  constant EPS_WIN_S9 : signed(8 downto 0) := to_signed(EPS_WIN_Q8, 9);
+
+  ---------------------------------------------------------------------------
+  -- Neighbor epsilon = 0.001 (Q16) => round(0.001*65536)=66
+  --   delta = (dx * eps_q16) >> 16
+  ---------------------------------------------------------------------------
+  constant EPS_NB_Q16 : integer := 66;
+  constant EPS_NB_SH  : natural := 16;
+  constant EPS_NB_S17 : signed(16 downto 0) := to_signed(EPS_NB_Q16, 17);
 
   ---------------------------------------------------------------------------
   -- Node packing in BRAM (80-bit)
@@ -132,7 +139,7 @@ architecture rtl of gng is
   end function;
 
   ---------------------------------------------------------------------------
-  -- Edge memory: upper triangle 1D (age 8-bit)
+  -- Edge memory: upper triangle 1D (age 8-bit), 0 means "no edge"
   ---------------------------------------------------------------------------
   constant EDGE_N : natural := (MAX_NODES * (MAX_NODES - 1)) / 2;
 
@@ -198,8 +205,8 @@ architecture rtl of gng is
     P_INIT_CLR_EDGE,
     P_INIT_SEED0,
     P_INIT_SEED1,
-    P_INIT_SEED_EDGE0, -- write edge01 + node0 degree=1
-    P_INIT_SEED_EDGE1, -- write node1 degree=1
+    P_INIT_SEED_EDGE0, -- edge01 + node0 degree=1
+    P_INIT_SEED_EDGE1, -- node1 degree=1
 
     -- loop
     P_WAIT_100MS,
@@ -212,12 +219,21 @@ architecture rtl of gng is
     P_WIN_WAIT,
     P_WIN_EVAL,
 
-    -- error + move s1 (RMW)
+    -- update error + move s1 (RMW)
     P_UPD_RD,
     P_UPD_WAIT,
     P_UPD_WR,
 
-    -- debug UART (also reads edge01 to keep BRAM used)
+    -- age edges incident to s1 and move neighbors
+    P_NB_SETUP,
+    P_NB_NODE_REQ,
+    P_NB_NODE_WAIT,
+    P_NB_NODE_EVAL,
+    P_NB_EDGE_WAIT,
+    P_NB_EDGE_EVAL,
+    P_NB_ADV,
+
+    -- debug UART
     P_DBG_EDGE_REQ,
     P_DBG_EDGE_WAIT,
     P_TX_PREP,
@@ -251,15 +267,23 @@ architecture rtl of gng is
   signal s1_id : unsigned(7 downto 0) := (others => '0');
   signal s2_id : unsigned(7 downto 0) := (others => '0');
 
+  -- neighbor scan index
+  signal nb_i : natural range 0 to MAX_NODES-1 := 0;
+
+  -- latch neighbor node fields
+  signal nb_act : std_logic := '0';
+  signal nb_deg : u8 := (others => '0');
+  signal nb_err : u32 := (others => '0');
+  signal nb_x   : s16 := (others => '0');
+  signal nb_y   : s16 := (others => '0');
+
   -- done pulse each loop
   signal done_p : std_logic := '0';
 
-  -- debug: last updated error(s1)
+  -- debug: last updated error(s1) and last s1 xy
   signal dbg_err32 : u32 := (others => '0');
-
-  -- NEW debug: last s1 position after update
-  signal dbg_s1_x : s16 := (others => '0');
-  signal dbg_s1_y : s16 := (others => '0');
+  signal dbg_s1x   : s16 := (others => '0');
+  signal dbg_s1y   : s16 := (others => '0');
 
   -- UART TX helper
   signal tx_inflight : std_logic := '0';
@@ -279,12 +303,10 @@ architecture rtl of gng is
   constant B_AB : std_logic_vector(7 downto 0) := x"AB";
   constant B_AC : std_logic_vector(7 downto 0) := x"AC";
   constant B_AD : std_logic_vector(7 downto 0) := x"AD";
-
-  -- NEW tags for s1 position
-  constant B_AE : std_logic_vector(7 downto 0) := x"AE"; -- s1_x lo
-  constant B_AF : std_logic_vector(7 downto 0) := x"AF"; -- s1_x hi
-  constant B_B0 : std_logic_vector(7 downto 0) := x"B0"; -- s1_y lo
-  constant B_B2 : std_logic_vector(7 downto 0) := x"B2"; -- s1_y hi
+  constant B_AE : std_logic_vector(7 downto 0) := x"AE"; -- s1x lo
+  constant B_AF : std_logic_vector(7 downto 0) := x"AF"; -- s1x hi
+  constant B_B0 : std_logic_vector(7 downto 0) := x"B0"; -- s1y lo
+  constant B_B1 : std_logic_vector(7 downto 0) := x"B1"; -- s1y hi
 
 begin
 
@@ -341,19 +363,26 @@ begin
     variable add_err : u32;
     variable new_err : u32;
 
-    -- move s1 (FIXED widths: dx(17) * eps(9) -> 26 bits)
-    variable mulx  : signed(25 downto 0);  -- 26-bit
-    variable muly  : signed(25 downto 0);  -- 26-bit
-    variable delx  : signed(16 downto 0);  -- 17-bit
-    variable dely  : signed(16 downto 0);  -- 17-bit
+    -- move winner (Q8): 17*9 -> 26 bits
+    variable mulx_w  : signed(25 downto 0);
+    variable muly_w  : signed(25 downto 0);
+
+    -- move neighbor (Q16): 17*17 -> 34 bits
+    variable mulx_n  : signed(33 downto 0);
+    variable muly_n  : signed(33 downto 0);
+
+    variable delx  : signed(16 downto 0);
+    variable dely  : signed(16 downto 0);
     variable nx_new : signed(17 downto 0);
     variable ny_new : signed(17 downto 0);
 
-    constant D2_INF : unsigned(34 downto 0) := (others => '1');
     variable idx01 : natural;
+    variable s1i   : integer;
+    variable idxe  : natural;
+    variable age_u : unsigned(7 downto 0);
+    variable age_inc : unsigned(7 downto 0);
 
-    variable sx : s16;
-    variable sy : s16;
+    constant D2_INF : unsigned(34 downto 0) := (others => '1');
   begin
     if rising_edge(clk_i) then
       if rstn_i = '0' then
@@ -381,9 +410,16 @@ begin
         s1_id <= (others => '0');
         s2_id <= (others => '0');
 
+        nb_i <= 0;
+        nb_act <= '0';
+        nb_deg <= (others => '0');
+        nb_err <= (others => '0');
+        nb_x <= (others => '0');
+        nb_y <= (others => '0');
+
         dbg_err32 <= (others => '0');
-        dbg_s1_x  <= (others => '0');
-        dbg_s1_y  <= (others => '0');
+        dbg_s1x   <= (others => '0');
+        dbg_s1y   <= (others => '0');
 
         done_p <= '0';
 
@@ -398,10 +434,8 @@ begin
         node_we <= '0';
         edge_we <= '0';
         done_p  <= '0';
-
         tx_start_o <= '0';
 
-        -- clear inflight robustly
         if tx_inflight = '1' then
           if (tx_done_i = '1') or (tx_busy_i = '0') then
             tx_inflight <= '0';
@@ -410,9 +444,6 @@ begin
 
         case ph is
 
-          -------------------------------------------------------------------
-          -- IDLE
-          -------------------------------------------------------------------
           when P_IDLE =>
             started <= '0';
             if start_i = '1' then
@@ -421,9 +452,6 @@ begin
               ph <= P_INIT_CLR_NODE;
             end if;
 
-          -------------------------------------------------------------------
-          -- INIT: clear node mem
-          -------------------------------------------------------------------
           when P_INIT_CLR_NODE =>
             node_we    <= '1';
             node_waddr <= to_unsigned(init_n, 8);
@@ -436,9 +464,6 @@ begin
               init_n <= init_n + 1;
             end if;
 
-          -------------------------------------------------------------------
-          -- INIT: clear edge mem
-          -------------------------------------------------------------------
           when P_INIT_CLR_EDGE =>
             edge_we    <= '1';
             edge_waddr <= to_unsigned(init_e, 13);
@@ -450,9 +475,6 @@ begin
               init_e <= init_e + 1;
             end if;
 
-          -------------------------------------------------------------------
-          -- seed node0
-          -------------------------------------------------------------------
           when P_INIT_SEED0 =>
             node_we    <= '1';
             node_waddr <= to_unsigned(0, 8);
@@ -465,9 +487,6 @@ begin
                           );
             ph <= P_INIT_SEED1;
 
-          -------------------------------------------------------------------
-          -- seed node1
-          -------------------------------------------------------------------
           when P_INIT_SEED1 =>
             node_we    <= '1';
             node_waddr <= to_unsigned(1, 8);
@@ -480,9 +499,6 @@ begin
                           );
             ph <= P_INIT_SEED_EDGE0;
 
-          -------------------------------------------------------------------
-          -- write edge(0,1)=1 AND set node0 degree=1
-          -------------------------------------------------------------------
           when P_INIT_SEED_EDGE0 =>
             idx01 := edge_idx(0, 1, MAX_NODES);
 
@@ -502,9 +518,6 @@ begin
 
             ph <= P_INIT_SEED_EDGE1;
 
-          -------------------------------------------------------------------
-          -- set node1 degree=1
-          -------------------------------------------------------------------
           when P_INIT_SEED_EDGE1 =>
             node_we    <= '1';
             node_waddr <= to_unsigned(1, 8);
@@ -520,9 +533,6 @@ begin
             delay_cnt <= integer(DELAY_TICKS);
             ph <= P_WAIT_100MS;
 
-          -------------------------------------------------------------------
-          -- Delay between loops
-          -------------------------------------------------------------------
           when P_WAIT_100MS =>
             if delay_cnt <= 0 then
               ph <= P_SAMPLE_REQ;
@@ -530,9 +540,6 @@ begin
               delay_cnt <= delay_cnt - 1;
             end if;
 
-          -------------------------------------------------------------------
-          -- Sample read (1-cycle latency)
-          -------------------------------------------------------------------
           when P_SAMPLE_REQ =>
             data_addr <= to_unsigned(samp_i, 7);
             ph <= P_SAMPLE_WAIT;
@@ -542,9 +549,6 @@ begin
             sample_y <= signed(data_rdata_i(31 downto 16));
             ph <= P_WIN_SETUP;
 
-          -------------------------------------------------------------------
-          -- Winner scan setup
-          -------------------------------------------------------------------
           when P_WIN_SETUP =>
             best_d2   <= D2_INF;
             second_d2 <= D2_INF;
@@ -554,9 +558,6 @@ begin
             scan_i <= 0;
             ph <= P_WIN_REQ;
 
-          -------------------------------------------------------------------
-          -- Request node read
-          -------------------------------------------------------------------
           when P_WIN_REQ =>
             node_raddr <= to_unsigned(scan_i, 8);
             ph <= P_WIN_WAIT;
@@ -564,9 +565,6 @@ begin
           when P_WIN_WAIT =>
             ph <= P_WIN_EVAL;
 
-          -------------------------------------------------------------------
-          -- Evaluate node_i
-          -------------------------------------------------------------------
           when P_WIN_EVAL =>
             w   := node_rdata;
             act := get_act(w);
@@ -602,9 +600,6 @@ begin
               ph <= P_WIN_REQ;
             end if;
 
-          -------------------------------------------------------------------
-          -- Update error(s1) + move s1 (RMW)
-          -------------------------------------------------------------------
           when P_UPD_RD =>
             node_raddr <= s1_id;
             ph <= P_UPD_WAIT;
@@ -618,10 +613,8 @@ begin
             deg := get_deg(w);
             nx  := get_x(w);
             ny  := get_y(w);
-
             cur_err := get_err(w);
 
-            -- If winner was never updated (all inactive), avoid INF explode
             if best_d2 = D2_INF then
               add_err := (others => '0');
             else
@@ -631,42 +624,138 @@ begin
             new_err := cur_err + add_err;
             dbg_err32 <= new_err;
 
-            -- move s1 towards sample with eps=0.3
+            -- move winner (Q8)
             dx_s := resize(sample_x, 17) - resize(nx, 17);
             dy_s := resize(sample_y, 17) - resize(ny, 17);
 
-            -- IMPORTANT FIX: keep operand widths (17 * 9 -> 26)
-            mulx := dx_s * EPS_Q8_S9; -- 26-bit result
-            muly := dy_s * EPS_Q8_S9;
+            mulx_w := dx_s * EPS_WIN_S9; -- 17*9 -> 26
+            muly_w := dy_s * EPS_WIN_S9;
 
-            delx := resize(shift_right(mulx, EPS_WIN_SH), 17);
-            dely := resize(shift_right(muly, EPS_WIN_SH), 17);
+            delx := resize(shift_right(mulx_w, EPS_WIN_SH), 17);
+            dely := resize(shift_right(muly_w, EPS_WIN_SH), 17);
 
             nx_new := resize(nx, 18) + resize(delx, 18);
             ny_new := resize(ny, 18) + resize(dely, 18);
 
-            sx := sat_s16(nx_new);
-            sy := sat_s16(ny_new);
-
-            -- NEW: store debug s1 position (after update)
-            dbg_s1_x <= sx;
-            dbg_s1_y <= sy;
+            dbg_s1x <= sat_s16(nx_new);
+            dbg_s1y <= sat_s16(ny_new);
 
             node_we    <= '1';
             node_waddr <= s1_id;
             node_wdata <= pack_node(
-                            sx,
-                            sy,
+                            sat_s16(nx_new),
+                            sat_s16(ny_new),
                             act,
                             deg,
                             new_err
                           );
 
-            ph <= P_DBG_EDGE_REQ;
+            ph <= P_NB_SETUP;
 
-          -------------------------------------------------------------------
-          -- Debug: read edge(0,1)
-          -------------------------------------------------------------------
+          when P_NB_SETUP =>
+            s1i := to_integer(s1_id);
+            if s1i = 0 then
+              nb_i <= 1;
+            else
+              nb_i <= 0;
+            end if;
+            ph <= P_NB_NODE_REQ;
+
+          when P_NB_NODE_REQ =>
+            node_raddr <= to_unsigned(nb_i, 8);
+            ph <= P_NB_NODE_WAIT;
+
+          when P_NB_NODE_WAIT =>
+            ph <= P_NB_NODE_EVAL;
+
+          when P_NB_NODE_EVAL =>
+            w   := node_rdata;
+            act := get_act(w);
+
+            if act = '0' then
+              ph <= P_NB_ADV;
+            else
+              nb_act <= '1';
+              nb_deg <= get_deg(w);
+              nb_err <= get_err(w);
+              nb_x   <= get_x(w);
+              nb_y   <= get_y(w);
+
+              s1i := to_integer(s1_id);
+              if nb_i < natural(s1i) then
+                idxe := edge_idx(nb_i, natural(s1i), MAX_NODES);
+              else
+                idxe := edge_idx(natural(s1i), nb_i, MAX_NODES);
+              end if;
+
+              edge_raddr <= to_unsigned(idxe, 13);
+              ph <= P_NB_EDGE_WAIT;
+            end if;
+
+          when P_NB_EDGE_WAIT =>
+            ph <= P_NB_EDGE_EVAL;
+
+          when P_NB_EDGE_EVAL =>
+            age_u := unsigned(edge_rdata);
+
+            if age_u = 0 then
+              ph <= P_NB_ADV;
+            else
+              if age_u = to_unsigned(255,8) then
+                age_inc := age_u;
+              else
+                age_inc := age_u + 1;
+              end if;
+
+              edge_we    <= '1';
+              edge_waddr <= edge_raddr;
+              edge_wdata <= std_logic_vector(age_inc);
+
+              -- move neighbor (Q16, eps=0.001)
+              dx_s := resize(sample_x, 17) - resize(nb_x, 17);
+              dy_s := resize(sample_y, 17) - resize(nb_y, 17);
+
+              mulx_n := dx_s * EPS_NB_S17; -- 17*17 -> 34
+              muly_n := dy_s * EPS_NB_S17;
+
+              delx := resize(shift_right(mulx_n, EPS_NB_SH), 17);
+              dely := resize(shift_right(muly_n, EPS_NB_SH), 17);
+
+              nx_new := resize(nb_x, 18) + resize(delx, 18);
+              ny_new := resize(nb_y, 18) + resize(dely, 18);
+
+              node_we    <= '1';
+              node_waddr <= to_unsigned(nb_i, 8);
+              node_wdata <= pack_node(
+                              sat_s16(nx_new),
+                              sat_s16(ny_new),
+                              nb_act,
+                              nb_deg,
+                              nb_err
+                            );
+
+              ph <= P_NB_ADV;
+            end if;
+
+          when P_NB_ADV =>
+            s1i := to_integer(s1_id);
+
+            if nb_i = MAX_NODES-1 then
+              ph <= P_DBG_EDGE_REQ;
+            else
+              if (integer(nb_i) + 1) = s1i then
+                if nb_i >= MAX_NODES-2 then
+                  ph <= P_DBG_EDGE_REQ;
+                else
+                  nb_i <= nb_i + 2;
+                  ph <= P_NB_NODE_REQ;
+                end if;
+              else
+                nb_i <= nb_i + 1;
+                ph <= P_NB_NODE_REQ;
+              end if;
+            end if;
+
           when P_DBG_EDGE_REQ =>
             idx01 := edge_idx(0, 1, MAX_NODES);
             edge_raddr <= to_unsigned(idx01, 13);
@@ -675,61 +764,29 @@ begin
           when P_DBG_EDGE_WAIT =>
             ph <= P_TX_PREP;
 
-          -------------------------------------------------------------------
-          -- Prepare TLV debug frame
-          -------------------------------------------------------------------
           when P_TX_PREP =>
-            -- 26 bytes:
-            -- A5 type, A6 s1, A7 s2, A8 edge01,
-            -- AA..AD err32,
-            -- AE/AF x_s1,
-            -- B0/B2 y_s1,
-            -- A9 sample (end marker)
-            tx_buf(0)  <= B_A5;
-            tx_buf(1)  <= x"10"; -- type/phase code: 0x10 = LOOP_DONE
+            -- 26 bytes TLV
+            tx_buf(0)  <= B_A5;  tx_buf(1)  <= x"10";
+            tx_buf(2)  <= B_A6;  tx_buf(3)  <= std_logic_vector(resize(s1_id, 8));
+            tx_buf(4)  <= B_A7;  tx_buf(5)  <= std_logic_vector(resize(s2_id, 8));
+            tx_buf(6)  <= B_A8;  tx_buf(7)  <= edge_rdata;
 
-            tx_buf(2)  <= B_A6;
-            tx_buf(3)  <= std_logic_vector(resize(s1_id, 8));
+            tx_buf(8)  <= B_AA;  tx_buf(9)  <= std_logic_vector(dbg_err32(7 downto 0));
+            tx_buf(10) <= B_AB;  tx_buf(11) <= std_logic_vector(dbg_err32(15 downto 8));
+            tx_buf(12) <= B_AC;  tx_buf(13) <= std_logic_vector(dbg_err32(23 downto 16));
+            tx_buf(14) <= B_AD;  tx_buf(15) <= std_logic_vector(dbg_err32(31 downto 24));
 
-            tx_buf(4)  <= B_A7;
-            tx_buf(5)  <= std_logic_vector(resize(s2_id, 8));
+            tx_buf(16) <= B_AE;  tx_buf(17) <= std_logic_vector(dbg_s1x(7 downto 0));
+            tx_buf(18) <= B_AF;  tx_buf(19) <= std_logic_vector(dbg_s1x(15 downto 8));
+            tx_buf(20) <= B_B0;  tx_buf(21) <= std_logic_vector(dbg_s1y(7 downto 0));
+            tx_buf(22) <= B_B1;  tx_buf(23) <= std_logic_vector(dbg_s1y(15 downto 8));
 
-            tx_buf(6)  <= B_A8;
-            tx_buf(7)  <= edge_rdata;
-
-            tx_buf(8)  <= B_AA;
-            tx_buf(9)  <= std_logic_vector(dbg_err32(7 downto 0));
-
-            tx_buf(10) <= B_AB;
-            tx_buf(11) <= std_logic_vector(dbg_err32(15 downto 8));
-
-            tx_buf(12) <= B_AC;
-            tx_buf(13) <= std_logic_vector(dbg_err32(23 downto 16));
-
-            tx_buf(14) <= B_AD;
-            tx_buf(15) <= std_logic_vector(dbg_err32(31 downto 24));
-
-            -- NEW: s1 x/y (signed 16)
-            tx_buf(16) <= B_AE;
-            tx_buf(17) <= std_logic_vector(dbg_s1_x(7 downto 0));
-            tx_buf(18) <= B_AF;
-            tx_buf(19) <= std_logic_vector(dbg_s1_x(15 downto 8));
-
-            tx_buf(20) <= B_B0;
-            tx_buf(21) <= std_logic_vector(dbg_s1_y(7 downto 0));
-            tx_buf(22) <= B_B2;
-            tx_buf(23) <= std_logic_vector(dbg_s1_y(15 downto 8));
-
-            tx_buf(24) <= B_A9;
-            tx_buf(25) <= std_logic_vector(to_unsigned(samp_i mod 256, 8));
+            tx_buf(24) <= B_A9;  tx_buf(25) <= std_logic_vector(to_unsigned(samp_i mod 256, 8));
 
             tx_len <= 26;
             tx_idx <= 0;
             ph <= P_TX_SEND;
 
-          -------------------------------------------------------------------
-          -- Send bytes over UART
-          -------------------------------------------------------------------
           when P_TX_SEND =>
             if (tx_busy_i = '0') and (tx_inflight = '0') then
               tx_start_o  <= '1';
@@ -749,9 +806,6 @@ begin
               end if;
             end if;
 
-          -------------------------------------------------------------------
-          -- Next sample and loop forever
-          -------------------------------------------------------------------
           when P_NEXT =>
             if samp_i = DATA_WORDS-1 then
               samp_i <= 0;
