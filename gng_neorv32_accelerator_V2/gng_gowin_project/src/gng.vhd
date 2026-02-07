@@ -35,7 +35,7 @@ entity gng is
     INIT_Y1    : integer := 800;
 
     CLOCK_HZ     : natural := 27_000_000;
-    DBG_DELAY_MS : natural := 100;
+    DBG_DELAY_MS : natural := 0;
 
     ERR_SHIFT : natural := 4;   -- add_err = d2 >> ERR_SHIFT
 
