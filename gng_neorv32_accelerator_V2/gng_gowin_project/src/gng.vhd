@@ -1,4 +1,25 @@
 -- gng.vhd (FULL) : winner + move + age neighbor + connect/reset + prune/iso + insert every LAMBDA + error decay
+-- + SNAPSHOT:
+--   1.A) snapshot every SNAP_EVERY iterations (default 20)
+--   2.B) edge snapshot sends ONLY active edges (cnt variable)
+--
+-- UART stream per iteration:
+--   always:  A5 10 ... (DBG TLV fixed 46 bytes)
+--   if snap_now=1: then immediately after DBG:
+--            A5 20 ... (NODE_SNAPSHOT fixed 4 + MAX_NODES*7)
+--            A5 21 ... (EDGE_SNAPSHOT variable 4 + cnt*3)
+--
+-- FIX (important):
+--  - Do NOT deactivate nodes when degree becomes 0 (keep act='1')
+--  - Do NOT decrement node_count on isolated events (node_count becomes "created nodes" count)
+--
+-- UPDATE (important):
+--  - INSERT now follows TRUE GNG:
+--      q = node with maximum accumulated error
+--      f = neighbor of q (edge exists) with maximum error (or first neighbor if all errors 0)
+--      insert new node r at midpoint(q,f), split edge(q,f), scale err(q),err(f) by 1/2, set err(r)=err(q)
+--    (alpha=0.5 implemented by shift-right 1)
+
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -51,6 +72,9 @@ architecture rtl of gng is
   subtype u8  is unsigned(7 downto 0);
   subtype u32 is unsigned(31 downto 0);
 
+  constant U32_ZERO : u32 := (others => '0');
+  constant U8_ZERO  : u8  := (others => '0');
+
   -- eps winner = 0.3 (Q8) => 77
   constant EPS_WIN_Q8 : integer := 77;
   constant EPS_WIN_SH : natural := 8;
@@ -58,6 +82,9 @@ architecture rtl of gng is
   -- eps neighbor = 0.001 (Q16) => 66
   constant EPS_N_Q16  : integer := 66;
   constant EPS_N_SH   : natural := 16;
+
+  -- INSERT alpha=0.5
+  constant INS_ALPHA_SHIFT : natural := 1;
 
   -- stored edge value: 0=no edge, 1..255 means connected, stored = age+1
   function age_limit_stored(a : natural) return unsigned is
@@ -208,35 +235,54 @@ architecture rtl of gng is
     P_CONN_DEGB_WAIT,
     P_CONN_DEGB_WR,
 
-    -- insert every LAMBDA (simple insert between s1 & s2)
+    -- insert every LAMBDA (TRUE GNG: q=max error, f=max-error neighbor of q)
     P_INS_CHECK,
+    P_INS_Q_SETUP, P_INS_Q_REQ, P_INS_Q_WAIT, P_INS_Q_EVAL,
+    P_INS_F_SETUP, P_INS_F_NODE_REQ, P_INS_F_NODE_WAIT, P_INS_F_NODE_EVAL,
+    P_INS_F_EDGE_WAIT, P_INS_F_EDGE_EVAL,
     P_INS_FIND_SETUP,
     P_INS_FIND_REQ,
     P_INS_FIND_WAIT,
     P_INS_FIND_EVAL,
     P_INS_CLR_EDGE,
-    P_INS_S2_RD,
-    P_INS_S2_WAIT,
+    P_INS_Q_RD, P_INS_Q_WAIT2, P_INS_Q_LATCH,
+    P_INS_F_RD, P_INS_F_WAIT2, P_INS_F_LATCH,
     P_INS_NODE_WR,
     P_INS_DEL_OLD_WR,
     P_INS_EDGE1_WR,
     P_INS_EDGE2_WR,
+    P_INS_Q_ERR_WR,
+    P_INS_F_ERR_WR,
 
     -- debug reads
     P_DBG_EDGE01_REQ,
     P_DBG_EDGE01_WAIT,
     P_DBG_DEG_S1_RD,
     P_DBG_DEG_S1_WAIT,
+    P_DBG_DEG_S1_EVAL,
     P_DBG_DEG_S2_RD,
     P_DBG_DEG_S2_WAIT,
-    P_DBG_EDGE01_EVAL,
-    P_DBG_DEG_S1_EVAL,
     P_DBG_DEG_S2_EVAL,
+    P_DBG_EDGE01_EVAL,
 
     P_TX_PREP,
     P_TX_SEND,
     P_TX_WAIT,
-    P_NEXT
+    P_NEXT,
+
+    -- snapshot streaming (A5 20 nodes, A5 21 edges)
+    P_SNAP_NODE_HDR0, P_SNAP_NODE_HDR1, P_SNAP_NODE_HDR2, P_SNAP_NODE_HDR3,
+    P_SNAP_NODE_RD, P_SNAP_NODE_WAIT, P_SNAP_NODE_LATCH,
+    P_SNAP_NODE_B0, P_SNAP_NODE_B1, P_SNAP_NODE_B2, P_SNAP_NODE_B3,
+    P_SNAP_NODE_B4, P_SNAP_NODE_B5, P_SNAP_NODE_B6, P_SNAP_NODE_NEXT,
+
+    P_SNAP_EDGE_CNT_INIT, P_SNAP_EDGE_CNT_RD, P_SNAP_EDGE_CNT_WAIT, P_SNAP_EDGE_CNT_EVAL,
+    P_SNAP_EDGE_HDR0, P_SNAP_EDGE_HDR1, P_SNAP_EDGE_HDR2, P_SNAP_EDGE_HDR3,
+    P_SNAP_EDGE_SEND_INIT, P_SNAP_EDGE_SEND_RD, P_SNAP_EDGE_SEND_WAIT, P_SNAP_EDGE_SEND_EVAL,
+    P_SNAP_EDGE_B0, P_SNAP_EDGE_B1, P_SNAP_EDGE_B2, P_SNAP_EDGE_ADV,
+
+    -- single-byte TX engine
+    P_STX_SEND, P_STX_WAIT
   );
   signal ph : phase_t := P_IDLE;
 
@@ -280,7 +326,7 @@ architecture rtl of gng is
   signal iso_flag   : std_logic := '0';
   signal iso_id_dbg : u8 := (others => '0');
 
-  -- node count
+  -- node count (here becomes "created nodes count")
   signal node_count : u8 := (others => '0');
 
   -- connect debug: edge(s1,s2) BEFORE reset
@@ -297,6 +343,22 @@ architecture rtl of gng is
   signal ins_flag : std_logic := '0';
   signal ins_id_dbg : u8 := (others => '0');
 
+  -- INSERT selection regs (TRUE GNG)
+  signal ins_q_id    : u8  := (others => '0');
+  signal ins_f_id    : u8  := (others => '0');
+  signal ins_q_err   : u32 := (others => '0');
+  signal ins_f_err   : u32 := (others => '0');
+  signal ins_f_found : std_logic := '0';
+
+  signal ins_tmp_act : std_logic := '0';
+  signal ins_tmp_err : u32 := (others => '0');
+
+  signal ins_qx, ins_qy : s16 := (others => '0');
+  signal ins_fx, ins_fy : s16 := (others => '0');
+  signal ins_qdeg, ins_fdeg : u8 := (others => '0');
+  signal ins_qact, ins_fact : std_logic := '0';
+  signal ins_qerr_lat, ins_ferr_lat : u32 := (others => '0');
+
   -- dbg: edge01
   signal dbg_e01 : std_logic_vector(7 downto 0) := (others => '0');
 
@@ -304,7 +366,7 @@ architecture rtl of gng is
   signal dbg_deg_s1 : u8 := (others => '0');
   signal dbg_deg_s2 : u8 := (others => '0');
 
-  -- UART TX
+  -- UART TX (DBG TLV)
   signal tx_inflight : std_logic := '0';
   signal tx_idx      : natural range 0 to 63 := 0;
   signal tx_len      : natural range 0 to 64 := 0;
@@ -333,7 +395,7 @@ architecture rtl of gng is
   constant B_C0 : std_logic_vector(7 downto 0) := x"C0"; -- e_s1s2_pre
   constant B_C1 : std_logic_vector(7 downto 0) := x"C1"; -- deg_s1
   constant B_C2 : std_logic_vector(7 downto 0) := x"C2"; -- deg_s2
-  constant B_C3 : std_logic_vector(7 downto 0) := x"C3"; -- conn_flag
+  constant B_C3 : std_logic_vector(7 downto 0) := x"C3"; -- conn_flag (s2_valid)
   constant B_C4 : std_logic_vector(7 downto 0) := x"C4"; -- rm_flag
   constant B_C5 : std_logic_vector(7 downto 0) := x"C5"; -- iso_flag
   constant B_C6 : std_logic_vector(7 downto 0) := x"C6"; -- iso_id
@@ -341,13 +403,42 @@ architecture rtl of gng is
   constant B_C8 : std_logic_vector(7 downto 0) := x"C8"; -- ins_flag
   constant B_C9 : std_logic_vector(7 downto 0) := x"C9"; -- ins_id
 
+  -- =========================================================
+  -- SNAPSHOT control
+  -- =========================================================
+  constant SNAP_EVERY : natural := 20; -- snapshot interval
+  signal snap_cnt : natural range 0 to SNAP_EVERY-1 := 0;
+  signal snap_now : std_logic := '0';
+
+  -- node snapshot regs
+  signal sn_node_i : natural range 0 to MAX_NODES-1 := 0;
+  signal sn_act_s  : std_logic := '0';
+  signal sn_deg_s  : u8 := (others => '0');
+  signal sn_x_s    : s16 := (others => '0');
+  signal sn_y_s    : s16 := (others => '0');
+
+  -- edge snapshot regs (active-only)
+  signal sn_edge_cnt : unsigned(15 downto 0) := (others => '0');
+  signal sn_e_i      : natural range 0 to MAX_NODES-2 := 0;
+  signal sn_e_j      : natural range 1 to MAX_NODES-1 := 1;
+  signal sn_edge_i_u8 : std_logic_vector(7 downto 0) := (others => '0');
+  signal sn_edge_j_u8 : std_logic_vector(7 downto 0) := (others => '0');
+  signal sn_edge_val  : std_logic_vector(7 downto 0) := (others => '0');
+
+  -- small single-byte TX helper for snapshots
+  signal stx_byte : std_logic_vector(7 downto 0) := (others => '0');
+  signal stx_next : phase_t := P_IDLE;
+
+  constant B_20 : std_logic_vector(7 downto 0) := x"20";
+  constant B_21 : std_logic_vector(7 downto 0) := x"21";
+
 begin
 
   data_raddr_o <= data_addr;
   gng_busy_o   <= started;
   gng_done_o   <= done_p;
 
-  -- Node BRAM
+  -- Node BRAM (sync read)
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -358,7 +449,7 @@ begin
     end if;
   end process;
 
-  -- Edge BRAM
+  -- Edge BRAM (sync read)
   process(clk_i)
   begin
     if rising_edge(clk_i) then
@@ -475,6 +566,25 @@ begin
         ins_flag <= '0';
         ins_id_dbg <= (others => '0');
 
+        ins_q_id <= (others => '0');
+        ins_f_id <= (others => '0');
+        ins_q_err <= (others => '0');
+        ins_f_err <= (others => '0');
+        ins_f_found <= '0';
+        ins_tmp_act <= '0';
+        ins_tmp_err <= (others => '0');
+
+        ins_qx <= (others => '0');
+        ins_qy <= (others => '0');
+        ins_fx <= (others => '0');
+        ins_fy <= (others => '0');
+        ins_qdeg <= (others => '0');
+        ins_fdeg <= (others => '0');
+        ins_qact <= '0';
+        ins_fact <= '0';
+        ins_qerr_lat <= (others => '0');
+        ins_ferr_lat <= (others => '0');
+
         dbg_e01 <= (others => '0');
         dbg_deg_s1 <= (others => '0');
         dbg_deg_s2 <= (others => '0');
@@ -484,6 +594,26 @@ begin
         tx_inflight <= '0';
         tx_idx <= 0;
         tx_len <= 0;
+
+        -- snapshot reset
+        snap_cnt <= 0;
+        snap_now <= '0';
+
+        sn_node_i <= 0;
+        sn_act_s  <= '0';
+        sn_deg_s  <= (others=>'0');
+        sn_x_s    <= (others=>'0');
+        sn_y_s    <= (others=>'0');
+
+        sn_edge_cnt <= (others=>'0');
+        sn_e_i <= 0;
+        sn_e_j <= 1;
+        sn_edge_i_u8 <= (others=>'0');
+        sn_edge_j_u8 <= (others=>'0');
+        sn_edge_val  <= (others=>'0');
+
+        stx_byte <= (others=>'0');
+        stx_next <= P_IDLE;
 
       else
         -- defaults
@@ -577,6 +707,15 @@ begin
             else
               lambda_cnt <= lambda_cnt + 1;
               insert_now <= '0';
+            end if;
+
+            -- decide snapshot for THIS iteration (every SNAP_EVERY)
+            if snap_cnt = SNAP_EVERY-1 then
+              snap_cnt <= 0;
+              snap_now <= '1';
+            else
+              snap_cnt <= snap_cnt + 1;
+              snap_now <= '0';
             end if;
 
             data_addr <= to_unsigned(samp_i, 7);
@@ -762,7 +901,7 @@ begin
             is_s2_edge := (s2_valid = '1') and (ins_i = to_integer(s2_id));
 
             if age_u = 0 then
-              -- not neighbor: only update error decay (optional write)
+              -- not neighbor: only update error decay
               if dec_err /= cur_err then
                 node_we <= '1';
                 node_waddr <= to_unsigned(ins_i, 8);
@@ -792,14 +931,12 @@ begin
                   deg := deg - 1;
                 end if;
 
+                -- FIX: DO NOT deactivate node when isolated
                 if deg = to_unsigned(0,8) then
-                  -- isolated => deactivate
-                  act := '0';
-                  iso_flag <= '1';
+                  iso_flag   <= '1';
                   iso_id_dbg <= to_unsigned(ins_i, 8);
-                  if node_count > to_unsigned(0,8) then
-                    node_count <= node_count - 1;
-                  end if;
+                  -- keep act='1'
+                  -- no node_count decrement
                 end if;
 
                 node_we <= '1';
@@ -814,8 +951,9 @@ begin
                   edge_wdata <= std_logic_vector(age_new_u);
                 end if;
 
-                dx_n := resize(s1x_reg,17) - resize(nx,17);
-                dy_n := resize(s1y_reg,17) - resize(ny,17);
+                -- neighbor move towards sample (standard GNG)
+                dx_n := resize(sample_x,17) - resize(nx,17);
+                dy_n := resize(sample_y,17) - resize(ny,17);
 
                 mulx_n := dx_n * to_signed(EPS_N_Q16,18);
                 muly_n := dy_n * to_signed(EPS_N_Q16,18);
@@ -840,15 +978,12 @@ begin
             end if;
 
           when P_S1_WRBACK =>
-            -- write s1 with possibly updated degree (after prune)
-            -- (optional safety: if deg=0 -> deactivate)
+            -- FIX: keep s1 active even if degree becomes 0; only flag
             if (s1_act_reg = '1') and (s1_deg_reg = to_unsigned(0,8)) then
-              s1_act_reg <= '0';
-              iso_flag <= '1';
+              iso_flag   <= '1';
               iso_id_dbg <= s1_id;
-              if node_count > to_unsigned(0,8) then
-                node_count <= node_count - 1;
-              end if;
+              -- do NOT set s1_act_reg <= '0'
+              -- do NOT decrement node_count
             end if;
 
             node_we <= '1';
@@ -924,15 +1059,119 @@ begin
             end if;
             ph <= P_INS_CHECK;
 
-          -- INSERT CHECK
+          -- =========================================================
+          -- INSERT (TRUE GNG)
+          -- =========================================================
           when P_INS_CHECK =>
-            if (insert_now = '1') and (s2_valid='1') and (node_count < to_unsigned(MAX_NODES,8)) then
+            if (insert_now = '1') and (node_count < to_unsigned(MAX_NODES,8)) then
               ins_i <= 0;
-              ph <= P_INS_FIND_SETUP;
+              ins_q_err <= U32_ZERO;
+              ins_q_id  <= (others=>'0');
+              ph <= P_INS_Q_SETUP;
             else
               ph <= P_DBG_EDGE01_REQ;
             end if;
 
+          -- find q = max error over active nodes
+          when P_INS_Q_SETUP =>
+            ins_i <= 0;
+            ins_q_err <= U32_ZERO;
+            ins_q_id  <= (others=>'0');
+            ph <= P_INS_Q_REQ;
+
+          when P_INS_Q_REQ =>
+            node_raddr <= to_unsigned(ins_i,8);
+            ph <= P_INS_Q_WAIT;
+
+          when P_INS_Q_WAIT =>
+            ph <= P_INS_Q_EVAL;
+
+          when P_INS_Q_EVAL =>
+            w := node_rdata;
+            if get_act(w)='1' then
+              cur_err := get_err(w);
+              if cur_err > ins_q_err then
+                ins_q_err <= cur_err;
+                ins_q_id  <= to_unsigned(ins_i,8);
+              end if;
+            end if;
+
+            if ins_i = MAX_NODES-1 then
+              ins_i <= 0;
+              ins_f_err <= U32_ZERO;
+              ins_f_id  <= ins_q_id;
+              ins_f_found <= '0';
+              ph <= P_INS_F_SETUP;
+            else
+              ins_i <= ins_i + 1;
+              ph <= P_INS_Q_REQ;
+            end if;
+
+          -- find f = neighbor of q with max error (or first neighbor if all errors 0)
+          when P_INS_F_SETUP =>
+            ins_i <= 0;
+            ins_f_err <= U32_ZERO;
+            ins_f_id  <= ins_q_id;
+            ins_f_found <= '0';
+            ph <= P_INS_F_NODE_REQ;
+
+          when P_INS_F_NODE_REQ =>
+            if ins_i = to_integer(ins_q_id) then
+              if ins_i = MAX_NODES-1 then
+                if ins_f_found = '0' then
+                  ph <= P_DBG_EDGE01_REQ; -- q has no neighbor edges
+                else
+                  ph <= P_INS_FIND_SETUP;
+                end if;
+              else
+                ins_i <= ins_i + 1;
+                ph <= P_INS_F_NODE_REQ;
+              end if;
+            else
+              node_raddr <= to_unsigned(ins_i,8);
+              ph <= P_INS_F_NODE_WAIT;
+            end if;
+
+          when P_INS_F_NODE_WAIT =>
+            ph <= P_INS_F_NODE_EVAL;
+
+          when P_INS_F_NODE_EVAL =>
+            w := node_rdata;
+            ins_tmp_act <= get_act(w);
+            ins_tmp_err <= get_err(w);
+
+            i1 := to_integer(ins_q_id);
+            i2 := ins_i;
+            if i1 < i2 then idxe := edge_idx(i1,i2,MAX_NODES);
+            else idxe := edge_idx(i2,i1,MAX_NODES);
+            end if;
+            edge_raddr <= to_unsigned(idxe,13);
+            ph <= P_INS_F_EDGE_WAIT;
+
+          when P_INS_F_EDGE_WAIT =>
+            ph <= P_INS_F_EDGE_EVAL;
+
+          when P_INS_F_EDGE_EVAL =>
+            if (edge_rdata /= x"00") and (ins_tmp_act='1') then
+              if (ins_f_found='0') or (ins_tmp_err > ins_f_err) then
+                ins_f_err   <= ins_tmp_err;
+                ins_f_id    <= to_unsigned(ins_i,8);
+              end if;
+              ins_f_found <= '1';
+            end if;
+
+            if ins_i = MAX_NODES-1 then
+              if ins_f_found='0' then
+                ph <= P_DBG_EDGE01_REQ;
+              else
+                ph <= P_INS_FIND_SETUP;
+              end if;
+            else
+              ins_i <= ins_i + 1;
+              ph <= P_INS_F_NODE_REQ;
+            end if;
+
+          -- find free slot (act='0') for new node
           when P_INS_FIND_SETUP =>
             ins_i <= 0;
             ph <= P_INS_FIND_REQ;
@@ -963,9 +1202,8 @@ begin
           -- clear all edges incident to new node (safety)
           when P_INS_CLR_EDGE =>
             if ins_j = ins_free then
-              -- skip self
               if ins_j = MAX_NODES-1 then
-                ph <= P_INS_S2_RD;
+                ph <= P_INS_Q_RD;
               else
                 ins_j <= ins_j + 1;
               end if;
@@ -982,31 +1220,56 @@ begin
               edge_wdata <= x"00";
 
               if ins_j = MAX_NODES-1 then
-                ph <= P_INS_S2_RD;
+                ph <= P_INS_Q_RD;
               else
                 ins_j <= ins_j + 1;
               end if;
             end if;
 
-          when P_INS_S2_RD =>
-            node_raddr <= s2_id;
-            ph <= P_INS_S2_WAIT;
+          -- read q node
+          when P_INS_Q_RD =>
+            node_raddr <= ins_q_id;
+            ph <= P_INS_Q_WAIT2;
 
-          when P_INS_S2_WAIT =>
+          when P_INS_Q_WAIT2 =>
+            ph <= P_INS_Q_LATCH;
+
+          when P_INS_Q_LATCH =>
+            w := node_rdata;
+            ins_qact <= get_act(w);
+            ins_qdeg <= get_deg(w);
+            ins_qx   <= get_x(w);
+            ins_qy   <= get_y(w);
+            ins_qerr_lat <= get_err(w);
+            ph <= P_INS_F_RD;
+
+          -- read f node
+          when P_INS_F_RD =>
+            node_raddr <= ins_f_id;
+            ph <= P_INS_F_WAIT2;
+
+          when P_INS_F_WAIT2 =>
+            ph <= P_INS_F_LATCH;
+
+          when P_INS_F_LATCH =>
+            w := node_rdata;
+            ins_fact <= get_act(w);
+            ins_fdeg <= get_deg(w);
+            ins_fx   <= get_x(w);
+            ins_fy   <= get_y(w);
+            ins_ferr_lat <= get_err(w);
             ph <= P_INS_NODE_WR;
 
+          -- write new node at midpoint(q,f)
           when P_INS_NODE_WR =>
-            w := node_rdata;
-
-            -- midpoint between s1 and s2
             node_we <= '1';
             node_waddr <= to_unsigned(ins_free,8);
             node_wdata <= pack_node(
-              sat_s16( resize( shift_right( resize(s1x_reg,17) + resize(get_x(w),17), 1 ), 18) ),
-              sat_s16( resize( shift_right( resize(s1y_reg,17) + resize(get_y(w),17), 1 ), 18) ),
+              sat_s16( resize( shift_right( resize(ins_qx,17) + resize(ins_fx,17), 1 ), 18) ),
+              sat_s16( resize( shift_right( resize(ins_qy,17) + resize(ins_fy,17), 1 ), 18) ),
               '1',
               to_unsigned(2,8),
-              s1_err_reg
+              shift_right(ins_qerr_lat, INS_ALPHA_SHIFT)
             );
 
             ins_flag <= '1';
@@ -1018,10 +1281,10 @@ begin
 
             ph <= P_INS_DEL_OLD_WR;
 
+          -- remove edge(q,f)
           when P_INS_DEL_OLD_WR =>
-            -- remove edge(s1,s2) once (optional, helps keep degree consistent)
-            i1 := to_integer(s1_id);
-            i2 := to_integer(s2_id);
+            i1 := to_integer(ins_q_id);
+            i2 := to_integer(ins_f_id);
             if i1 < i2 then idxe := edge_idx(i1,i2,MAX_NODES);
             else idxe := edge_idx(i2,i1,MAX_NODES);
             end if;
@@ -1030,9 +1293,9 @@ begin
             edge_wdata <= x"00";
             ph <= P_INS_EDGE1_WR;
 
+          -- edge(q,new)=1
           when P_INS_EDGE1_WR =>
-            -- edge(s1, new)=1
-            i1 := to_integer(s1_id);
+            i1 := to_integer(ins_q_id);
             i2 := ins_free;
             if i1 < i2 then idxe := edge_idx(i1,i2,MAX_NODES);
             else idxe := edge_idx(i2,i1,MAX_NODES);
@@ -1042,58 +1305,70 @@ begin
             edge_wdata <= x"01";
             ph <= P_INS_EDGE2_WR;
 
+          -- edge(new,f)=1
           when P_INS_EDGE2_WR =>
-            -- edge(new, s2)=1
             i1 := ins_free;
-            i2 := to_integer(s2_id);
+            i2 := to_integer(ins_f_id);
             if i1 < i2 then idxe := edge_idx(i1,i2,MAX_NODES);
             else idxe := edge_idx(i2,i1,MAX_NODES);
             end if;
             edge_we <= '1';
             edge_waddr <= to_unsigned(idxe, 13);
             edge_wdata <= x"01";
+            ph <= P_INS_Q_ERR_WR;
+
+          -- scale down errors of q and f (alpha=0.5)
+          when P_INS_Q_ERR_WR =>
+            node_we <= '1';
+            node_waddr <= ins_q_id;
+            node_wdata <= pack_node(ins_qx, ins_qy, ins_qact, ins_qdeg, shift_right(ins_qerr_lat, INS_ALPHA_SHIFT));
+            ph <= P_INS_F_ERR_WR;
+
+          when P_INS_F_ERR_WR =>
+            node_we <= '1';
+            node_waddr <= ins_f_id;
+            node_wdata <= pack_node(ins_fx, ins_fy, ins_fact, ins_fdeg, shift_right(ins_ferr_lat, INS_ALPHA_SHIFT));
             ph <= P_DBG_EDGE01_REQ;
 
+          -- =========================================================
           -- debug reads
-      when P_DBG_EDGE01_REQ =>
-          idxe := edge_idx(0,1,MAX_NODES);
-          edge_raddr <= to_unsigned(idxe, 13);
-          ph <= P_DBG_EDGE01_WAIT;
+          -- =========================================================
+          when P_DBG_EDGE01_REQ =>
+            idxe := edge_idx(0,1,MAX_NODES);
+            edge_raddr <= to_unsigned(idxe, 13);
+            ph <= P_DBG_EDGE01_WAIT;
 
-        when P_DBG_EDGE01_WAIT =>
-          ph <= P_DBG_EDGE01_EVAL;
+          when P_DBG_EDGE01_WAIT =>
+            ph <= P_DBG_EDGE01_EVAL;
 
-        when P_DBG_EDGE01_EVAL =>
-          dbg_e01 <= edge_rdata;
-          ph <= P_DBG_DEG_S1_RD;
+          when P_DBG_EDGE01_EVAL =>
+            dbg_e01 <= edge_rdata;
+            ph <= P_DBG_DEG_S1_RD;
 
-        when P_DBG_DEG_S1_RD =>
-          node_raddr <= s1_id;
-          ph <= P_DBG_DEG_S1_WAIT;
+          when P_DBG_DEG_S1_RD =>
+            node_raddr <= s1_id;
+            ph <= P_DBG_DEG_S1_WAIT;
 
-        when P_DBG_DEG_S1_WAIT =>
-          ph <= P_DBG_DEG_S1_EVAL;
+          when P_DBG_DEG_S1_WAIT =>
+            ph <= P_DBG_DEG_S1_EVAL;
 
-        when P_DBG_DEG_S1_EVAL =>
-          dbg_deg_s1 <= get_deg(node_rdata);
-          ph <= P_DBG_DEG_S2_RD;
+          when P_DBG_DEG_S1_EVAL =>
+            dbg_deg_s1 <= get_deg(node_rdata);
+            ph <= P_DBG_DEG_S2_RD;
 
-        when P_DBG_DEG_S2_RD =>
-          node_raddr <= s2_id;
-          ph <= P_DBG_DEG_S2_WAIT;
+          when P_DBG_DEG_S2_RD =>
+            node_raddr <= s2_id;
+            ph <= P_DBG_DEG_S2_WAIT;
 
-        when P_DBG_DEG_S2_WAIT =>
-          ph <= P_DBG_DEG_S2_EVAL;
+          when P_DBG_DEG_S2_WAIT =>
+            ph <= P_DBG_DEG_S2_EVAL;
 
-        when P_DBG_DEG_S2_EVAL =>
-          dbg_deg_s2 <= get_deg(node_rdata);
-          ph <= P_TX_PREP;
+          when P_DBG_DEG_S2_EVAL =>
+            dbg_deg_s2 <= get_deg(node_rdata);
+            ph <= P_TX_PREP;
 
           when P_TX_PREP =>
-            -- TLV pairs (<=64 bytes total)
-            -- A5 type, A6 s1, A7 s2, A8 edge01,
-            -- C0 e_s1s2_pre, C1 deg_s1, C2 deg_s2, C3 conn, C4 rm, C5 iso, C6 iso_id, C7 node_count, C8 ins_flag, C9 ins_id
-            -- AA..AD err32, AE/AF x_s1, B0/B1 y_s1, A9 sample
+            -- TLV pairs (fixed 46 bytes)
             tx_buf(0)  <= B_A5; tx_buf(1) <= x"10";
             tx_buf(2)  <= B_A6; tx_buf(3) <= std_logic_vector(s1_id);
             tx_buf(4)  <= B_A7; tx_buf(5) <= std_logic_vector(s2_id);
@@ -1139,14 +1414,230 @@ begin
           when P_TX_WAIT =>
             if (tx_done_i='1') or (tx_inflight='0') then
               if tx_idx = tx_len-1 then
-                done_p <= '1';
-                ph <= P_NEXT;
+                if snap_now = '1' then
+                  ph <= P_SNAP_NODE_HDR0;
+                else
+                  done_p <= '1';
+                  ph <= P_NEXT;
+                end if;
               else
                 tx_idx <= tx_idx + 1;
                 ph <= P_TX_SEND;
               end if;
             end if;
 
+          -- =========================================================
+          -- Single-byte TX engine (stx_byte -> UART)
+          -- =========================================================
+          when P_STX_SEND =>
+            if (tx_busy_i='0') and (tx_inflight='0') then
+              tx_start_o <= '1';
+              tx_data_o  <= stx_byte;
+              tx_inflight <= '1';
+              ph <= P_STX_WAIT;
+            end if;
+
+          when P_STX_WAIT =>
+            if (tx_done_i='1') or (tx_inflight='0') then
+              ph <= stx_next;
+            end if;
+
+          -- =========================================================
+          -- NODE SNAPSHOT: A5 20 MAX_NODES node_count + (id,act,deg,xlo,xhi,ylo,yhi)*MAX_NODES
+          -- =========================================================
+          when P_SNAP_NODE_HDR0 =>
+            stx_byte <= x"A5"; stx_next <= P_SNAP_NODE_HDR1; ph <= P_STX_SEND;
+
+          when P_SNAP_NODE_HDR1 =>
+            stx_byte <= B_20;  stx_next <= P_SNAP_NODE_HDR2; ph <= P_STX_SEND;
+
+          when P_SNAP_NODE_HDR2 =>
+            stx_byte <= std_logic_vector(to_unsigned(MAX_NODES,8));
+            stx_next <= P_SNAP_NODE_HDR3;
+            ph <= P_STX_SEND;
+
+          when P_SNAP_NODE_HDR3 =>
+            sn_node_i <= 0;
+            stx_byte <= std_logic_vector(node_count);
+            stx_next <= P_SNAP_NODE_RD;
+            ph <= P_STX_SEND;
+
+          when P_SNAP_NODE_RD =>
+            node_raddr <= to_unsigned(sn_node_i,8);
+            ph <= P_SNAP_NODE_WAIT;
+
+          when P_SNAP_NODE_WAIT =>
+            ph <= P_SNAP_NODE_LATCH;
+
+          when P_SNAP_NODE_LATCH =>
+            w := node_rdata;
+            sn_act_s <= get_act(w);
+            sn_deg_s <= get_deg(w);
+            sn_x_s   <= get_x(w);
+            sn_y_s   <= get_y(w);
+            ph <= P_SNAP_NODE_B0;
+
+          when P_SNAP_NODE_B0 =>
+            stx_byte <= std_logic_vector(to_unsigned(sn_node_i,8));
+            stx_next <= P_SNAP_NODE_B1;
+            ph <= P_STX_SEND;
+
+          when P_SNAP_NODE_B1 =>
+            stx_byte <= "0000000" & sn_act_s;
+            stx_next <= P_SNAP_NODE_B2;
+            ph <= P_STX_SEND;
+
+          when P_SNAP_NODE_B2 =>
+            stx_byte <= std_logic_vector(sn_deg_s);
+            stx_next <= P_SNAP_NODE_B3;
+            ph <= P_STX_SEND;
+
+          when P_SNAP_NODE_B3 =>
+            stx_byte <= std_logic_vector(sn_x_s(7 downto 0));
+            stx_next <= P_SNAP_NODE_B4;
+            ph <= P_STX_SEND;
+
+          when P_SNAP_NODE_B4 =>
+            stx_byte <= std_logic_vector(sn_x_s(15 downto 8));
+            stx_next <= P_SNAP_NODE_B5;
+            ph <= P_STX_SEND;
+
+          when P_SNAP_NODE_B5 =>
+            stx_byte <= std_logic_vector(sn_y_s(7 downto 0));
+            stx_next <= P_SNAP_NODE_B6;
+            ph <= P_STX_SEND;
+
+          when P_SNAP_NODE_B6 =>
+            stx_byte <= std_logic_vector(sn_y_s(15 downto 8));
+            stx_next <= P_SNAP_NODE_NEXT;
+            ph <= P_STX_SEND;
+
+          when P_SNAP_NODE_NEXT =>
+            if sn_node_i = MAX_NODES-1 then
+              ph <= P_SNAP_EDGE_CNT_INIT;
+            else
+              sn_node_i <= sn_node_i + 1;
+              ph <= P_SNAP_NODE_RD;
+            end if;
+
+          -- =========================================================
+          -- EDGE SNAPSHOT (active-only): 2-pass
+          -- Pass1 count edges!=0  => send header A5 21 cnt_lo cnt_hi
+          -- Pass2 send triplets (i,j,ageStored) only if edge!=0
+          -- =========================================================
+          when P_SNAP_EDGE_CNT_INIT =>
+            sn_edge_cnt <= (others=>'0');
+            sn_e_i <= 0;
+            sn_e_j <= 1;
+            ph <= P_SNAP_EDGE_CNT_RD;
+
+          when P_SNAP_EDGE_CNT_RD =>
+            idxe := edge_idx(sn_e_i, sn_e_j, MAX_NODES);
+            edge_raddr <= to_unsigned(idxe, 13);
+            ph <= P_SNAP_EDGE_CNT_WAIT;
+
+          when P_SNAP_EDGE_CNT_WAIT =>
+            ph <= P_SNAP_EDGE_CNT_EVAL;
+
+          when P_SNAP_EDGE_CNT_EVAL =>
+            if edge_rdata /= x"00" then
+              sn_edge_cnt <= sn_edge_cnt + 1;
+            end if;
+
+            if (sn_e_i = MAX_NODES-2) and (sn_e_j = MAX_NODES-1) then
+              ph <= P_SNAP_EDGE_HDR0;
+            else
+              if sn_e_j = MAX_NODES-1 then
+                sn_e_i <= sn_e_i + 1;
+                sn_e_j <= sn_e_i + 2;
+              else
+                sn_e_j <= sn_e_j + 1;
+              end if;
+              ph <= P_SNAP_EDGE_CNT_RD;
+            end if;
+
+          when P_SNAP_EDGE_HDR0 =>
+            stx_byte <= x"A5"; stx_next <= P_SNAP_EDGE_HDR1; ph <= P_STX_SEND;
+
+          when P_SNAP_EDGE_HDR1 =>
+            stx_byte <= B_21;  stx_next <= P_SNAP_EDGE_HDR2; ph <= P_STX_SEND;
+
+          when P_SNAP_EDGE_HDR2 =>
+            stx_byte <= std_logic_vector(sn_edge_cnt(7 downto 0));
+            stx_next <= P_SNAP_EDGE_HDR3;
+            ph <= P_STX_SEND;
+
+          when P_SNAP_EDGE_HDR3 =>
+            stx_byte <= std_logic_vector(sn_edge_cnt(15 downto 8));
+            stx_next <= P_SNAP_EDGE_SEND_INIT;
+            ph <= P_STX_SEND;
+
+          when P_SNAP_EDGE_SEND_INIT =>
+            sn_e_i <= 0;
+            sn_e_j <= 1;
+            ph <= P_SNAP_EDGE_SEND_RD;
+
+          when P_SNAP_EDGE_SEND_RD =>
+            idxe := edge_idx(sn_e_i, sn_e_j, MAX_NODES);
+            edge_raddr <= to_unsigned(idxe, 13);
+            ph <= P_SNAP_EDGE_SEND_WAIT;
+
+          when P_SNAP_EDGE_SEND_WAIT =>
+            ph <= P_SNAP_EDGE_SEND_EVAL;
+
+          when P_SNAP_EDGE_SEND_EVAL =>
+            if edge_rdata /= x"00" then
+              sn_edge_i_u8 <= std_logic_vector(to_unsigned(sn_e_i,8));
+              sn_edge_j_u8 <= std_logic_vector(to_unsigned(sn_e_j,8));
+              sn_edge_val  <= edge_rdata;
+              ph <= P_SNAP_EDGE_B0;
+            else
+              if (sn_e_i = MAX_NODES-2) and (sn_e_j = MAX_NODES-1) then
+                done_p <= '1';
+                ph <= P_NEXT;
+              else
+                if sn_e_j = MAX_NODES-1 then
+                  sn_e_i <= sn_e_i + 1;
+                  sn_e_j <= sn_e_i + 2;
+                else
+                  sn_e_j <= sn_e_j + 1;
+                end if;
+                ph <= P_SNAP_EDGE_SEND_RD;
+              end if;
+            end if;
+
+          when P_SNAP_EDGE_B0 =>
+            stx_byte <= sn_edge_i_u8;
+            stx_next <= P_SNAP_EDGE_B1;
+            ph <= P_STX_SEND;
+
+          when P_SNAP_EDGE_B1 =>
+            stx_byte <= sn_edge_j_u8;
+            stx_next <= P_SNAP_EDGE_B2;
+            ph <= P_STX_SEND;
+
+          when P_SNAP_EDGE_B2 =>
+            stx_byte <= sn_edge_val;
+            stx_next <= P_SNAP_EDGE_ADV;
+            ph <= P_STX_SEND;
+
+          when P_SNAP_EDGE_ADV =>
+            if (sn_e_i = MAX_NODES-2) and (sn_e_j = MAX_NODES-1) then
+              done_p <= '1';
+              ph <= P_NEXT;
+            else
+              if sn_e_j = MAX_NODES-1 then
+                sn_e_i <= sn_e_i + 1;
+                sn_e_j <= sn_e_i + 2;
+              else
+                sn_e_j <= sn_e_j + 1;
+              end if;
+              ph <= P_SNAP_EDGE_SEND_RD;
+            end if;
+
+          -- =========================================================
+          -- NEXT ITERATION
+          -- =========================================================
           when P_NEXT =>
             if samp_i = DATA_WORDS-1 then
               samp_i <= 0;
