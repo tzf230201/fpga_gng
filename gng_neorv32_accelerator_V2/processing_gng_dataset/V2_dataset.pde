@@ -1,11 +1,13 @@
 // ======================================================
-// GNG Viewer (Processing) : DATASET + DBG + NODE/EDGE render
-// WITHOUT settings() AND WITHOUT size()
-// Uses: surface.setSize(WIN_W, WIN_H);
-// RX expects:
-//   A5 10 : DBG fixed 46 bytes
-//   A5 20 : NODE_SNAPSHOT fixed: 4 + MAX_NODES*7 bytes
-//   A5 21 : EDGE_SNAPSHOT variable: 4 + cnt*3 bytes
+// GNG Viewer (Processing) : A5 RX (DBG + NODE/EDGE) + Two-Moons TX
+// - RX expects:
+//    A5 10 : DBG fixed 46 bytes (with markers)
+//    A5 20 : NODE_SNAPSHOT fixed: 4 + MAX_NODES*7 bytes
+//    A5 21 : EDGE_SNAPSHOT variable: 4 + cnt*3 bytes
+// - TX sends dataset as raw points: [xi_lo xi_hi yi_lo yi_hi] * MOONS_N
+//
+// IMPORTANT: dataset generator here matches your "paper style" version:
+//   second moon uses: y = -sin(t) + 0.5   (NOT -0.5)
 // ======================================================
 
 import processing.serial.*;
@@ -19,25 +21,14 @@ final String PORT_NAME = "COM1";
 final int BAUD = 1_000_000;
 
 // -------------------------------
-// Window / layout
+// Window
 // -------------------------------
-final int WIN_W = 1400;
-final int WIN_H = 780;
-
-final int TOP = 80;
-final int DBG_H = 110;
-
-final int PANEL_W = 600;
-final int PANEL_H = 600;
-
-final int L_X = 60;
-final int L_Y = TOP;
-
-final int R_X = 740;
-final int R_Y = TOP;
+final int WIN_W = 1000;
+final int WIN_H = 1000;
+final int DBG_H = 140;
 
 // -------------------------------
-// GNG limits
+// GNG limits (MUST MATCH FPGA/VHDL)
 // -------------------------------
 final int MAX_NODES = 40;
 
@@ -48,7 +39,7 @@ final float NODE_SCALE = 1000.0;
 final int A_MAX = 50; // match VHDL A_MAX
 
 // -------------------------------
-// Dataset (Two Moons) for reference + TX
+// Two-moons dataset options (MATCH YOUR PAPER STYLE)
 // -------------------------------
 final int     MOONS_N            = 100;
 final boolean MOONS_RANDOM_ANGLE = false;
@@ -57,12 +48,12 @@ final float   MOONS_NOISE_STD    = 0.06;
 final boolean MOONS_SHUFFLE      = true;
 final boolean MOONS_NORMALIZE01  = true;
 
+// TX packing (raw stream)
 final float SCALE = 1000.0;
 final int BYTES_PER_POINT = 4;
 final int TX_BYTES = MOONS_N * BYTES_PER_POINT;
-
 byte[] txBuf = new byte[TX_BYTES];
-float[][] moonsTx;
+float[][] dataTx;
 
 // -------------------------------
 // RX ring buffer
@@ -116,18 +107,25 @@ ArrayList<Edge> edges = new ArrayList<Edge>();
 int snapNodesSeen = 0;
 int snapEdgesSeen = 0;
 
+// -------------------------------
+// Plot controls
+// -------------------------------
+boolean hideIsolated = false;        // press 'I' to toggle
+boolean showMismatchPrint = true;    // press 'M' to toggle
+
 // ======================================================
 // Setup / Draw
 // ======================================================
 void setup() {
   // IMPORTANT: do NOT call size()
   surface.setSize(WIN_W, WIN_H);
+  surface.setTitle("GNG on Two-Moons (A5 RX)");
 
-  surface.setTitle("GNG Viewer (DBG + NODE/EDGE) - no settings(), no size()");
   frameRate(60);
   smooth(4);
-  textFont(createFont("Consolas", 14));
+  textFont(createFont("Consolas", 13));
 
+  // Build dataset (MATCH paper style) and pack to txBuf
   buildTwoMoonsAndPack();
 
   println("Serial ports:");
@@ -137,9 +135,10 @@ void setup() {
     myPort = new Serial(this, PORT_NAME, BAUD);
     myPort.clear();
     myPort.buffer(1);
-    delay(200);
+    delay(250);
+
     sendDatasetOnce();
-    println("Opened " + PORT_NAME + " @ " + BAUD);
+    println("Opened " + PORT_NAME + " @ " + BAUD + "  (sent dataset once)");
   } catch(Exception e) {
     println("Failed to open serial: " + e);
     myPort = null;
@@ -147,7 +146,7 @@ void setup() {
 }
 
 void draw() {
-  background(14);
+  background(255);
 
   // read serial bytes
   if (myPort != null) {
@@ -159,20 +158,11 @@ void draw() {
     parseRx();
   }
 
-  // Panels
-  drawPanelFrame(L_X, L_Y, "TX DATASET (static)");
-  drawPanelFrame(R_X, R_Y, "RX: DBG + NODE/EDGE (now)");
+  // plot (upper area)
+  renderPlot(g, 0, 0, width, height - DBG_H, true);
 
-  // Left: dataset bright
-  drawDataset(L_X, L_Y, true);
-
-  // Right: dataset dim + edges + nodes + winners
-  drawDataset(R_X, R_Y, false);
-  drawEdges(R_X, R_Y);
-  drawNodes(R_X, R_Y);
-  drawWinners(R_X, R_Y);
-
-  drawDebugBar();
+  // debug bar bottom
+  drawDebugPanel();
 }
 
 // ======================================================
@@ -181,6 +171,8 @@ void draw() {
 void keyPressed() {
   if (key=='r' || key=='R') { buildTwoMoonsAndPack(); sendDatasetOnce(); }
   if (key=='s' || key=='S') { sendDatasetOnce(); }
+  if (key=='i' || key=='I') { hideIsolated = !hideIsolated; println("hideIsolated=" + hideIsolated); }
+  if (key=='m' || key=='M') { showMismatchPrint = !showMismatchPrint; println("showMismatchPrint=" + showMismatchPrint); }
 }
 
 void sendDatasetOnce() {
@@ -189,203 +181,357 @@ void sendDatasetOnce() {
 }
 
 // ======================================================
-// UI helpers
-// ======================================================
-void drawPanelFrame(int x0, int y0, String title) {
-  noFill();
-  stroke(60);
-  rect(x0, y0, PANEL_W, PANEL_H);
-  fill(200);
-  textSize(14);
-  text(title, x0, y0 - 18);
-
-  // grid
-  stroke(35);
-  line(x0 + PANEL_W/2, y0, x0 + PANEL_W/2, y0 + PANEL_H);
-  line(x0, y0 + PANEL_H/2, x0 + PANEL_W, y0 + PANEL_H/2);
-}
-
-void drawDebugBar() {
-  fill(0, 160);
-  noStroke();
-  rect(0, height-DBG_H, width, DBG_H);
-
-  fill(220);
-  textSize(12);
-  String s =
-    "DBG(A5 10): s1=" + dbg_s1 +
-    " s2=" + dbg_s2 +
-    " edge01=" + dbg_edge01 +
-    " e_s1s2_pre=" + dbg_es1s2_pre +
-    " deg=(" + dbg_deg_s1 + "," + dbg_deg_s2 + ")" +
-    " conn=" + (dbg_conn ? "Y":"N") +
-    " rm=" + (dbg_rm ? 1:0) +
-    " iso=" + (dbg_iso ? 1:0) + "(id=" + dbg_iso_id + ")" +
-    " nodes=" + dbg_node_count +
-    " ins=" + (dbg_ins ? 1:0) + "(id=" + dbg_ins_id + ")" +
-    " err32=" + dbg_err32 +
-    " samp=" + dbg_sample +
-    " | snapNodes=" + snapNodesSeen +
-    " snapEdges=" + snapEdgesSeen;
-
-  text(s, 30, height-DBG_H+35);
-
-  fill(160);
-  text("RX expects: A5 10 (DBG), A5 20 (NODE_SNAPSHOT), A5 21 (EDGE_SNAPSHOT).  Keys: [R]=rebuild+send  [S]=send",
-       30, height-DBG_H+60);
-}
-
-// ======================================================
-// Dataset + TX packing
+// Dataset + TX packing (MATCH YOUR PAPER STYLE)
 // ======================================================
 void buildTwoMoonsAndPack() {
-  moonsTx = generateMoons(MOONS_N, MOONS_RANDOM_ANGLE, MOONS_NOISE_STD, MOONS_SEED, MOONS_SHUFFLE, MOONS_NORMALIZE01);
+  dataTx = generateMoons(
+    MOONS_N,
+    MOONS_RANDOM_ANGLE,
+    MOONS_NOISE_STD,
+    MOONS_SEED,
+    MOONS_SHUFFLE,
+    MOONS_NORMALIZE01
+  );
 
   int p=0;
   for (int i=0;i<MOONS_N;i++){
-    short xi=(short)round(moonsTx[i][0]*SCALE);
-    short yi=(short)round(moonsTx[i][1]*SCALE);
-    txBuf[p++]=(byte)(xi & 0xFF);
-    txBuf[p++]=(byte)((xi>>8)&0xFF);
-    txBuf[p++]=(byte)(yi & 0xFF);
-    txBuf[p++]=(byte)((yi>>8)&0xFF);
+    short xi = (short)round(dataTx[i][0]*SCALE);
+    short yi = (short)round(dataTx[i][1]*SCALE);
+    txBuf[p++] = (byte)(xi & 0xFF);
+    txBuf[p++] = (byte)((xi>>8)&0xFF);
+    txBuf[p++] = (byte)(yi & 0xFF);
+    txBuf[p++] = (byte)((yi>>8)&0xFF);
   }
 }
 
-float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed, boolean shuffle, boolean normalize01) {
-  float[][] arr=new float[N][2];
-  randomSeed(seed);
+// Two-moons generator (THIS IS THE ONE YOU WANTED)
+float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed,
+                        boolean shuffle, boolean normalize01) {
+  float[][] arr = new float[N][2];
 
-  for (int i=0;i<N/2;i++){
-    float t = randomAngle ? random(PI) : map(i,0,(N/2)-1,0,PI);
-    arr[i][0]=cos(t);
-    arr[i][1]=sin(t);
-  }
-  for (int i=N/2;i<N;i++){
-    int j=i-N/2;
-    float t = randomAngle ? random(PI) : map(j,0,(N/2)-1,0,PI);
-    arr[i][0]=1-cos(t);
-    arr[i][1]=-sin(t)-0.5;
+  if (seed >= 0) randomSeed(seed);
+  else randomSeed((int)millis());
+
+  for (int i = 0; i < N/2; i++) {
+    float t = randomAngle ? random(PI) : map(i, 0, (N/2) - 1, 0, PI);
+    arr[i][0] = cos(t);
+    arr[i][1] = sin(t);
   }
 
-  if (noiseStd>0){
-    for (int i=0;i<N;i++){
-      arr[i][0]+= (float)randomGaussian()*noiseStd;
-      arr[i][1]+= (float)randomGaussian()*noiseStd;
+  for (int i = N/2; i < N; i++) {
+    int j = i - N/2;
+    float t = randomAngle ? random(PI) : map(j, 0, (N/2) - 1, 0, PI);
+    arr[i][0] = 1 - cos(t);
+    arr[i][1] = -sin(t) + 0.5;   // <-- IMPORTANT: +0.5 (match your code)
+  }
+
+  if (noiseStd > 0.0) {
+    for (int i = 0; i < N; i++) {
+      arr[i][0] += (float)randomGaussian() * noiseStd;
+      arr[i][1] += (float)randomGaussian() * noiseStd;
     }
   }
 
-  if (normalize01){
-    float minx=999,maxx=-999,miny=999,maxy=-999;
-    for (int i=0;i<N;i++){
-      minx=min(minx,arr[i][0]); maxx=max(maxx,arr[i][0]);
-      miny=min(miny,arr[i][1]); maxy=max(maxy,arr[i][1]);
+  if (normalize01) {
+    float minx=999, maxx=-999, miny=999, maxy=-999;
+    for (int i = 0; i < N; i++) {
+      float x = arr[i][0], y = arr[i][1];
+      if (x < minx) minx = x;
+      if (x > maxx) maxx = x;
+      if (y < miny) miny = y;
+      if (y > maxy) maxy = y;
     }
-    float dx=max(1e-9, maxx-minx);
-    float dy=max(1e-9, maxy-miny);
-    for (int i=0;i<N;i++){
-      arr[i][0]=(arr[i][0]-minx)/dx;
-      arr[i][1]=(arr[i][1]-miny)/dy;
+    float dx = maxx - minx; if (dx < 1e-9) dx = 1.0;
+    float dy = maxy - miny; if (dy < 1e-9) dy = 1.0;
+
+    for (int i = 0; i < N; i++) {
+      arr[i][0] = (arr[i][0] - minx) / dx;
+      arr[i][1] = (arr[i][1] - miny) / dy;
     }
   }
 
-  if (shuffle){
-    for (int i=N-1;i>0;i--){
-      int j=(int)random(i+1);
-      float tx=arr[i][0], ty=arr[i][1];
-      arr[i][0]=arr[j][0]; arr[i][1]=arr[j][1];
-      arr[j][0]=tx; arr[j][1]=ty;
+  if (shuffle) {
+    for (int i = N - 1; i > 0; i--) {
+      int j = (int)random(i + 1);
+      float tx = arr[i][0], ty = arr[i][1];
+      arr[i][0] = arr[j][0]; arr[i][1] = arr[j][1];
+      arr[j][0] = tx;        arr[j][1] = ty;
     }
   }
+
   return arr;
 }
 
 // ======================================================
-// Drawing dataset + nodes + edges
+// Plot rendering (paper style)
 // ======================================================
-PVector map01ToPanel(float x01, float y01, int x0, int y0) {
-  float px = map(x01, 0, 1, x0 + 20, x0 + PANEL_W - 20);
-  float py = map(y01, 0, 1, y0 + PANEL_H - 20, y0 + 20);
-  return new PVector(px, py);
-}
+void renderPlot(PGraphics gg, int x0, int y0, int w, int h, boolean title) {
+  int marginL = 85;
+  int marginR = 30;
+  int marginT = title ? 60 : 30;
+  int marginB = 80;
 
-PVector mapNodeToPanel(float nxRaw, float nyRaw, int x0, int y0) {
-  float nx = nxRaw / NODE_SCALE;
-  float ny = nyRaw / NODE_SCALE;
-  return map01ToPanel(nx, ny, x0, y0);
-}
+  int px0 = x0 + marginL;
+  int py0 = y0 + marginT;
+  int pw  = w - marginL - marginR;
+  int ph  = h - marginT - marginB;
 
-void drawDataset(int x0, int y0, boolean bright) {
-  noStroke();
-  fill(0, 110);
-  rect(x0, y0, PANEL_W, PANEL_H);
+  // force square
+  int side = min(pw, ph);
+  int sx0  = px0 + (pw - side)/2;
+  int sy0  = py0 + (ph - side)/2;
+  int sw   = side;
+  int sh   = side;
 
-  noStroke();
-  fill(255, bright ? 255 : 90);
-  for (int i=0;i<moonsTx.length;i++){
-    PVector q = map01ToPanel(moonsTx[i][0], moonsTx[i][1], x0, y0);
-    ellipse(q.x, q.y, bright?5:4, bright?5:4);
+  gg.pushStyle();
+
+  // frame
+  gg.stroke(0);
+  gg.strokeWeight(1);
+  gg.noFill();
+  gg.rect(sx0, sy0, sw, sh);
+
+  // grid + ticks
+  gg.fill(0);
+  gg.textSize(14);
+  gg.textAlign(CENTER, TOP);
+
+  for (int t=0;t<=5;t++) {
+    float v = t/5.0;
+    float xx = sx0 + v*sw;
+
+    gg.stroke(235);
+    gg.line(xx, sy0, xx, sy0+sh);
+
+    gg.stroke(0);
+    gg.line(xx, sy0+sh, xx, sy0+sh+6);
+    gg.text(nf(v,1,1), xx, sy0+sh+10);
   }
-}
 
-void drawNodes(int x0, int y0) {
-  for (int i=0; i<MAX_NODES; i++) {
-    if (!nodeAct[i]) continue;
-    PVector p = mapNodeToPanel(nodeX[i], nodeY[i], x0, y0);
+  gg.textAlign(RIGHT, CENTER);
+  for (int t=0;t<=5;t++) {
+    float v = t/5.0;
+    float yy = sy0 + (1.0-v)*sh;
 
-    float r = 6 + min(10, nodeDeg[i]);
+    gg.stroke(235);
+    gg.line(sx0, yy, sx0+sw, yy);
 
-    noStroke();
-    fill(220);
-    ellipse(p.x, p.y, r, r);
-
-    fill(160);
-    textSize(11);
-    text("" + i, p.x + 6, p.y - 6);
+    gg.stroke(0);
+    gg.line(sx0-6, yy, sx0, yy);
+    gg.text(nf(v,1,1), sx0-10, yy);
   }
-}
 
-void drawEdges(int x0, int y0) {
+  // axis labels
+  gg.fill(0);
+  gg.textAlign(CENTER, CENTER);
+  gg.textSize(18);
+  gg.text("x (normalized)", sx0 + sw/2, sy0 + sh + 55);
+
+  gg.pushMatrix();
+  gg.translate(sx0 - 60, sy0 + sh/2);
+  gg.rotate(-HALF_PI);
+  gg.text("y (normalized)", 0, 0);
+  gg.popMatrix();
+
+  // title
+  if (title) {
+    gg.textAlign(CENTER, CENTER);
+    gg.textSize(20);
+    gg.text("GNG on Two-Moons (A5 RX)", x0 + w/2, y0 + 26);
+  }
+
+  // dataset (blue)
+  gg.noStroke();
+  gg.fill(40, 110, 220);
+  for (int i=0;i<dataTx.length;i++) {
+    float x = map01x(dataTx[i][0], sx0, sw);
+    float y = map01y(dataTx[i][1], sy0, sh);
+    gg.rect(x-2, y-2, 4, 4);
+  }
+
+  // edges
+  gg.strokeWeight(2);
   for (Edge e : edges) {
     if (e.ageStored == 0) continue;
     if (e.a < 0 || e.a >= MAX_NODES || e.b < 0 || e.b >= MAX_NODES) continue;
     if (!nodeAct[e.a] || !nodeAct[e.b]) continue;
 
-    PVector p1 = mapNodeToPanel(nodeX[e.a], nodeY[e.a], x0, y0);
-    PVector p2 = mapNodeToPanel(nodeX[e.b], nodeY[e.b], x0, y0);
-
     int age = max(0, e.ageStored - 1);
-    float a = map(constrain(age, 0, A_MAX), 0, A_MAX, 220, 40);
+    float alpha = map(constrain(age, 0, A_MAX), 0, A_MAX, 220, 40);
+    gg.stroke(110, alpha);
 
-    stroke(200, a);
-    strokeWeight(2);
-    line(p1.x, p1.y, p2.x, p2.y);
+    float x1 = map01x(nodeX[e.a]/NODE_SCALE, sx0, sw);
+    float y1 = map01y(nodeY[e.a]/NODE_SCALE, sy0, sh);
+    float x2 = map01x(nodeX[e.b]/NODE_SCALE, sx0, sw);
+    float y2 = map01y(nodeY[e.b]/NODE_SCALE, sy0, sh);
+    gg.line(x1,y1,x2,y2);
   }
+
+  // nodes (red X) + (optional) hide isolated (from edge list)
+  gg.stroke(220, 0, 0);
+  gg.strokeWeight(3);
+  for (int i=0;i<MAX_NODES;i++) {
+    if (!nodeAct[i]) continue;
+
+    int dEdge = degFromEdges(i);
+    if (hideIsolated && dEdge == 0) continue;
+
+    float x = map01x(nodeX[i]/NODE_SCALE, sx0, sw);
+    float y = map01y(nodeY[i]/NODE_SCALE, sy0, sh);
+    float r = 8;
+    gg.line(x-r, y-r, x+r, y+r);
+    gg.line(x-r, y+r, x+r, y-r);
+  }
+
+  // legend
+  drawLegend(gg, sx0, sy0, sw, sh);
+
+  gg.popStyle();
 }
 
-void drawWinners(int x0, int y0) {
-  if (dbg_s1 >= 0 && dbg_s1 < MAX_NODES && nodeAct[dbg_s1]) {
-    PVector p = mapNodeToPanel(nodeX[dbg_s1], nodeY[dbg_s1], x0, y0);
-    noStroke();
-    fill(255);
-    ellipse(p.x, p.y, 14, 14);
-    fill(255);
-    textSize(14);
-    text("s1", p.x + 10, p.y + 5);
-  }
-  if (dbg_s2 >= 0 && dbg_s2 < MAX_NODES && nodeAct[dbg_s2]) {
-    PVector p = mapNodeToPanel(nodeX[dbg_s2], nodeY[dbg_s2], x0, y0);
-    noStroke();
-    fill(200);
-    ellipse(p.x, p.y, 12, 12);
-    fill(200);
-    textSize(14);
-    text("s2", p.x + 10, p.y + 5);
-  }
+void drawLegend(PGraphics gg, int sx0, int sy0, int sw, int sh) {
+  int pad  = 12;
+  int boxW = 290;
+  int boxH = 120;
+
+  int bx = sx0 + sw - boxW - pad;
+  int by = sy0 + pad;
+
+  bx = constrain(bx, sx0 + 10, sx0 + sw - boxW - 10);
+  by = constrain(by, sy0 + 10, sy0 + sh - boxH - 10);
+
+  gg.pushStyle();
+  gg.noStroke();
+  gg.fill(255, 245);
+  gg.rect(bx, by, boxW, boxH, 8);
+
+  gg.stroke(0, 70);
+  gg.strokeWeight(1);
+  gg.noFill();
+  gg.rect(bx, by, boxW, boxH, 8);
+
+  gg.textSize(14);
+  gg.textAlign(LEFT, CENTER);
+
+  int x0 = bx + 16;
+  int y0 = by + 24;
+
+  // dataset
+  gg.noStroke();
+  gg.fill(40,110,220);
+  gg.rect(x0-3, y0-3, 6, 6);
+  gg.fill(0);
+  gg.text("Two-Moons dataset", x0 + 16, y0);
+
+  // edges
+  int y2 = y0 + 26;
+  gg.stroke(110);
+  gg.strokeWeight(2);
+  gg.line(x0-5, y2, x0+12, y2);
+  gg.noStroke();
+  gg.fill(0);
+  gg.text("GNG edges", x0 + 16, y2);
+
+  // nodes
+  int y3 = y2 + 26;
+  gg.stroke(220, 0, 0);
+  gg.strokeWeight(3);
+  float r = 6;
+  gg.line(x0-r, y3-r, x0+r, y3+r);
+  gg.line(x0-r, y3+r, x0+r, y3-r);
+  gg.noStroke();
+  gg.fill(0);
+  gg.text("GNG nodes", x0 + 16, y3);
+
+  gg.popStyle();
+}
+
+float map01x(float v, int px0, int pw) {
+  return px0 + constrain(v,0,1)*pw;
+}
+float map01y(float v, int py0, int ph) {
+  return py0 + (1.0 - constrain(v,0,1))*ph;
 }
 
 // ======================================================
-// RX parsing
+// Debug panel + mismatch detector
+// ======================================================
+void drawDebugPanel() {
+  int y0 = height - DBG_H;
+
+  fill(0, 160);
+  noStroke();
+  rect(0, y0, width, DBG_H);
+
+  // counts
+  int actN = 0;
+  for (int i=0;i<MAX_NODES;i++) if (nodeAct[i]) actN++;
+
+  int isoByEdges = 0;
+  int isoByNodeDeg = 0;
+  for (int i=0;i<MAX_NODES;i++){
+    if(!nodeAct[i]) continue;
+    if(degFromEdges(i) == 0) isoByEdges++;
+    if(nodeDeg[i] == 0) isoByNodeDeg++;
+  }
+
+  // mismatch prints (optional)
+  if (showMismatchPrint) {
+    for (int i=0;i<MAX_NODES;i++){
+      if(!nodeAct[i]) continue;
+      int dE = degFromEdges(i);
+      int dN = nodeDeg[i];
+      // "mismatch" heuristics: nodeDeg says connected but edges snapshot says 0, or vice versa
+      if ((dE==0 && dN>0) || (dE>0 && dN==0)) {
+        println("DEG MISMATCH node=" + i + "  nodeDeg=" + dN + "  degFromEdges=" + dE +
+                "  (snapNodes=" + snapNodesSeen + " snapEdges=" + snapEdgesSeen + ")");
+      }
+    }
+  }
+
+  fill(255);
+  textSize(13);
+  textAlign(LEFT, TOP);
+
+  String s1 =
+    "A5 DBG: s1=" + dbg_s1 + " s2=" + dbg_s2 +
+    " deg=(" + dbg_deg_s1 + "," + dbg_deg_s2 + ")" +
+    " conn=" + (dbg_conn?"Y":"N") +
+    " rm=" + (dbg_rm?1:0) +
+    " iso=" + (dbg_iso?1:0) + "(id=" + dbg_iso_id + ")" +
+    " nodes=" + dbg_node_count +
+    " ins=" + (dbg_ins?1:0) + "(id=" + dbg_ins_id + ")" +
+    " err32=" + dbg_err32 +
+    " samp=" + dbg_sample;
+
+  String s2 =
+    "SNAP: active=" + actN +
+    " edges=" + edges.size() +
+    " iso(nodeDeg)=" + isoByNodeDeg +
+    " iso(edges)=" + isoByEdges +
+    " | snapNodesSeen=" + snapNodesSeen +
+    " snapEdgesSeen=" + snapEdgesSeen +
+    " | hideIsolated=" + hideIsolated + " (toggle I)";
+
+  text(s1, 12, y0 + 12);
+  text(s2, 12, y0 + 34);
+  text("Keys: [R]=rebuild+send dataset  [S]=send dataset  [I]=hide isolated(by edges)  [M]=toggle mismatch print",
+       12, y0 + 58);
+}
+
+// degree computed from current edges snapshot
+int degFromEdges(int id) {
+  int d = 0;
+  for (Edge e : edges) {
+    if (e.ageStored == 0) continue;
+    if (e.a == id) d++;
+    else if (e.b == id) d++;
+  }
+  return d;
+}
+
+// ======================================================
+// RX parsing (A5)
 // ======================================================
 final int TAG_A5 = 0xA5;
 
@@ -443,6 +589,14 @@ void parseDbgFrame(byte[] b, int off) {
 }
 
 void parseNodeSnap(byte[] b, int off) {
+  // clear first to avoid stale state if something goes weird
+  for (int i=0;i<MAX_NODES;i++) {
+    nodeAct[i] = false;
+    nodeDeg[i] = 0;
+    nodeX[i]   = 0;
+    nodeY[i]   = 0;
+  }
+
   int p = off + 4;
   for (int k=0; k<MAX_NODES; k++) {
     int id  = u8(b[p+0]);
@@ -468,7 +622,7 @@ void parseEdgeSnap(byte[] b, int off, int cnt) {
   for (int k=0; k<cnt; k++) {
     int i = u8(b[p+0]);
     int j = u8(b[p+1]);
-    int a = u8(b[p+2]);
+    int a = u8(b[p+2]); // ageStored
     edges.add(new Edge(i, j, a));
     p += 3;
   }
