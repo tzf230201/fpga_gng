@@ -54,6 +54,16 @@ final int BYTES_PER_POINT = 4;
 final int TX_BYTES = MOONS_N * BYTES_PER_POINT;
 byte[] txBuf = new byte[TX_BYTES];
 float[][] dataTx;
+int[] dataLabel = new int[MOONS_N]; // 0 = moon A (blue), 1 = moon B (yellow)
+
+// -------------------------------
+// CSV logging
+// -------------------------------
+PrintWriter csvDataset;
+PrintWriter csvDbg;
+PrintWriter csvNodes;
+PrintWriter csvEdges;
+int csvSnapIdx = 0;
 
 // -------------------------------
 // RX ring buffer
@@ -110,7 +120,7 @@ int snapEdgesSeen = 0;
 // -------------------------------
 // Plot controls
 // -------------------------------
-boolean hideIsolated = false;        // press 'I' to toggle
+boolean hideIsolated = true;        // press 'I' to toggle
 boolean showMismatchPrint = true;    // press 'M' to toggle
 
 // ======================================================
@@ -173,11 +183,26 @@ void keyPressed() {
   if (key=='s' || key=='S') { sendDatasetOnce(); }
   if (key=='i' || key=='I') { hideIsolated = !hideIsolated; println("hideIsolated=" + hideIsolated); }
   if (key=='m' || key=='M') { showMismatchPrint = !showMismatchPrint; println("showMismatchPrint=" + showMismatchPrint); }
+  if (key=='q' || key=='Q') { closeCSV(); println("CSV files closed/flushed."); }
 }
 
 void sendDatasetOnce() {
-  if (myPort == null) return;
-  myPort.write(txBuf);
+  // Fresh CSV for every dataset send.
+  // Snapshot data from before this send (old GNG state) will NOT appear in the new files.
+  closeCSV();
+  setupCSV();
+  csvSnapIdx = 0;
+  writeDatasetCSV();
+
+  if (myPort != null) {
+    myPort.write(txBuf);
+    // Wait for all 400 bytes to be transmitted (at 1Mbaud: ~4ms) plus FPGA INIT time.
+    // Then flush any stale snapshot bytes that arrived before the soft-reset.
+    delay(50);
+    myPort.clear();
+    rxLen = 0;
+    println("RX buffer flushed after dataset send.");
+  }
 }
 
 // ======================================================
@@ -190,7 +215,8 @@ void buildTwoMoonsAndPack() {
     MOONS_NOISE_STD,
     MOONS_SEED,
     MOONS_SHUFFLE,
-    MOONS_NORMALIZE01
+    MOONS_NORMALIZE01,
+    dataLabel
   );
 
   int p=0;
@@ -202,11 +228,12 @@ void buildTwoMoonsAndPack() {
     txBuf[p++] = (byte)(yi & 0xFF);
     txBuf[p++] = (byte)((yi>>8)&0xFF);
   }
+  // Dataset CSV is written by sendDatasetOnce(), not here.
 }
 
 // Two-moons generator (THIS IS THE ONE YOU WANTED)
 float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed,
-                        boolean shuffle, boolean normalize01) {
+                        boolean shuffle, boolean normalize01, int[] labelOut) {
   float[][] arr = new float[N][2];
 
   if (seed >= 0) randomSeed(seed);
@@ -216,6 +243,7 @@ float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed,
     float t = randomAngle ? random(PI) : map(i, 0, (N/2) - 1, 0, PI);
     arr[i][0] = cos(t);
     arr[i][1] = sin(t);
+    if (labelOut != null) labelOut[i] = 0; // moon A
   }
 
   for (int i = N/2; i < N; i++) {
@@ -223,6 +251,7 @@ float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed,
     float t = randomAngle ? random(PI) : map(j, 0, (N/2) - 1, 0, PI);
     arr[i][0] = 1 - cos(t);
     arr[i][1] = -sin(t) + 0.5;   // <-- IMPORTANT: +0.5 (match your code)
+    if (labelOut != null) labelOut[i] = 1; // moon B
   }
 
   if (noiseStd > 0.0) {
@@ -245,8 +274,9 @@ float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed,
     float dy = maxy - miny; if (dy < 1e-9) dy = 1.0;
 
     for (int i = 0; i < N; i++) {
-      arr[i][0] = (arr[i][0] - minx) / dx;
-      arr[i][1] = (arr[i][1] - miny) / dy;
+      // remap to [-1, 1] (symmetric around 0)
+      arr[i][0] = ((arr[i][0] - minx) / dx) * 2.0 - 1.0;
+      arr[i][1] = ((arr[i][1] - miny) / dy) * 2.0 - 1.0;
     }
   }
 
@@ -256,6 +286,9 @@ float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed,
       float tx = arr[i][0], ty = arr[i][1];
       arr[i][0] = arr[j][0]; arr[i][1] = arr[j][1];
       arr[j][0] = tx;        arr[j][1] = ty;
+      if (labelOut != null) {
+        int tl = labelOut[i]; labelOut[i] = labelOut[j]; labelOut[j] = tl;
+      }
     }
   }
 
@@ -291,14 +324,14 @@ void renderPlot(PGraphics gg, int x0, int y0, int w, int h, boolean title) {
   gg.noFill();
   gg.rect(sx0, sy0, sw, sh);
 
-  // grid + ticks
+  // grid + ticks (range -1 to 1, step 0.5)
   gg.fill(0);
   gg.textSize(14);
   gg.textAlign(CENTER, TOP);
 
-  for (int t=0;t<=5;t++) {
-    float v = t/5.0;
-    float xx = sx0 + v*sw;
+  for (int t=0;t<=4;t++) {
+    float v = -1.0 + t * 0.5;
+    float xx = sx0 + map(v, -1, 1, 0, sw);
 
     gg.stroke(235);
     gg.line(xx, sy0, xx, sy0+sh);
@@ -309,9 +342,9 @@ void renderPlot(PGraphics gg, int x0, int y0, int w, int h, boolean title) {
   }
 
   gg.textAlign(RIGHT, CENTER);
-  for (int t=0;t<=5;t++) {
-    float v = t/5.0;
-    float yy = sy0 + (1.0-v)*sh;
+  for (int t=0;t<=4;t++) {
+    float v = -1.0 + t * 0.5;
+    float yy = sy0 + map(v, -1, 1, sh, 0);
 
     gg.stroke(235);
     gg.line(sx0, yy, sx0+sw, yy);
@@ -340,12 +373,13 @@ void renderPlot(PGraphics gg, int x0, int y0, int w, int h, boolean title) {
     gg.text("GNG on Two-Moons (A5 RX)", x0 + w/2, y0 + 26);
   }
 
-  // dataset (blue)
+  // dataset: moon A (blue), moon B (yellow)
   gg.noStroke();
-  gg.fill(40, 110, 220);
   for (int i=0;i<dataTx.length;i++) {
-    float x = map01x(dataTx[i][0], sx0, sw);
-    float y = map01y(dataTx[i][1], sy0, sh);
+    if (dataLabel[i] == 1) gg.fill(255, 200, 0);   // moon B: yellow
+    else                   gg.fill(40, 110, 220);   // moon A: blue
+    float x = mapN11x(dataTx[i][0], sx0, sw);
+    float y = mapN11y(dataTx[i][1], sy0, sh);
     gg.rect(x-2, y-2, 4, 4);
   }
 
@@ -360,10 +394,10 @@ void renderPlot(PGraphics gg, int x0, int y0, int w, int h, boolean title) {
     float alpha = map(constrain(age, 0, A_MAX), 0, A_MAX, 220, 40);
     gg.stroke(110, alpha);
 
-    float x1 = map01x(nodeX[e.a]/NODE_SCALE, sx0, sw);
-    float y1 = map01y(nodeY[e.a]/NODE_SCALE, sy0, sh);
-    float x2 = map01x(nodeX[e.b]/NODE_SCALE, sx0, sw);
-    float y2 = map01y(nodeY[e.b]/NODE_SCALE, sy0, sh);
+    float x1 = mapN11x(nodeX[e.a]/NODE_SCALE, sx0, sw);
+    float y1 = mapN11y(nodeY[e.a]/NODE_SCALE, sy0, sh);
+    float x2 = mapN11x(nodeX[e.b]/NODE_SCALE, sx0, sw);
+    float y2 = mapN11y(nodeY[e.b]/NODE_SCALE, sy0, sh);
     gg.line(x1,y1,x2,y2);
   }
 
@@ -376,8 +410,8 @@ void renderPlot(PGraphics gg, int x0, int y0, int w, int h, boolean title) {
     int dEdge = degFromEdges(i);
     if (hideIsolated && dEdge == 0) continue;
 
-    float x = map01x(nodeX[i]/NODE_SCALE, sx0, sw);
-    float y = map01y(nodeY[i]/NODE_SCALE, sy0, sh);
+    float x = mapN11x(nodeX[i]/NODE_SCALE, sx0, sw);
+    float y = mapN11y(nodeY[i]/NODE_SCALE, sy0, sh);
     float r = 8;
     gg.line(x-r, y-r, x+r, y+r);
     gg.line(x-r, y+r, x+r, y-r);
@@ -392,7 +426,7 @@ void renderPlot(PGraphics gg, int x0, int y0, int w, int h, boolean title) {
 void drawLegend(PGraphics gg, int sx0, int sy0, int sw, int sh) {
   int pad  = 12;
   int boxW = 290;
-  int boxH = 120;
+  int boxH = 146;
 
   int bx = sx0 + sw - boxW - pad;
   int by = sy0 + pad;
@@ -416,15 +450,23 @@ void drawLegend(PGraphics gg, int sx0, int sy0, int sw, int sh) {
   int x0 = bx + 16;
   int y0 = by + 24;
 
-  // dataset
+  // moon A (blue)
   gg.noStroke();
-  gg.fill(40,110,220);
+  gg.fill(40, 110, 220);
   gg.rect(x0-3, y0-3, 6, 6);
   gg.fill(0);
-  gg.text("Two-Moons dataset", x0 + 16, y0);
+  gg.text("Moon A", x0 + 16, y0);
+
+  // moon B (yellow)
+  int y1 = y0 + 26;
+  gg.noStroke();
+  gg.fill(255, 200, 0);
+  gg.rect(x0-3, y1-3, 6, 6);
+  gg.fill(0);
+  gg.text("Moon B", x0 + 16, y1);
 
   // edges
-  int y2 = y0 + 26;
+  int y2 = y1 + 26;
   gg.stroke(110);
   gg.strokeWeight(2);
   gg.line(x0-5, y2, x0+12, y2);
@@ -446,11 +488,11 @@ void drawLegend(PGraphics gg, int sx0, int sy0, int sw, int sh) {
   gg.popStyle();
 }
 
-float map01x(float v, int px0, int pw) {
-  return px0 + constrain(v,0,1)*pw;
+float mapN11x(float v, int px0, int pw) {
+  return px0 + map(constrain(v, -1, 1), -1, 1, 0, pw);
 }
-float map01y(float v, int py0, int ph) {
-  return py0 + (1.0 - constrain(v,0,1))*ph;
+float mapN11y(float v, int py0, int ph) {
+  return py0 + map(constrain(v, -1, 1), -1, 1, ph, 0);
 }
 
 // ======================================================
@@ -641,12 +683,14 @@ void parseRx() {
       if (i + frameLen > rxLen) break;
       if (!checkDbgFixed(rx, i)) { i++; continue; }
       parseDbgFrame(rx, i);
+      writeDbgCSV();
       i += frameLen;
 
     } else if (type == 0x20) {
       int frameLen = 4 + MAX_NODES * 7;
       if (i + frameLen > rxLen) break;
       parseNodeSnap(rx, i);
+      writeNodeSnapCSV();
       i += frameLen;
 
     } else if (type == 0x21) {
@@ -655,6 +699,7 @@ void parseRx() {
       int frameLen = 4 + cnt * 3;
       if (i + frameLen > rxLen) break;
       parseEdgeSnap(rx, i, cnt);
+      writeEdgeSnapCSV();
       i += frameLen;
 
     } else {
@@ -678,4 +723,92 @@ int s16le(byte[] b, int loPos, int hiPos) {
   int hi = u8(b[hiPos]);
   short v = (short)((hi << 8) | lo);
   return (int)v;
+}
+
+// ======================================================
+// CSV logging
+// ======================================================
+String csvTimestamp() {
+  return String.format("%d%02d%02d_%02d%02d%02d",
+    year(), month(), day(), hour(), minute(), second());
+}
+
+String csvNow() {
+  return String.format("%d-%02d-%02d %02d:%02d:%02d.%03d",
+    year(), month(), day(), hour(), minute(), second(), millis() % 1000);
+}
+
+void setupCSV() {
+  // Ensure logs/ directory exists
+  new java.io.File(sketchPath("logs")).mkdirs();
+
+  String ts = csvTimestamp();
+  csvDataset = createWriter(sketchPath("logs/dataset_"   + ts + ".csv"));
+  csvDbg     = createWriter(sketchPath("logs/gng_dbg_"   + ts + ".csv"));
+  csvNodes   = createWriter(sketchPath("logs/gng_nodes_" + ts + ".csv"));
+  csvEdges   = createWriter(sketchPath("logs/gng_edges_" + ts + ".csv"));
+
+  csvDataset.println("timestamp,index,x_norm,y_norm,label,x_int,y_int");
+  csvDbg.println("timestamp,sample_idx,s1,s2,deg_s1,deg_s2,err32,s1x_raw,s1y_raw,node_count,conn,rm,iso,iso_id,ins,ins_id");
+  csvNodes.println("timestamp,snap_idx,node_id,active,degree,x_int,y_int,x_norm,y_norm");
+  csvEdges.println("timestamp,snap_idx,node_a,node_b,age_stored,true_age");
+
+  println("CSV logging started: logs/*_" + ts + ".csv");
+}
+
+void writeDatasetCSV() {
+  if (csvDataset == null) return;
+  String ts = csvNow();
+  for (int i = 0; i < MOONS_N; i++) {
+    int xi = (int)round(dataTx[i][0] * SCALE);
+    int yi = (int)round(dataTx[i][1] * SCALE);
+    csvDataset.println(ts + "," + i + "," +
+      nf(dataTx[i][0], 1, 6) + "," + nf(dataTx[i][1], 1, 6) + "," +
+      dataLabel[i] + "," + xi + "," + yi);
+  }
+  csvDataset.flush();
+}
+
+void writeDbgCSV() {
+  if (csvDbg == null) return;
+  csvDbg.println(csvNow() + "," +
+    dbg_sample + "," + dbg_s1 + "," + dbg_s2 + "," +
+    dbg_deg_s1 + "," + dbg_deg_s2 + "," + dbg_err32 + "," +
+    dbg_s1x_raw + "," + dbg_s1y_raw + "," + dbg_node_count + "," +
+    (dbg_conn?1:0) + "," + (dbg_rm?1:0) + "," +
+    (dbg_iso?1:0) + "," + dbg_iso_id + "," +
+    (dbg_ins?1:0) + "," + dbg_ins_id);
+}
+
+void writeNodeSnapCSV() {
+  if (csvNodes == null) return;
+  String ts = csvNow();
+  for (int i = 0; i < MAX_NODES; i++) {
+    float xn = nodeX[i] / NODE_SCALE;
+    float yn = nodeY[i] / NODE_SCALE;
+    csvNodes.println(ts + "," + csvSnapIdx + "," + i + "," +
+      (nodeAct[i]?1:0) + "," + nodeDeg[i] + "," +
+      (int)nodeX[i] + "," + (int)nodeY[i] + "," +
+      nf(xn, 1, 6) + "," + nf(yn, 1, 6));
+  }
+  csvNodes.flush();
+}
+
+void writeEdgeSnapCSV() {
+  if (csvEdges == null) return;
+  String ts = csvNow();
+  for (Edge e : edges) {
+    if (e.ageStored == 0) continue;
+    csvEdges.println(ts + "," + csvSnapIdx + "," +
+      e.a + "," + e.b + "," + e.ageStored + "," + (e.ageStored - 1));
+  }
+  csvEdges.flush();
+  csvSnapIdx++;
+}
+
+void closeCSV() {
+  if (csvDataset != null) { csvDataset.flush(); csvDataset.close(); csvDataset = null; }
+  if (csvDbg     != null) { csvDbg.flush();     csvDbg.close();     csvDbg = null;     }
+  if (csvNodes   != null) { csvNodes.flush();   csvNodes.close();   csvNodes = null;   }
+  if (csvEdges   != null) { csvEdges.flush();   csvEdges.close();   csvEdges = null;   }
 }

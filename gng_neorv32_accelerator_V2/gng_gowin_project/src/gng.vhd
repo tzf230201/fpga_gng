@@ -29,10 +29,10 @@ entity gng is
     MAX_NODES  : natural := 40;
     DATA_WORDS : natural := 100;
 
-    INIT_X0    : integer := 200;
-    INIT_Y0    : integer := 200;
-    INIT_X1    : integer := 800;
-    INIT_Y1    : integer := 800;
+    INIT_X0    : integer := -500;
+    INIT_Y0    : integer :=  500;
+    INIT_X1    : integer :=  500;
+    INIT_Y1    : integer := -500;
 
     CLOCK_HZ     : natural := 27_000_000;
     DBG_DELAY_MS : natural := 0;
@@ -406,7 +406,7 @@ architecture rtl of gng is
   -- =========================================================
   -- SNAPSHOT control
   -- =========================================================
-  constant SNAP_EVERY : natural := 20; -- snapshot interval
+  constant SNAP_EVERY : natural := 50; -- snapshot interval
   signal snap_cnt : natural range 0 to SNAP_EVERY-1 := 0;
   signal snap_now : std_logic := '0';
 
@@ -614,6 +614,34 @@ begin
 
         stx_byte <= (others=>'0');
         stx_next <= P_IDLE;
+
+      elsif start_i = '1' then
+        -- -------------------------------------------------------
+        -- SOFT RESET: new dataset arrived (fires from any state)
+        -- Re-run full INIT: clear BRAMs, place seed nodes, restart
+        -- -------------------------------------------------------
+        started      <= '1';
+        ph           <= P_INIT_CLR_NODE;
+        init_n       <= 0;
+        init_e       <= 0;
+        node_we      <= '0';
+        edge_we      <= '0';
+        done_p       <= '0';
+        tx_start_o   <= '0';
+        tx_inflight  <= '0';
+        tx_idx       <= 0;
+        tx_len       <= 0;
+        samp_i       <= 0;
+        lambda_cnt   <= 0;
+        insert_now   <= '0';
+        snap_cnt     <= 0;
+        snap_now     <= '0';
+        node_count   <= (others => '0');
+        rm_flag      <= '0';
+        iso_flag     <= '0';
+        ins_flag     <= '0';
+        ins_f_found  <= '0';
+        delay_cnt    <= integer(DELAY_TICKS);
 
       else
         -- defaults

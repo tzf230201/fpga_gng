@@ -3,7 +3,7 @@ theme: default
 class: text-center
 highlighter: shiki
 lineNumbers: false
-transition: slide-left
+transition: view-transition
 title: Edge-Cell GNG for Embedded Systems
 mdc: true
 layout: cover
@@ -19,6 +19,7 @@ canvasWidth: 1280
 }
 .slidev-layout h1 {
   @apply text-3xl mb-3;
+  view-transition-name: slide-title;
 }
 .slidev-layout h2 {
   @apply text-xl mb-2;
@@ -29,6 +30,12 @@ canvasWidth: 1280
 .gng-slide .mermaid {
   transform: scale(0.85);
   transform-origin: top left;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 420ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 </style>
 

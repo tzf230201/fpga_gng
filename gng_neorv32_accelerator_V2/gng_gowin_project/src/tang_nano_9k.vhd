@@ -112,7 +112,10 @@ architecture rtl of tang_nano_9k is
 
 begin
 
-  sys_hold <= copying or gng_busy; -- hold RX store while copy or GNG (incl dump)
+  -- Only hold RX store during active copy (BRAM A is being read).
+  -- GNG-busy is intentionally NOT in hold: a new dataset arriving mid-training
+  -- will trigger a soft-reset of GNG via gng_start_p, so we allow the bytes in.
+  sys_hold <= copying;
 
   ---------------------------------------------------------------------------
   -- Debug latch: remember full (for LED), clear when store_clear_p
@@ -275,6 +278,10 @@ begin
 
   ---------------------------------------------------------------------------
   -- Scheduler: upload -> run gng (incl dump inside gng) -> wait done
+  --
+  -- When a new dataset arrives while GNG is already running (WAIT_GNG),
+  -- fire gng_start_p again to trigger GNG's soft-reset (P_INIT_CLR_NODE).
+  -- GNG responds to start_i in any state (see gng.vhd elsif start_i='1').
   ---------------------------------------------------------------------------
   process(clk_i)
   begin
@@ -292,13 +299,18 @@ begin
             end if;
 
           when RUN_GNG =>
-            if gng_busy='0' then
+            -- Wait until GNG is idle before first start; or fire immediately
+            -- for a soft-reset (gng.vhd handles start_i in any state)
+            if gng_busy='0' or have_data='1' then
               gng_start_p <= '1';
               sm <= WAIT_GNG;
             end if;
 
           when WAIT_GNG =>
-            if gng_done_p='1' then
+            -- New dataset arrived while GNG running: soft-reset GNG
+            if have_data='1' then
+              gng_start_p <= '1';  -- triggers soft-reset via start_i
+            elsif gng_done_p='1' then
               sm <= WAIT_DATA;
             end if;
 
@@ -317,8 +329,8 @@ begin
     generic map (
       MAX_NODES  => GNG_MAX_NODES,
       DATA_WORDS => WORDS_C,
-      INIT_X0    => 200, INIT_Y0 => 200,
-      INIT_X1    => 800, INIT_Y1 => 800
+      INIT_X0    => -500, INIT_Y0 =>  500,
+      INIT_X1    =>  500, INIT_Y1 => -500
     )
     port map (
       clk_i   => clk_i,
