@@ -366,6 +366,10 @@ architecture rtl of gng is
   signal dbg_deg_s1 : u8 := (others => '0');
   signal dbg_deg_s2 : u8 := (others => '0');
 
+  -- FPGA timing: free-running cycle counter + per-iteration latch
+  signal cycle_cnt : u32 := (others => '0'); -- increments every clk (27 MHz)
+  signal dbg_ts    : u32 := (others => '0'); -- latched at P_SAMPLE_REQ
+
   -- UART TX (DBG TLV)
   signal tx_inflight : std_logic := '0';
   signal tx_idx      : natural range 0 to 63 := 0;
@@ -390,6 +394,10 @@ architecture rtl of gng is
   constant B_AF : std_logic_vector(7 downto 0) := x"AF"; -- x hi
   constant B_B0 : std_logic_vector(7 downto 0) := x"B0"; -- y lo
   constant B_B1 : std_logic_vector(7 downto 0) := x"B1"; -- y hi
+  constant B_B2 : std_logic_vector(7 downto 0) := x"B2"; -- ts byte 0 (LSB)
+  constant B_B3 : std_logic_vector(7 downto 0) := x"B3"; -- ts byte 1
+  constant B_B4 : std_logic_vector(7 downto 0) := x"B4"; -- ts byte 2
+  constant B_B5 : std_logic_vector(7 downto 0) := x"B5"; -- ts byte 3 (MSB)
 
   -- extra tags (C0..C9)
   constant B_C0 : std_logic_vector(7 downto 0) := x"C0"; -- e_s1s2_pre
@@ -437,6 +445,20 @@ begin
   data_raddr_o <= data_addr;
   gng_busy_o   <= started;
   gng_done_o   <= done_p;
+
+  -- Free-running cycle counter
+  -- Resets on hardware reset OR soft-reset (start_i='1') so timestamps
+  -- are relative to the start of each training session.
+  process(clk_i)
+  begin
+    if rising_edge(clk_i) then
+      if rstn_i = '0' or start_i = '1' then
+        cycle_cnt <= (others => '0');
+      else
+        cycle_cnt <= cycle_cnt + 1;
+      end if;
+    end if;
+  end process;
 
   -- Node BRAM (sync read)
   process(clk_i)
@@ -642,6 +664,8 @@ begin
         ins_flag     <= '0';
         ins_f_found  <= '0';
         delay_cnt    <= integer(DELAY_TICKS);
+        -- cycle_cnt is driven by its own process (reset via start_i there)
+        dbg_ts       <= (others => '0');
 
       else
         -- defaults
@@ -746,6 +770,7 @@ begin
               snap_now <= '0';
             end if;
 
+            dbg_ts    <= cycle_cnt; -- latch FPGA timestamp for this iteration
             data_addr <= to_unsigned(samp_i, 7);
             ph <= P_SAMPLE_WAIT;
 
@@ -1425,9 +1450,15 @@ begin
             tx_buf(40) <= B_B0; tx_buf(41) <= std_logic_vector(s1y_reg(7 downto 0));
             tx_buf(42) <= B_B1; tx_buf(43) <= std_logic_vector(s1y_reg(15 downto 8));
 
-            tx_buf(44) <= B_A9; tx_buf(45) <= std_logic_vector(to_unsigned(samp_i, 8));
+            -- FPGA cycle timestamp (latched at iteration start, 27 MHz)
+            tx_buf(44) <= B_B2; tx_buf(45) <= std_logic_vector(dbg_ts( 7 downto  0));
+            tx_buf(46) <= B_B3; tx_buf(47) <= std_logic_vector(dbg_ts(15 downto  8));
+            tx_buf(48) <= B_B4; tx_buf(49) <= std_logic_vector(dbg_ts(23 downto 16));
+            tx_buf(50) <= B_B5; tx_buf(51) <= std_logic_vector(dbg_ts(31 downto 24));
 
-            tx_len <= 46;
+            tx_buf(52) <= B_A9; tx_buf(53) <= std_logic_vector(to_unsigned(samp_i, 8));
+
+            tx_len <= 54;
             tx_idx <= 0;
             ph <= P_TX_SEND;
 

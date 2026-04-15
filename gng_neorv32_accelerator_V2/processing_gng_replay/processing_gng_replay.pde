@@ -37,6 +37,10 @@ final int MAX_NODES  = 40;
 final float NODE_SCALE = 1000.0;
 final int A_MAX      = 50;
 
+// Must match VHDL generics
+final int SNAP_EVERY = 50;   // iterations per snapshot
+final int DATA_WORDS = 100;  // samples per epoch
+
 // -------------------------------------------------------
 // Data structures
 // -------------------------------------------------------
@@ -53,14 +57,16 @@ class EdgeState {
 class SnapFrame {
   int         snapIdx;
   String      timestamp;
-  NodeState[] nodes;   // length MAX_NODES
-  EdgeState[] edges;   // active edges only
+  long        fpgaTsCycles; // FPGA cycle counter at this snapshot (27 MHz); -1 if unavailable
+  NodeState[] nodes;        // length MAX_NODES
+  EdgeState[] edges;        // active edges only
 }
 
 // Dataset background
 float[][] dataPoints;
 int[]     dataLabel;
 int       dataN = 0;
+String    datasetName = "GNG";
 
 // All snapshot frames, sorted by snapIdx
 ArrayList<SnapFrame> snaps = new ArrayList<SnapFrame>();
@@ -88,7 +94,7 @@ int    statusMs  = 0;
 // -------------------------------------------------------
 void setup() {
   surface.setSize(WIN_W, WIN_H);
-  surface.setTitle("GNG Replay Viewer");
+  surface.setTitle("GNG Replay");
   frameRate(30);
   smooth(4);
   textFont(createFont("Consolas", 13));
@@ -131,7 +137,7 @@ void draw() {
 // -------------------------------------------------------
 void renderPlot() {
   int plotH = height - INFO_H;
-  int marginL = 85, marginR = 30, marginT = 60, marginB = 70;
+  int marginL = 85, marginR = 30, marginT = 60, marginB = 120;
 
   int px0 = marginL, py0 = marginT;
   int pw  = WIN_W - marginL - marginR;
@@ -178,14 +184,16 @@ void renderPlot() {
   // Title
   textSize(18); textAlign(CENTER, CENTER);
   SnapFrame sf = snaps.get(currentSnap);
-  text("GNG Replay  —  snap " + sf.snapIdx + "  |  " + sf.timestamp,
+  int iterNum  = sf.snapIdx * SNAP_EVERY;
+  int epochNum = iterNum / DATA_WORDS;
+  text("GNG " + datasetName + "  —  Epoch " + epochNum + "  |  FPGA: " + fpgaFmtTime(sf.fpgaTsCycles),
        sx0 + sw / 2, py0 - 18);
 
   // Dataset points
   noStroke();
   if (dataPoints != null) {
     for (int i = 0; i < dataN; i++) {
-      fill(dataLabel[i] == 1 ? color(255, 200, 0) : color(40, 110, 220));
+      fill(dataLabel[i] == 1 ? color(255, 140, 0) : color(40, 110, 220));
       float x = px(dataPoints[i][0], sx0, sw);
       float y = py(dataPoints[i][1], sy0, sh);
       rect(x - 2, y - 2, 4, 4);
@@ -219,14 +227,6 @@ void renderPlot() {
   // Legend
   drawLegend(sx0, sy0, sw, sh);
 
-  // Progress bar
-  float frac = (snaps.size() > 1) ? (float)currentSnap / (snaps.size() - 1) : 0;
-  int barX = sx0, barY = sy0 + sh + 54, barW = sw, barH = 8;
-  noStroke(); fill(210);
-  rect(barX, barY, barW, barH, 4);
-  fill(playing ? color(0, 180, 80) : color(60, 120, 220));
-  rect(barX, barY, barW * frac, barH, 4);
-
   popStyle();
 }
 
@@ -241,14 +241,28 @@ void renderInfoBar() {
   for (NodeState n : sf.nodes) if (n.active) actN++;
 
   int y0 = height - INFO_H;
+
+  // Progress bar — sits just above the info bar, inside the dark region
+  float frac = (snaps.size() > 1) ? (float)currentSnap / (snaps.size() - 1) : 0;
+  int barH = 6, barPad = 10;
+  fill(30); noStroke();
+  rect(0, y0 - barH - barPad, width, barH + barPad); // background strip
+  fill(50); noStroke();
+  rect(barPad, y0 - barH - barPad/2, width - barPad*2, barH, 3);
+  fill(playing ? color(0, 200, 90) : color(70, 140, 240));
+  rect(barPad, y0 - barH - barPad/2, (width - barPad*2) * frac, barH, 3);
+
   fill(30); noStroke();
   rect(0, y0, width, INFO_H);
 
   fill(255); textSize(13); textAlign(LEFT, TOP);
   int lh = 20;
-  text("Snapshot : " + currentSnap + " / " + (snaps.size()-1) +
-       "   snap_idx=" + sf.snapIdx +
-       "   time=" + sf.timestamp, 12, y0 + 6);
+  int iter  = sf.snapIdx * SNAP_EVERY;
+  int epoch = iter / DATA_WORDS;
+  int totalEpochs = (snaps.size()-1) * SNAP_EVERY / DATA_WORDS;
+  text("Epoch    : " + epoch + " / " + totalEpochs +
+       "   (iter " + iter + ")" +
+       "   FPGA: " + fpgaFmtTime(sf.fpgaTsCycles), 12, y0 + 6);
   text("Nodes    : " + actN + " active   Edges: " + sf.edges.length, 12, y0 + 6 + lh);
   text("Playback : " + (playing ? "PLAYING" : "PAUSED") +
        "  interval=" + playInterval + "ms", 12, y0 + 6 + lh*2);
@@ -263,39 +277,39 @@ void renderInfoBar() {
 // Legend
 // -------------------------------------------------------
 void drawLegend(int sx0, int sy0, int sw, int sh) {
-  int pad  = 12, boxW = 220, boxH = 148;
-  int bx   = sx0 + sw - boxW - pad;
-  int by   = sy0 + pad;
-
   pushStyle();
-  noStroke(); fill(255, 240);
-  rect(bx, by, boxW, boxH, 8);
-  stroke(0, 60); strokeWeight(1); noFill();
-  rect(bx, by, boxW, boxH, 8);
-
   textSize(13); textAlign(LEFT, CENTER);
-  int x0 = bx + 14, y0 = by + 22, step = 26;
 
+  int ly = sy0 + sh + 78;
+  int cx = sx0 + sw / 2;
+  int totalW = 520;
+  int x0 = cx - totalW / 2;
+  int spacing = 130;
+
+  // item 1: dataset A (blue square)
   noStroke(); fill(40, 110, 220);
-  rect(x0-3, y0-4, 7, 7);
-  fill(0); text("Moon A", x0 + 14, y0);
+  rect(x0-3, ly-3, 6, 6);
+  fill(0); text("Class A", x0 + 12, ly);
 
-  int y1 = y0 + step;
-  noStroke(); fill(255, 200, 0);
-  rect(x0-3, y1-4, 7, 7);
-  fill(0); text("Moon B", x0 + 14, y1);
+  // item 2: dataset B (orange square)
+  int x1 = x0 + spacing;
+  noStroke(); fill(255, 140, 0);
+  rect(x1-3, ly-3, 6, 6);
+  fill(0); text("Class B", x1 + 12, ly);
 
-  int y2 = y1 + step;
+  // item 3: edges (gray line)
+  int x2 = x1 + spacing;
   stroke(100); strokeWeight(2);
-  line(x0-4, y2, x0+12, y2);
-  noStroke(); fill(0); text("GNG edges", x0 + 14, y2);
+  line(x2-5, ly, x2+12, ly);
+  noStroke(); fill(0); text("GNG edges", x2 + 18, ly);
 
-  int y3 = y2 + step;
+  // item 4: nodes (red X)
+  int x3 = x2 + spacing;
   stroke(220, 0, 0); strokeWeight(3);
-  float r = 6;
-  line(x0-r, y3-r, x0+r, y3+r);
-  line(x0-r, y3+r, x0+r, y3-r);
-  noStroke(); fill(0); text("GNG nodes", x0 + 14, y3);
+  float r = 5;
+  line(x3-r, ly-r, x3+r, ly+r);
+  line(x3-r, ly+r, x3+r, ly-r);
+  noStroke(); fill(0); text("GNG nodes", x3 + 12, ly);
 
   popStyle();
 }
@@ -416,8 +430,9 @@ void saveScreenshot(boolean fullWindow) {
     crop.save(sketchPath(fname));
     status("Crop saved: " + fname + "  (" + rw + "×" + rh + ")");
   } else {
-    // Plot area only (no dark info bar)
-    PImage plot = get(0, 0, WIN_W, height - INFO_H);
+    // Plot area only (no info bar or progress bar)
+    int cutY = height - INFO_H - 16;
+    PImage plot = get(0, 0, WIN_W, cutY);
     String fname = base + "_plot.png";
     plot.save(sketchPath(fname));
     status("Plot screenshot: " + fname);
@@ -425,6 +440,14 @@ void saveScreenshot(boolean fullWindow) {
 }
 
 void status(String msg) { statusMsg = msg; statusMs = millis(); println(msg); }
+
+// FPGA time formatting (27 MHz clock)
+String fpgaFmtTime(long cycles) {
+  if (cycles < 0) return "n/a";
+  float ms = cycles / 27000.0;
+  if (ms >= 1000.0) return nf(ms / 1000.0, 1, 3) + " s";
+  return nf(ms, 1, 1) + " ms";
+}
 String timestamp() {
   return String.format("%d%02d%02d_%02d%02d%02d",
     year(), month(), day(), hour(), minute(), second());
@@ -446,8 +469,10 @@ void loadCSVFiles() {
   loadDataset(LOGS_PATH + "/dataset_"   + ts + ".csv");
   loadNodes  (LOGS_PATH + "/gng_nodes_" + ts + ".csv");
   loadEdges  (LOGS_PATH + "/gng_edges_" + ts + ".csv");
+  loadMeta   (LOGS_PATH + "/meta_"      + ts + ".txt");
 
   currentSnap = 0;
+  surface.setTitle("GNG " + datasetName + " Replay");
   status("Loaded " + snaps.size() + " snapshots, " + dataN + " dataset pts  [" + ts + "]");
 }
 
@@ -503,7 +528,7 @@ void loadNodes(String path) {
   if (lines == null) { println("Cannot load: " + path); return; }
 
   // Parse all rows, group by snap_idx
-  // timestamp,snap_idx,node_id,active,degree,x_int,y_int,x_norm,y_norm
+  // timestamp,snap_idx,node_id,active,degree,x_int,y_int,x_norm,y_norm[,fpga_ts_cycles]
   java.util.TreeMap<Integer, SnapFrame> frameMap = new java.util.TreeMap<Integer, SnapFrame>();
 
   for (int i = 1; i < lines.length; i++) {
@@ -518,12 +543,13 @@ void loadNodes(String path) {
       if (nodeId < 0 || nodeId >= MAX_NODES) continue;
 
       if (!frameMap.containsKey(snapIdx)) {
-        SnapFrame sf  = new SnapFrame();
-        sf.snapIdx    = snapIdx;
-        sf.timestamp  = ts;
-        sf.nodes      = new NodeState[MAX_NODES];
+        SnapFrame sf     = new SnapFrame();
+        sf.snapIdx       = snapIdx;
+        sf.timestamp     = ts;
+        sf.fpgaTsCycles  = -1;
+        sf.nodes         = new NodeState[MAX_NODES];
         for (int k = 0; k < MAX_NODES; k++) sf.nodes[k] = new NodeState();
-        sf.edges      = new EdgeState[0];
+        sf.edges         = new EdgeState[0];
         frameMap.put(snapIdx, sf);
       }
       SnapFrame sf      = frameMap.get(snapIdx);
@@ -535,6 +561,10 @@ void loadNodes(String path) {
       n.y_int           = int(tok[6]);
       n.x_norm          = float(tok[7]);
       n.y_norm          = float(tok[8]);
+      // fpga_ts_cycles is the same for all nodes in a snap; read from first node row
+      if (tok.length >= 10 && sf.fpgaTsCycles < 0) {
+        sf.fpgaTsCycles = Long.parseLong(tok[9].trim());
+      }
     } catch (Exception e) { /* skip */ }
   }
 
@@ -578,4 +608,13 @@ void loadEdges(String path) {
     }
   }
   println("Edges loaded and attached.");
+}
+
+void loadMeta(String path) {
+  datasetName = "GNG";
+  String[] lines = loadStrings(sketchPath(path));
+  if (lines != null && lines.length > 0 && lines[0].trim().length() > 0) {
+    datasetName = lines[0].trim();
+  }
+  println("Dataset name: " + datasetName);
 }

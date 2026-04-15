@@ -39,6 +39,12 @@ final float NODE_SCALE = 1000.0;
 final int A_MAX = 50; // match VHDL A_MAX
 
 // -------------------------------
+// Dataset mode: 0 = Two Moons, 1 = Concentric Circles
+// Press '1' for Moons, '2' for Circles
+// -------------------------------
+int DATASET_MODE = 0;
+
+// -------------------------------
 // Two-moons dataset options (MATCH YOUR PAPER STYLE)
 // -------------------------------
 final int     MOONS_N            = 100;
@@ -47,6 +53,15 @@ final int     MOONS_SEED         = 1234;
 final float   MOONS_NOISE_STD    = 0.06;
 final boolean MOONS_SHUFFLE      = true;
 final boolean MOONS_NORMALIZE01  = true;
+
+// -------------------------------
+// Concentric circles dataset options
+// -------------------------------
+final int     CIRCLES_N          = 100;
+final int     CIRCLES_SEED       = 1234;
+final float   CIRCLES_NOISE_STD  = 0.04;
+final float   CIRCLES_FACTOR     = 0.45;  // inner_radius / outer_radius
+final boolean CIRCLES_SHUFFLE    = true;
 
 // TX packing (raw stream)
 final float SCALE = 1000.0;
@@ -96,6 +111,10 @@ long dbg_err32 = 0;
 
 int dbg_s1x_raw = 0;
 int dbg_s1y_raw = 0;
+
+long dbg_fpga_ts   = 0;  // raw cycle count from FPGA (27 MHz)
+long dbg_fpga_ts_prev = -1;
+float dbg_iter_us  = 0;  // computed iteration period in microseconds
 
 int dbg_sample = 0;
 
@@ -179,11 +198,13 @@ void draw() {
 // Keys
 // ======================================================
 void keyPressed() {
-  if (key=='r' || key=='R') { buildTwoMoonsAndPack(); sendDatasetOnce(); }
+  if (key=='r' || key=='R') { buildDatasetAndPack(); sendDatasetOnce(); }
   if (key=='s' || key=='S') { sendDatasetOnce(); }
   if (key=='i' || key=='I') { hideIsolated = !hideIsolated; println("hideIsolated=" + hideIsolated); }
   if (key=='m' || key=='M') { showMismatchPrint = !showMismatchPrint; println("showMismatchPrint=" + showMismatchPrint); }
   if (key=='q' || key=='Q') { closeCSV(); println("CSV files closed/flushed."); }
+  if (key=='1') { DATASET_MODE = 0; buildDatasetAndPack(); sendDatasetOnce(); }
+  if (key=='2') { DATASET_MODE = 1; buildDatasetAndPack(); sendDatasetOnce(); }
 }
 
 void sendDatasetOnce() {
@@ -195,6 +216,7 @@ void sendDatasetOnce() {
   writeDatasetCSV();
 
   if (myPort != null) {
+    dbg_fpga_ts_prev = -1; // reset delta so first iter_us is not garbage
     myPort.write(txBuf);
     // Wait for all 400 bytes to be transmitted (at 1Mbaud: ~4ms) plus FPGA INIT time.
     // Then flush any stale snapshot bytes that arrived before the soft-reset.
@@ -208,19 +230,24 @@ void sendDatasetOnce() {
 // ======================================================
 // Dataset + TX packing (MATCH YOUR PAPER STYLE)
 // ======================================================
-void buildTwoMoonsAndPack() {
-  dataTx = generateMoons(
-    MOONS_N,
-    MOONS_RANDOM_ANGLE,
-    MOONS_NOISE_STD,
-    MOONS_SEED,
-    MOONS_SHUFFLE,
-    MOONS_NORMALIZE01,
-    dataLabel
-  );
+void buildDatasetAndPack() {
+  if (DATASET_MODE == 1) {
+    dataTx = generateCircles(
+      CIRCLES_N, CIRCLES_FACTOR, CIRCLES_NOISE_STD,
+      CIRCLES_SEED, CIRCLES_SHUFFLE, dataLabel
+    );
+    println("Dataset: Concentric Circles (" + CIRCLES_N + " samples)");
+  } else {
+    dataTx = generateMoons(
+      MOONS_N, MOONS_RANDOM_ANGLE, MOONS_NOISE_STD,
+      MOONS_SEED, MOONS_SHUFFLE, MOONS_NORMALIZE01, dataLabel
+    );
+    println("Dataset: Two Moons (" + MOONS_N + " samples)");
+  }
 
+  int N = dataTx.length;
   int p=0;
-  for (int i=0;i<MOONS_N;i++){
+  for (int i=0;i<N;i++){
     short xi = (short)round(dataTx[i][0]*SCALE);
     short yi = (short)round(dataTx[i][1]*SCALE);
     txBuf[p++] = (byte)(xi & 0xFF);
@@ -228,7 +255,10 @@ void buildTwoMoonsAndPack() {
     txBuf[p++] = (byte)(yi & 0xFF);
     txBuf[p++] = (byte)((yi>>8)&0xFF);
   }
-  // Dataset CSV is written by sendDatasetOnce(), not here.
+}
+
+void buildTwoMoonsAndPack() {
+  buildDatasetAndPack();
 }
 
 // Two-moons generator (THIS IS THE ONE YOU WANTED)
@@ -295,6 +325,72 @@ float[][] generateMoons(int N, boolean randomAngle, float noiseStd, int seed,
   return arr;
 }
 
+// Concentric circles generator (similar to sklearn.datasets.make_circles)
+float[][] generateCircles(int N, float factor, float noiseStd, int seed,
+                          boolean shuffle, int[] labelOut) {
+  float[][] arr = new float[N][2];
+
+  if (seed >= 0) randomSeed(seed);
+  else randomSeed((int)millis());
+
+  int nOuter = N / 2;
+  int nInner = N - nOuter;
+
+  // outer circle (label 0)
+  for (int i = 0; i < nOuter; i++) {
+    float t = map(i, 0, nOuter, 0, TWO_PI);
+    arr[i][0] = cos(t);
+    arr[i][1] = sin(t);
+    if (labelOut != null) labelOut[i] = 0;
+  }
+
+  // inner circle (label 1)
+  for (int i = 0; i < nInner; i++) {
+    float t = map(i, 0, nInner, 0, TWO_PI);
+    arr[nOuter + i][0] = cos(t) * factor;
+    arr[nOuter + i][1] = sin(t) * factor;
+    if (labelOut != null) labelOut[nOuter + i] = 1;
+  }
+
+  // add noise
+  if (noiseStd > 0.0) {
+    for (int i = 0; i < N; i++) {
+      arr[i][0] += (float)randomGaussian() * noiseStd;
+      arr[i][1] += (float)randomGaussian() * noiseStd;
+    }
+  }
+
+  // normalize to [-1, 1]
+  float minx=999, maxx=-999, miny=999, maxy=-999;
+  for (int i = 0; i < N; i++) {
+    if (arr[i][0] < minx) minx = arr[i][0];
+    if (arr[i][0] > maxx) maxx = arr[i][0];
+    if (arr[i][1] < miny) miny = arr[i][1];
+    if (arr[i][1] > maxy) maxy = arr[i][1];
+  }
+  float dx = maxx - minx; if (dx < 1e-9) dx = 1.0;
+  float dy = maxy - miny; if (dy < 1e-9) dy = 1.0;
+  for (int i = 0; i < N; i++) {
+    arr[i][0] = ((arr[i][0] - minx) / dx) * 2.0 - 1.0;
+    arr[i][1] = ((arr[i][1] - miny) / dy) * 2.0 - 1.0;
+  }
+
+  // shuffle
+  if (shuffle) {
+    for (int i = N - 1; i > 0; i--) {
+      int j = (int)random(i + 1);
+      float tx = arr[i][0], ty = arr[i][1];
+      arr[i][0] = arr[j][0]; arr[i][1] = arr[j][1];
+      arr[j][0] = tx;        arr[j][1] = ty;
+      if (labelOut != null) {
+        int tl = labelOut[i]; labelOut[i] = labelOut[j]; labelOut[j] = tl;
+      }
+    }
+  }
+
+  return arr;
+}
+
 // ======================================================
 // Plot rendering (paper style)
 // ======================================================
@@ -302,7 +398,7 @@ void renderPlot(PGraphics gg, int x0, int y0, int w, int h, boolean title) {
   int marginL = 85;
   int marginR = 30;
   int marginT = title ? 60 : 30;
-  int marginB = 80;
+  int marginB = 110;
 
   int px0 = x0 + marginL;
   int py0 = y0 + marginT;
@@ -370,13 +466,14 @@ void renderPlot(PGraphics gg, int x0, int y0, int w, int h, boolean title) {
   if (title) {
     gg.textAlign(CENTER, CENTER);
     gg.textSize(20);
-    gg.text("GNG on Two-Moons (A5 RX)", x0 + w/2, y0 + 26);
+    String dsName = (DATASET_MODE == 1) ? "Concentric Circles" : "Two-Moons";
+    gg.text("GNG on " + dsName + " (A5 RX)", x0 + w/2, y0 + 26);
   }
 
   // dataset: moon A (blue), moon B (yellow)
   gg.noStroke();
   for (int i=0;i<dataTx.length;i++) {
-    if (dataLabel[i] == 1) gg.fill(255, 200, 0);   // moon B: yellow
+    if (dataLabel[i] == 1) gg.fill(255, 140, 0);   // moon B: yellow
     else                   gg.fill(40, 110, 220);   // moon A: blue
     float x = mapN11x(dataTx[i][0], sx0, sw);
     float y = mapN11y(dataTx[i][1], sy0, sh);
@@ -424,66 +521,53 @@ void renderPlot(PGraphics gg, int x0, int y0, int w, int h, boolean title) {
 }
 
 void drawLegend(PGraphics gg, int sx0, int sy0, int sw, int sh) {
-  int pad  = 12;
-  int boxW = 290;
-  int boxH = 146;
-
-  int bx = sx0 + sw - boxW - pad;
-  int by = sy0 + pad;
-
-  bx = constrain(bx, sx0 + 10, sx0 + sw - boxW - 10);
-  by = constrain(by, sy0 + 10, sy0 + sh - boxH - 10);
-
   gg.pushStyle();
-  gg.noStroke();
-  gg.fill(255, 245);
-  gg.rect(bx, by, boxW, boxH, 8);
-
-  gg.stroke(0, 70);
-  gg.strokeWeight(1);
-  gg.noFill();
-  gg.rect(bx, by, boxW, boxH, 8);
-
-  gg.textSize(14);
+  gg.textSize(13);
   gg.textAlign(LEFT, CENTER);
 
-  int x0 = bx + 16;
-  int y0 = by + 24;
+  int ly = sy0 + sh + 78;
+  int cx = sx0 + sw / 2;
+  int totalW = 520;
+  int x0 = cx - totalW / 2;
+  int spacing = 130;
 
-  // moon A (blue)
+  String labelA = (DATASET_MODE == 1) ? "Outer" : "Moon A";
+  String labelB = (DATASET_MODE == 1) ? "Inner" : "Moon B";
+
+  // item 1: dataset A (blue square)
   gg.noStroke();
   gg.fill(40, 110, 220);
-  gg.rect(x0-3, y0-3, 6, 6);
+  gg.rect(x0-3, ly-3, 6, 6);
   gg.fill(0);
-  gg.text("Moon A", x0 + 16, y0);
+  gg.text(labelA, x0 + 12, ly);
 
-  // moon B (yellow)
-  int y1 = y0 + 26;
+  // item 2: dataset B (yellow square)
+  int x1 = x0 + spacing;
   gg.noStroke();
-  gg.fill(255, 200, 0);
-  gg.rect(x0-3, y1-3, 6, 6);
+  gg.fill(255, 140, 0);
+  gg.rect(x1-3, ly-3, 6, 6);
   gg.fill(0);
-  gg.text("Moon B", x0 + 16, y1);
+  gg.text(labelB, x1 + 12, ly);
 
-  // edges
-  int y2 = y1 + 26;
+  // item 3: edges (gray line)
+  int x2 = x1 + spacing;
   gg.stroke(110);
   gg.strokeWeight(2);
-  gg.line(x0-5, y2, x0+12, y2);
+  gg.line(x2-5, ly, x2+12, ly);
   gg.noStroke();
   gg.fill(0);
-  gg.text("GNG edges", x0 + 16, y2);
+  gg.text("GNG edges", x2 + 18, ly);
 
-  // nodes
-  int y3 = y2 + 26;
+  // item 4: nodes (red X)
+  int x3 = x2 + spacing;
   gg.stroke(220, 0, 0);
   gg.strokeWeight(3);
-  float r = 6;
-  gg.line(x0-r, y3-r, x0+r, y3+r);
-  gg.line(x0-r, y3+r, x0+r, y3-r);
+  float r = 5;
+  gg.line(x3-r, ly-r, x3+r, ly+r);
+  gg.line(x3-r, ly+r, x3+r, ly-r);
   gg.noStroke();
   gg.fill(0);
-  gg.text("GNG nodes", x0 + 16, y3);
+  gg.text("GNG nodes", x3 + 12, ly);
 
   gg.popStyle();
 }
@@ -544,7 +628,8 @@ void drawDebugPanel() {
     " nodes=" + dbg_node_count +
     " ins=" + (dbg_ins?1:0) + "(id=" + dbg_ins_id + ")" +
     " err32=" + dbg_err32 +
-    " samp=" + dbg_sample;
+    " samp=" + dbg_sample +
+    "  |  FPGA: elapsed=" + fpgaFmtTime(dbg_fpga_ts) + "  iter=" + fpgaFmtIter(dbg_iter_us);
 
   String s2 =
     "SNAP: active=" + actN +
@@ -601,7 +686,11 @@ boolean checkDbgFixed(byte[] b, int off) {
          (u8(b[off+38])== 0xAF) &&
          (u8(b[off+40])== 0xB0) &&
          (u8(b[off+42])== 0xB1) &&
-         (u8(b[off+44])== 0xA9);
+         (u8(b[off+44])== 0xB2) &&  // FPGA timestamp bytes (new)
+         (u8(b[off+46])== 0xB3) &&
+         (u8(b[off+48])== 0xB4) &&
+         (u8(b[off+50])== 0xB5) &&
+         (u8(b[off+52])== 0xA9);    // terminator moved to [52]
 }
 
 void parseDbgFrame(byte[] b, int off) {
@@ -627,7 +716,20 @@ void parseDbgFrame(byte[] b, int off) {
 
   dbg_s1x_raw = s16le(b, off+37, off+39);
   dbg_s1y_raw = s16le(b, off+41, off+43);
-  dbg_sample = u8(b[off+45]);
+
+  // FPGA cycle timestamp (32-bit LE, tags B2-B5 at offsets 44-51)
+  long ts = ((long)u8(b[off+45])) |
+            ((long)u8(b[off+47]) << 8) |
+            ((long)u8(b[off+49]) << 16) |
+            ((long)u8(b[off+51]) << 24);
+  if (dbg_fpga_ts_prev >= 0) {
+    long delta = (ts - dbg_fpga_ts_prev) & 0xFFFFFFFFL; // handle 32-bit wrap
+    dbg_iter_us = delta / 27.0;  // 27 MHz → microseconds
+  }
+  dbg_fpga_ts_prev = ts;
+  dbg_fpga_ts      = ts;
+
+  dbg_sample = u8(b[off+53]); // moved from [45] to [53]
 }
 
 void parseNodeSnap(byte[] b, int off) {
@@ -679,7 +781,7 @@ void parseRx() {
     int type = u8(rx[i+1]);
 
     if (type == 0x10) {
-      int frameLen = 46;
+      int frameLen = 54; // 46 + 8 bytes (4 × tag+value for FPGA timestamp)
       if (i + frameLen > rxLen) break;
       if (!checkDbgFixed(rx, i)) { i++; continue; }
       parseDbgFrame(rx, i);
@@ -726,6 +828,21 @@ int s16le(byte[] b, int loPos, int hiPos) {
 }
 
 // ======================================================
+// FPGA time formatting helpers (27 MHz clock)
+// ======================================================
+// elapsed: cycles → "X.XXX s" or "X.X ms"
+String fpgaFmtTime(long cycles) {
+  float ms = cycles / 27000.0;
+  if (ms >= 1000.0) return nf(ms / 1000.0, 1, 3) + " s";
+  return nf(ms, 1, 1) + " ms";
+}
+// iter period: microseconds → "X.X ms" or "X us"
+String fpgaFmtIter(float us) {
+  if (us >= 1000.0) return nf(us / 1000.0, 1, 2) + " ms";
+  return nf(us, 1, 1) + " us";
+}
+
+// ======================================================
 // CSV logging
 // ======================================================
 String csvTimestamp() {
@@ -749,9 +866,16 @@ void setupCSV() {
   csvEdges   = createWriter(sketchPath("logs/gng_edges_" + ts + ".csv"));
 
   csvDataset.println("timestamp,index,x_norm,y_norm,label,x_int,y_int");
-  csvDbg.println("timestamp,sample_idx,s1,s2,deg_s1,deg_s2,err32,s1x_raw,s1y_raw,node_count,conn,rm,iso,iso_id,ins,ins_id");
-  csvNodes.println("timestamp,snap_idx,node_id,active,degree,x_int,y_int,x_norm,y_norm");
+  csvDbg.println("timestamp,sample_idx,s1,s2,deg_s1,deg_s2,err32,s1x_raw,s1y_raw,node_count,conn,rm,iso,iso_id,ins,ins_id,fpga_ts_cycles,iter_us");
+  csvNodes.println("timestamp,snap_idx,node_id,active,degree,x_int,y_int,x_norm,y_norm,fpga_ts_cycles");
   csvEdges.println("timestamp,snap_idx,node_a,node_b,age_stored,true_age");
+
+  // Save dataset name metadata for replay
+  String dsName = (DATASET_MODE == 1) ? "Concentric Circles" : "Two Moons";
+  PrintWriter meta = createWriter(sketchPath("logs/meta_" + ts + ".txt"));
+  meta.println(dsName);
+  meta.flush();
+  meta.close();
 
   println("CSV logging started: logs/*_" + ts + ".csv");
 }
@@ -777,7 +901,8 @@ void writeDbgCSV() {
     dbg_s1x_raw + "," + dbg_s1y_raw + "," + dbg_node_count + "," +
     (dbg_conn?1:0) + "," + (dbg_rm?1:0) + "," +
     (dbg_iso?1:0) + "," + dbg_iso_id + "," +
-    (dbg_ins?1:0) + "," + dbg_ins_id);
+    (dbg_ins?1:0) + "," + dbg_ins_id + "," +
+    dbg_fpga_ts + "," + nf(dbg_iter_us, 1, 3));
 }
 
 void writeNodeSnapCSV() {
@@ -789,7 +914,8 @@ void writeNodeSnapCSV() {
     csvNodes.println(ts + "," + csvSnapIdx + "," + i + "," +
       (nodeAct[i]?1:0) + "," + nodeDeg[i] + "," +
       (int)nodeX[i] + "," + (int)nodeY[i] + "," +
-      nf(xn, 1, 6) + "," + nf(yn, 1, 6));
+      nf(xn, 1, 6) + "," + nf(yn, 1, 6) + "," +
+      dbg_fpga_ts);
   }
   csvNodes.flush();
 }
