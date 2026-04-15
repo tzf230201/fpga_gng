@@ -1,0 +1,145 @@
+\relax 
+\citation{IEEEexample:BSTcontrol}
+\citation{fritzke1994growing}
+\citation{kohonen1982self,Kohonen1995SOM}
+\citation{Fritzke1994GCS}
+\@writefile{toc}{\contentsline {section}{\numberline {I}Introduction}{1}{}\protected@file@percent }
+\citation{fpga_gng_repo}
+\citation{kohonen1982self,Kohonen1995SOM}
+\citation{Fritzke1994GCS}
+\citation{fritzke1994growing}
+\citation{hamker2001life}
+\citation{marsland2002self}
+\citation{Holmstrom2002Utility}
+\citation{prudent2005incremental}
+\citation{toda2006multiple,toda2007batch,Toda2008MultiLayer}
+\citation{Siow2024DBL}
+\citation{ventocilla2021mapreduce}
+\citation{ardilla2023msblgng}
+\citation{coelho2020fpga}
+\citation{Dias2021SOMFPGA,deSousa2020SOMProcessor,yamagiwa2024scalable,hikawa2023nested}
+\citation{LaTona2020VirtualAnemometer}
+\citation{Shoaran2015SpikeSorting}
+\citation{Derue2025SWAPGNG}
+\citation{Arostegi2025AiGAS}
+\citation{piyasena2020fpl}
+\citation{firmli2021csrpp}
+\citation{Zhou2021GNNPruning}
+\citation{Fiser2013Efficient}
+\citation{Hernandez2005Landmarks}
+\citation{orts2012gpgpu}
+\@writefile{toc}{\contentsline {section}{\numberline {II}Related Work}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {III}Methodology}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-A}}GNG Algorithm Overview}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-B}}FPGA Architecture}{2}{}\protected@file@percent }
+\newlabel{sec:arch}{{\mbox  {III-B}}{2}{}{subsection.3.2}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {III-B}1}Overview}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {III-B}2}Block RAM Layout}{2}{}\protected@file@percent }
+\@writefile{loa}{\contentsline {algorithm}{\numberline {1}{\ignorespaces Growing Neural Gas Training}}{3}{}\protected@file@percent }
+\newlabel{alg:gng}{{1}{3}{}{algorithm.1}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {III-B}3}FSM Pipeline}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-C}}Integer Fixed-Point Arithmetic}{3}{}\protected@file@percent }
+\newlabel{sec:arith}{{\mbox  {III-C}}{3}{}{subsection.3.3}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {III-C}1}Coordinate Representation}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {III-C}2}Distance Computation}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {III-C}3}Winner Adaptation (Q8 Learning Rate)}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {III-C}4}Neighbor Adaptation (Q16 Learning Rate)}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {III-C}5}Error Accumulation and Decay}{3}{}\protected@file@percent }
+\citation{Fiser2013Efficient}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-D}}Memory Optimization}{4}{}\protected@file@percent }
+\newlabel{sec:memory_opt}{{\mbox  {III-D}}{4}{}{subsection.3.4}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {III-D}1}Edge-Cell Graph Encoding}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {III-D}2}Static BRAM Allocation}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-E}}Edge Management Strategy}{4}{}\protected@file@percent }
+\newlabel{sec:edge_mgmt}{{\mbox  {III-E}}{4}{}{subsection.3.5}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {III-E}1}Half-Adjacency Indexing}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {III-E}2}Fused NB\_SCAN Pass}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {III-E}3}Degree-Assisted Isolated-Node Monitoring}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-F}}UART Debug and Visualization Interface}{4}{}\protected@file@percent }
+\citation{fpga_gng_repo}
+\citation{martinetz1994topology,fritzke1994growing}
+\@writefile{toc}{\contentsline {section}{\numberline {IV}Experimental Setup}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}Datasets}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}Evaluation Metrics}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-B}1}Quantization Error}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-B}2}Topological Error}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-B}3}Hardware Resource Utilization}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}Implementation Details}{5}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces Hardware and software configuration.}}{5}{}\protected@file@percent }
+\newlabel{tab:platform}{{I}{5}{}{table.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces GNG hyperparameters used in all experiments.}}{5}{}\protected@file@percent }
+\newlabel{tab:hyperparams}{{II}{5}{}{table.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-D}}Baseline Comparisons}{5}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {III}{\ignorespaces Baselines used for comparison.}}{5}{}\protected@file@percent }
+\newlabel{tab:baselines}{{III}{5}{}{table.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {V}Results}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}Hardware Resource Utilization}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Memory Efficiency}{5}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {IV}{\ignorespaces FPGA resource utilization on Gowin GW1NR-LV9QN88PC6 ($N_{\max }=40$).}}{6}{}\protected@file@percent }
+\newlabel{tab:synthesis}{{IV}{6}{}{table.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {V}{\ignorespaces Allocated BRAM footprint comparison (fixed-capacity, $N_{\max }=40$).}}{6}{}\protected@file@percent }
+\newlabel{tab:memory}{{V}{6}{}{table.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}Topology Learning Quality}{6}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {VI}{\ignorespaces Topology learning quality on FPGA snapshots at selected epochs.}}{6}{}\protected@file@percent }
+\newlabel{tab:qe_te}{{VI}{6}{}{table.6}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Learned GNG topology on Two Moons (100 samples; $N_{\max }\!=\!40$). Node positions received via UART and plotted in normalized $[-1,1]$ coordinates.}}{6}{}\protected@file@percent }
+\newlabel{fig:two_moons_result}{{1}{6}{}{figure.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Two Moons training dynamics over 32 epochs (100 samples/epoch). Left: node and edge count growth. Middle: quantization error convergence. Right: topological error vs. epoch.}}{6}{}\protected@file@percent }
+\newlabel{fig:two_moons_training}{{2}{6}{}{figure.2}{}}
+\citation{coelho2020fpga,Dias2021SOMFPGA}
+\citation{fritzke1994growing}
+\citation{marsland2002self}
+\citation{Holmstrom2002Utility}
+\citation{Arostegi2025AiGAS}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Learned GNG topology on Concentric Circles (100 samples; $N_{\max }\!=\!40$).}}{7}{}\protected@file@percent }
+\newlabel{fig:circles_result}{{3}{7}{}{figure.3}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Concentric Circles training dynamics over 64 epochs (100 samples/epoch). Left: network growth. Middle: quantization error convergence. Right: topological error vs. epoch.}}{7}{}\protected@file@percent }
+\newlabel{fig:circles_training}{{4}{7}{}{figure.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-D}}Computational Performance}{7}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {VII}{\ignorespaces FPGA runtime performance at 27~MHz ($N_{\max }=40$).}}{7}{}\protected@file@percent }
+\newlabel{tab:runtime}{{VII}{7}{}{table.7}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VI}Discussion}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-A}}Hardware Trade-offs}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {VI-A}1}Sequential FSM vs. Parallel Datapath}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {VI-A}2}Integer Approximation of Learning Rates}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {VI-A}3}Isolated-Node Policy}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {VI-A}4}Error Accumulation Scaling}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-B}}Relation to Prior FPGA Self-Organizing Work}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-C}}Relation to GNG Variants and Continual Learning}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-D}}Limitations and Future Works}{7}{}\protected@file@percent }
+\bibstyle{IEEEtran}
+\bibdata{references}
+\bibcite{fritzke1994growing}{1}
+\bibcite{kohonen1982self}{2}
+\bibcite{Kohonen1995SOM}{3}
+\bibcite{Fritzke1994GCS}{4}
+\bibcite{fpga_gng_repo}{5}
+\bibcite{hamker2001life}{6}
+\bibcite{marsland2002self}{7}
+\bibcite{Holmstrom2002Utility}{8}
+\bibcite{prudent2005incremental}{9}
+\bibcite{toda2006multiple}{10}
+\bibcite{toda2007batch}{11}
+\bibcite{Toda2008MultiLayer}{12}
+\bibcite{Siow2024DBL}{13}
+\bibcite{ventocilla2021mapreduce}{14}
+\bibcite{ardilla2023msblgng}{15}
+\bibcite{coelho2020fpga}{16}
+\bibcite{Dias2021SOMFPGA}{17}
+\bibcite{deSousa2020SOMProcessor}{18}
+\bibcite{yamagiwa2024scalable}{19}
+\bibcite{hikawa2023nested}{20}
+\bibcite{LaTona2020VirtualAnemometer}{21}
+\bibcite{Shoaran2015SpikeSorting}{22}
+\bibcite{Derue2025SWAPGNG}{23}
+\bibcite{Arostegi2025AiGAS}{24}
+\bibcite{piyasena2020fpl}{25}
+\bibcite{firmli2021csrpp}{26}
+\bibcite{Zhou2021GNNPruning}{27}
+\bibcite{Fiser2013Efficient}{28}
+\bibcite{Hernandez2005Landmarks}{29}
+\bibcite{orts2012gpgpu}{30}
+\bibcite{martinetz1994topology}{31}
+\@writefile{toc}{\contentsline {section}{\numberline {VII}Conclusion}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{References}{8}{}\protected@file@percent }
+\gdef \@abspage@last{8}

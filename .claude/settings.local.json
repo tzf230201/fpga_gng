@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pdflatex -interaction=nonstopmode main.tex)",
+      "Bash(bibtex main:*)",
+      "Read(//tmp/**)",
+      "Bash(grep -oE \"\\\\\\\\\\\\\\\\cite\\\\{[^}]+\\\\}\" main.tex)",
+      "Bash(grep -oE \"@[a-zA-Z]+\\\\{[^,]+\" references.bib)",
+      "Bash(ls \"c:/Users/teuku/Documents/Github/fpga_gng/WCCI2026_5/experiment_logs/meta_\"*.txt)",
+      "Bash(wc -l \"c:/Users/teuku/Documents/Github/fpga_gng/WCCI2026_5/experiment_logs/dataset_\"*.csv)",
+      "Bash(cp dataset_20260413_180416.csv dataset_concentric_circles.csv)",
+      "Bash(cp dataset_20260413_180644.csv dataset_two_moons.csv)",
+      "Bash(ls dataset_*.csv)",
+      "Bash(ls *180644*)",
+      "Bash(wc -l gng_dbg_20260413_180644.csv gng_nodes_20260413_180644.csv)",
+      "Bash(MPLBACKEND=Agg python plot_gng_stats.py 20260413_180644 64)",
+      "Bash(cat)",
+      "Bash(python /tmp/extract.py)",
+      "Bash(MPLBACKEND=Agg python plot_gng_stats.py 20260413_180644 32)",
+      "Bash(MPLBACKEND=Agg python plot_gng_stats.py 20260413_180416 32)"
+    ]
+  }
+}
