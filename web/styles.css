@@ -519,6 +519,144 @@ p {
   text-align: center;
 }
 
+.fixed-point-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 0.82fr) minmax(380px, 1.18fr);
+  gap: 1.2rem;
+  align-items: start;
+  margin: 1.6rem 0 2.4rem;
+  padding: 1.2rem;
+  border: 3px solid #17375f;
+  border-radius: 16px;
+  background: #f9fbff;
+  box-shadow: 0 12px 30px rgba(20, 26, 34, 0.1);
+}
+
+.fixed-point-detail > * {
+  min-width: 0;
+}
+
+.fixed-point-detail h3 {
+  color: #2f67b1;
+  font-size: clamp(1.5rem, 2.8vw, 2rem);
+}
+
+.fixed-point-copy p,
+.fixed-formula p,
+.node-word-panel p {
+  color: var(--muted);
+  font-size: 0.96rem;
+}
+
+.fixed-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 1rem 0 1.1rem;
+}
+
+.fixed-badges span {
+  padding: 0.38rem 0.55rem;
+  border-radius: 999px;
+  background: #17375f;
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.node-word-panel {
+  padding: 0.95rem;
+  border: 1px solid #d9e5f5;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.node-word-panel h4,
+.fixed-formula h4 {
+  margin: 0 0 0.6rem;
+  color: #263a58;
+  font-size: 1rem;
+}
+
+.node-word-strip {
+  display: grid;
+  grid-template-columns: 1.2fr 1.2fr 0.72fr 0.82fr 1.45fr 0.72fr;
+  gap: 0.22rem;
+  margin-bottom: 0.75rem;
+}
+
+.node-field {
+  display: grid;
+  min-height: 42px;
+  place-items: center;
+  border-radius: 8px;
+  background: #dfe9f7;
+  color: #17375f;
+  font-family: "Cambria Math", "Times New Roman", serif;
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.field-wide {
+  background: #c8dbf2;
+}
+
+.field-compact {
+  background: #e8eef7;
+}
+
+.field-error {
+  background: #b8d2ee;
+}
+
+.field-pad {
+  background: #edf1f6;
+  color: #718096;
+}
+
+.fixed-point-equations {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.fixed-formula {
+  padding: 0.95rem;
+  border: 1px solid #d9e5f5;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.fixed-formula.full-width {
+  grid-column: 1 / -1;
+}
+
+.compact-formula {
+  justify-content: flex-start;
+  gap: 0.38rem;
+  padding: 0.62rem;
+  font-size: clamp(0.88rem, 1.6vw, 1.05rem);
+}
+
+.fixed-code-formula {
+  display: grid;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding: 0.68rem;
+  border-radius: 10px;
+  background: #f6f8fb;
+  color: #263a58;
+  font-family: "Cambria Math", "Times New Roman", serif;
+  font-size: 1.02rem;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.fixed-code-formula.inline {
+  display: block;
+}
+
 .motivation-flow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(190px, 0.62fr) minmax(0, 1fr);
@@ -719,6 +857,8 @@ footer p {
   .method-grid,
   .motivation-flow,
   .edge-cell-detail,
+  .fixed-point-detail,
+  .fixed-point-equations,
   .future-image-grid,
   .future-card-grid,
   .metrics {
@@ -795,6 +935,14 @@ footer p {
   .memory-table td {
     padding: 0.5rem 0.55rem;
     white-space: nowrap;
+  }
+
+  .node-word-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fixed-formula.full-width {
+    grid-column: auto;
   }
 
   .motivation-flow img {

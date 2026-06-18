@@ -302,6 +302,107 @@
           </table>
           <p class="edge-saving">-51.25% edge storage and -41% total graph state at Nmax = 40.</p>
         </article>
+
+        <article class="fixed-point-detail" aria-labelledby="fixed-point-title">
+          <div class="fixed-point-copy">
+            <h3 id="fixed-point-title">Fixed-Point Arithmetic</h3>
+            <p>
+              The updated poster emphasizes that the accelerator is an integer-only datapath:
+              no floating-point unit, one synchronous FSM, three BRAMs, and UART streaming on
+              the Tang Nano 9K at 27 MHz.
+            </p>
+
+            <div class="fixed-badges" aria-label="Fixed-point hardware summary">
+              <span>No FPU</span>
+              <span>27 MHz FSM</span>
+              <span>3 BRAMs</span>
+              <span>1 Mbit/s UART</span>
+            </div>
+
+            <div class="node-word-panel">
+              <h4>80-bit packed node word</h4>
+              <div class="node-word-strip" aria-label="Packed node state fields">
+                <span class="node-field field-wide">x[16]</span>
+                <span class="node-field field-wide">y[16]</span>
+                <span class="node-field field-compact">act[1]</span>
+                <span class="node-field">deg[8]</span>
+                <span class="node-field field-error">err[32]</span>
+                <span class="node-field field-pad">pad[7]</span>
+              </div>
+              <p>
+                Coordinates are signed 16-bit integers in [-1000, 1000]. Degree and error stay
+                inside node BRAM, so isolated-node checks do not need a full edge scan.
+              </p>
+            </div>
+          </div>
+
+          <div class="fixed-point-equations">
+            <div class="fixed-formula">
+              <h4>Coordinate representation</h4>
+              <div class="formula-display compact-formula">
+                <span class="formula-term">x<sub>norm</sub></span>
+                <span class="formula-operator">=</span>
+                <span class="formula-term">(x - x<sub>min</sub>)</span>
+                <span class="formula-operator">/</span>
+                <span class="formula-term">(x<sub>max</sub> - x<sub>min</sub>)</span>
+                <span class="formula-operator">&middot;</span>
+                <span class="formula-term">2s - s</span>
+              </div>
+              <p>s = 1000 after min-max normalization.</p>
+            </div>
+
+            <div class="fixed-formula">
+              <h4>Squared-distance unit</h4>
+              <div class="fixed-code-formula">
+                <span>&Delta;x = &xi;<sub>x</sub> - x<sub>n</sub>, &Delta;y = &xi;<sub>y</sub> - y<sub>n</sub></span>
+                <span>d<sup>2</sup> = &Delta;x<sup>2</sup> + &Delta;y<sup>2</sup></span>
+              </div>
+              <p>17-bit signed differences produce a 35-bit unsigned distance.</p>
+            </div>
+
+            <div class="fixed-formula">
+              <h4>Winner update (Q8)</h4>
+              <div class="formula-display compact-formula">
+                <span class="formula-term">&Delta;x<sub>s1</sub></span>
+                <span class="formula-operator">=</span>
+                <span>&lfloor;</span>
+                <span class="formula-fraction">
+                  <span class="formula-numerator">77(&xi;<sub>x</sub> - x<sub>s1</sub>)</span>
+                  <span class="formula-denominator">2<sup>8</sup></span>
+                </span>
+                <span>&rfloor;</span>
+              </div>
+              <p>EPS_WIN_Q8 = 77, so epsilon_w = 77/256 = 0.301.</p>
+            </div>
+
+            <div class="fixed-formula">
+              <h4>Neighbor update (Q16)</h4>
+              <div class="formula-display compact-formula">
+                <span class="formula-term">&Delta;x<sub>n</sub></span>
+                <span class="formula-operator">=</span>
+                <span>&lfloor;</span>
+                <span class="formula-fraction">
+                  <span class="formula-numerator">66(&xi;<sub>x</sub> - x<sub>n</sub>)</span>
+                  <span class="formula-denominator">2<sup>16</sup></span>
+                </span>
+                <span>&rfloor;</span>
+              </div>
+              <p>EPS_N_Q16 = 66, so epsilon_n = 66/65536 = 0.001.</p>
+            </div>
+
+            <div class="fixed-formula full-width">
+              <h4>Multiplierless error decay</h4>
+              <div class="fixed-code-formula inline">
+                <span>err<sub>n</sub> -= err<sub>n</sub> &gt;&gt; ERR_DECAY_SHIFT</span>
+              </div>
+              <p>
+                ERR_DECAY_SHIFT = 8, giving beta = 255/256 = 0.9961 without a multiplier.
+                Winner movement, edge aging, neighbor movement, error decay, and pruning are
+                fused into one NB_SCAN sweep.
+              </p>
+            </div>
+          </div>
+        </article>
       </div>
     </section>
 
