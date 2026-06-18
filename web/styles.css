@@ -204,6 +204,43 @@ p {
   text-align: center;
 }
 
+.problem-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1.7rem 0 2rem;
+}
+
+.problem-grid article {
+  min-height: 242px;
+  padding: 1.05rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.problem-grid h3 {
+  min-height: 2.9em;
+  margin-bottom: 0.55rem;
+  color: #263a58;
+  font-size: 1.04rem;
+}
+
+.problem-grid p {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 0.94rem;
+}
+
+.problem-tag {
+  display: inline-block;
+  margin-bottom: 0.7rem;
+  color: #a87320;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .method-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -678,6 +715,7 @@ footer p {
   }
 
   .hero-media,
+  .problem-grid,
   .method-grid,
   .motivation-flow,
   .edge-cell-detail,
@@ -691,6 +729,14 @@ footer p {
     width: min(100%, 320px);
     margin-right: auto;
     margin-left: auto;
+  }
+
+  .problem-grid article {
+    min-height: auto;
+  }
+
+  .problem-grid h3 {
+    min-height: 0;
   }
 
   .future-card-grid article {

@@ -63,6 +63,78 @@
     </section>
 
     <section class="section">
+      <div class="container">
+        <h2>Problem &amp; Motivation</h2>
+        <p class="section-intro">
+          Edge robots and micro-UAVs need unsupervised learning close to the sensor, where
+          communication links, payload, and energy are limited. GNG is a strong candidate
+          because it learns both prototypes and topology online, but its graph operations are
+          not naturally matched to a small FPGA fabric.
+        </p>
+
+        <div class="problem-grid">
+          <article>
+            <span class="problem-tag">Problem 1</span>
+            <h3>Dynamic topology on static hardware</h3>
+            <p>
+              GNG continually creates, ages, reconnects, and removes graph edges. These
+              data-dependent operations are simple in software, but they create irregular
+              memory access and control-flow pressure on a small FPGA.
+            </p>
+          </article>
+          <article>
+            <span class="problem-tag">Problem 2</span>
+            <h3>Dense adjacency wastes graph memory</h3>
+            <p>
+              A conventional Nmax by Nmax adjacency matrix stores both halves of an undirected
+              graph. At Nmax = 40, the dense edge table alone consumes 1,600 B before any node
+              coordinate or error state is stored.
+            </p>
+          </article>
+          <article>
+            <span class="problem-tag">Problem 3</span>
+            <h3>Floating-point units are too costly</h3>
+            <p>
+              Winner search, distance evaluation, and learning-rate updates are repeated for
+              every input sample. Floating-point datapaths increase area and latency, limiting
+              their usefulness on a sub-10K-LUT FPGA.
+            </p>
+          </article>
+          <article>
+            <span class="problem-tag">Motivation</span>
+            <h3>Make online GNG practical at the edge</h3>
+            <p>
+              The design target is a bounded-memory, integer-only GNG accelerator that keeps
+              the dynamic topology behavior of the algorithm while fitting the Tang Nano 9K
+              resource envelope.
+            </p>
+          </article>
+        </div>
+
+        <div class="motivation-flow" aria-label="Motivation and problem pipeline">
+          <figure>
+            <img src="images/motivation-embedded-scene.png" alt="Constrained embedded environment with geometric obstacles">
+            <figcaption>Unstructured field scene</figcaption>
+          </figure>
+
+          <figure class="hardware-node">
+            <img src="images/tang-nano-9k.png" alt="Sipeed Tang Nano 9K FPGA board">
+            <figcaption>Tang Nano 9K FPGA</figcaption>
+          </figure>
+
+          <figure>
+            <img src="images/motivation-topology-map.png" alt="Growing Neural Gas topology graph over a navigation-like map">
+            <figcaption>Online topology graph</figcaption>
+          </figure>
+        </div>
+        <p class="motivation-caption">
+          Motivation: convert continuous, sensor-like spatial observations into a compact GNG
+          graph directly on a small FPGA, without floating-point hardware or dynamic memory.
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
       <div class="container narrow">
         <h2>Abstract</h2>
         <p>
@@ -230,27 +302,6 @@
           </table>
           <p class="edge-saving">-51.25% edge storage and -41% total graph state at Nmax = 40.</p>
         </article>
-
-        <div class="motivation-flow" aria-label="Motivation and problem pipeline">
-          <figure>
-            <img src="images/motivation-embedded-scene.png" alt="Constrained embedded environment with geometric obstacles">
-            <figcaption>Unstructured field scene</figcaption>
-          </figure>
-
-          <figure class="hardware-node">
-            <img src="images/tang-nano-9k.png" alt="Sipeed Tang Nano 9K FPGA board">
-            <figcaption>Tang Nano 9K FPGA</figcaption>
-          </figure>
-
-          <figure>
-            <img src="images/motivation-topology-map.png" alt="Growing Neural Gas topology graph over a navigation-like map">
-            <figcaption>Online topology graph</figcaption>
-          </figure>
-        </div>
-        <p class="motivation-caption">
-          Motivation: convert continuous, sensor-like spatial observations into a compact GNG
-          graph directly on a small FPGA, without floating-point hardware or dynamic memory.
-        </p>
       </div>
     </section>
 
