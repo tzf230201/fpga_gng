@@ -400,13 +400,6 @@
                 </div>
               </div>
             </div>
-            <div class="quantization-note">
-              <strong>Where 77 and 66 come from:</strong>
-              fixed-point learning rates quantize a real-valued learning rate by
-              <span>EPS_Q = round(&epsilon; &middot; 2<sup>Q</sup>)</span>.
-              Thus <span>EPS_WIN_Q8 = round(0.301 &middot; 256) = 77</span>, and
-              <span>EPS_N_Q16 = round(0.001 &middot; 65536) = 66</span>.
-            </div>
           </div>
 
           <div class="decay-strip">
@@ -472,6 +465,15 @@
               </tr>
             </tbody>
           </table>
+          <div class="quantization-note">
+            <strong>Where 77 and 66 come from:</strong>
+            the author selected fixed-point coefficients that approximate the target learning
+            rates, namely a winner rate close to <span>&epsilon;<sub>w</sub> = 0.3</span> and
+            a neighbor rate close to <span>&epsilon;<sub>n</sub> = 0.001</span>. In a Q-format
+            implementation, <span>EPS_Q = round(&epsilon; &middot; 2<sup>Q</sup>)</span>, so
+            <span>EPS_WIN_Q8 = round(0.3 &middot; 256) = 77</span> and
+            <span>EPS_N_Q16 = round(0.001 &middot; 65536) = 66</span>.
+          </div>
         </article>
       </div>
     </section>
