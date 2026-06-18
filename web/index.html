@@ -42,26 +42,6 @@
       </div>
     </section>
 
-    <section class="overview">
-      <div class="container">
-        <p class="result-callout">Integer-only GNG learns dynamic topology on a sub-10K-LUT FPGA.</p>
-        <div class="hero-media">
-          <figure>
-            <img src="WCCI2026_5/two_moons_result.png" alt="Two Moons topology learned by FPGA GNG">
-            <figcaption>Two Moons learned topology</figcaption>
-          </figure>
-          <figure>
-            <img src="WCCI2026_5/concentric_circles_result.png" alt="Concentric Circles topology learned by FPGA GNG">
-            <figcaption>Concentric Circles learned topology</figcaption>
-          </figure>
-        </div>
-        <p class="overview-caption">
-          The FPGA streams node and edge snapshots through UART. The host reconstructs the
-          learned topology and evaluates quantization error, topological error, and runtime.
-        </p>
-      </div>
-    </section>
-
     <section class="section">
       <div class="container">
         <h2>Problem &amp; Motivation</h2>
@@ -159,6 +139,14 @@
         <h2>Method Overview</h2>
         <div class="method-grid">
           <article>
+            <h3>Fused update pass</h3>
+            <p>
+              Error decay, edge aging, neighbor movement, and over-age pruning are combined
+              inside one NB_SCAN sweep. Per-node degree counters support isolated-node
+              monitoring without scanning the full edge array.
+            </p>
+          </article>
+          <article>
             <h3>Edge-cell encoding</h3>
             <p>
               The graph stores one byte per undirected node pair. A zero value means no edge;
@@ -172,14 +160,6 @@
               Node coordinates are signed integers normalized to [-1000, 1000]. Winner and
               neighbor adaptation use Q8/Q16 shift-scaled learning rates with DSP-friendly
               multiply-and-shift operations.
-            </p>
-          </article>
-          <article>
-            <h3>Fused update pass</h3>
-            <p>
-              Error decay, edge aging, neighbor movement, and over-age pruning are combined
-              inside one NB_SCAN sweep. Per-node degree counters support isolated-node
-              monitoring without scanning the full edge array.
             </p>
           </article>
         </div>
@@ -566,6 +546,22 @@
           The prototype is evaluated on two 2D topology-learning benchmarks using FPGA snapshots
           and an on-chip cycle counter. The measured latency remains near-identical across
           datasets because execution is bounded by O(Nmax) BRAM scans.
+        </p>
+
+        <p class="result-callout">Integer-only GNG learns dynamic topology on a sub-10K-LUT FPGA.</p>
+        <div class="hero-media">
+          <figure>
+            <img src="WCCI2026_5/two_moons_result.png" alt="Two Moons topology learned by FPGA GNG">
+            <figcaption>Two Moons learned topology</figcaption>
+          </figure>
+          <figure>
+            <img src="WCCI2026_5/concentric_circles_result.png" alt="Concentric Circles topology learned by FPGA GNG">
+            <figcaption>Concentric Circles learned topology</figcaption>
+          </figure>
+        </div>
+        <p class="overview-caption">
+          The FPGA streams node and edge snapshots through UART. The host reconstructs the
+          learned topology and evaluates quantization error, topological error, and runtime.
         </p>
 
         <div class="metrics">
