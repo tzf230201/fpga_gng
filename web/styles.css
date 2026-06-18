@@ -551,6 +551,76 @@ p {
   font-size: 0.95rem;
 }
 
+.future-section {
+  background: #17375f;
+  color: #ffffff;
+}
+
+.future-section h2 {
+  color: #ffffff;
+}
+
+.future-label {
+  color: #98bde8;
+  text-align: center;
+}
+
+.future-lead {
+  max-width: 900px;
+  margin: 0 auto 1.7rem;
+  color: rgba(255, 255, 255, 0.86);
+  text-align: center;
+}
+
+.future-image-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1.8rem 0;
+}
+
+.future-image-grid figure {
+  overflow: hidden;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.future-image-grid img {
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.future-image-grid figcaption {
+  padding: 0.55rem 0.4rem 0.7rem;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+.future-card-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.future-card-grid article {
+  min-height: 126px;
+  padding: 1rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.future-card-grid h3 {
+  color: #ffffff;
+  font-size: 1rem;
+}
+
+.future-card-grid p {
+  margin-bottom: 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.95rem;
+}
+
 .poster-preview {
   width: min(780px, 100%);
   margin: 0 auto;
@@ -599,8 +669,20 @@ footer p {
   .method-grid,
   .motivation-flow,
   .edge-cell-detail,
+  .future-image-grid,
+  .future-card-grid,
   .metrics {
     grid-template-columns: 1fr;
+  }
+
+  .future-image-grid {
+    width: min(100%, 320px);
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  .future-card-grid article {
+    min-height: auto;
   }
 
   .edge-matrix-wrap {
