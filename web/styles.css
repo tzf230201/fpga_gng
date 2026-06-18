@@ -223,6 +223,55 @@ p {
   font-size: 0.98rem;
 }
 
+.motivation-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 0.62fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: center;
+  margin-top: 1.9rem;
+}
+
+.motivation-flow figure {
+  position: relative;
+}
+
+.motivation-flow img {
+  height: 270px;
+  border-radius: 14px;
+  object-fit: cover;
+  box-shadow: 0 10px 26px rgba(20, 26, 34, 0.12);
+}
+
+.motivation-flow figcaption {
+  margin-top: 0.65rem;
+  color: #222;
+  font-size: 1rem;
+  text-align: center;
+}
+
+.hardware-node {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(20, 26, 34, 0.1);
+}
+
+.hardware-node img {
+  height: auto;
+  min-height: 140px;
+  object-fit: contain;
+  box-shadow: none;
+}
+
+.motivation-caption {
+  max-width: 860px;
+  margin: 1.4rem auto 0;
+  color: var(--muted);
+  font-size: 1.02rem;
+  text-align: center;
+}
+
 .wide-figure {
   margin-top: 1.7rem;
 }
@@ -301,7 +350,18 @@ footer p {
 
   .hero-media,
   .method-grid,
+  .motivation-flow,
   .metrics {
     grid-template-columns: 1fr;
+  }
+
+  .motivation-flow img {
+    height: auto;
+    max-height: none;
+  }
+
+  .hardware-node {
+    width: min(100%, 310px);
+    margin: 0 auto;
   }
 }

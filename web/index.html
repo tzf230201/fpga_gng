@@ -112,10 +112,26 @@
           </article>
         </div>
 
-        <figure class="wide-figure">
-          <img src="WCCI2026_5/problem.png" alt="Embedded GNG motivation and system problem illustration">
-          <figcaption>Motivation: on-device unsupervised adaptation under payload, memory, and timing constraints.</figcaption>
-        </figure>
+        <div class="motivation-flow" aria-label="Motivation and problem pipeline">
+          <figure>
+            <img src="images/motivation-embedded-scene.png" alt="Constrained embedded environment with geometric obstacles">
+            <figcaption>Unstructured field scene</figcaption>
+          </figure>
+
+          <figure class="hardware-node">
+            <img src="images/tang-nano-9k.png" alt="Sipeed Tang Nano 9K FPGA board">
+            <figcaption>Tang Nano 9K FPGA</figcaption>
+          </figure>
+
+          <figure>
+            <img src="images/motivation-topology-map.png" alt="Growing Neural Gas topology graph over a navigation-like map">
+            <figcaption>Online topology graph</figcaption>
+          </figure>
+        </div>
+        <p class="motivation-caption">
+          Motivation: convert continuous, sensor-like spatial observations into a compact GNG
+          graph directly on a small FPGA, without floating-point hardware or dynamic memory.
+        </p>
       </div>
     </section>
 
