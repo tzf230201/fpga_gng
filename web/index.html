@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260619-gng-loop">
+  <link rel="stylesheet" href="styles.css?v=20260619-gng-paper">
 </head>
 <body>
   <main>
@@ -187,19 +187,24 @@
         <article class="gng-loop-detail" aria-labelledby="gng-loop-title">
           <div class="gng-loop-copy">
             <h3 id="gng-loop-title">GNG Loop &amp; Fused FPGA Update</h3>
-            <ol class="gng-steps">
-              <li>Find winner <strong>s<sub>1</sub></strong> and runner-up <strong>s<sub>2</sub></strong>.</li>
-              <li>Accumulate winner error; move <strong>s<sub>1</sub></strong> toward sample <strong>&xi;</strong>.</li>
-              <li>Age edges of <strong>s<sub>1</sub></strong>; move neighbors by <strong>&epsilon;<sub>n</sub></strong>; prune old edges.</li>
-              <li>Connect <strong>(s<sub>1</sub>, s<sub>2</sub>)</strong> and decay errors by <strong>&beta;</strong>.</li>
-              <li>Every <strong>&lambda;</strong> samples, insert a node and split errors by <strong>&alpha;</strong>.</li>
-            </ol>
             <p>
-              The key FPGA property is spatial scheduling: operations that update different
-              edge cells or different neighbor nodes are order-independent. They can be fused
-              into one sweep in the current single-FSM design, and the same structure can be
-              parallelized by replicating datapaths when BRAM ports and resources allow it.
+              In the paper, the current implementation is a sequential single-clock FSM.
+              <strong>UPDATE</strong> handles the winner first: accumulate
+              <span>err<sub>s1</sub></span>, apply winner error decay, and move
+              <span>s<sub>1</sub></span> with the Q8 learning rate.
             </p>
+            <p>
+              The fused part is the <strong>NB_SCAN</strong> pass. While scanning each active
+              node slot <span>n &ne; s<sub>1</sub></span>, the FSM decays that node's error,
+              probes <code>edge_cell[idx(s1,n)]</code>, and only for active winner-incident
+              edges performs aging, neighbor movement, and old-edge pruning inline.
+            </p>
+            <div class="parallel-note">
+              <strong>FPGA implication:</strong> the current paper reports this as a bounded
+              sequential read-modify-write pipeline; the same regular per-node/per-edge-cell
+              structure is the path to wider parallel datapaths when BRAM ports and resources
+              are provisioned.
+            </div>
           </div>
 
           <div class="gng-flow" aria-label="GNG fused loop pipeline">
@@ -213,24 +218,29 @@
               <span>WIN_SCAN</span>
             </div>
             <div class="flow-arrow">&darr;</div>
+            <div class="flow-node update-node">
+              <strong>Update winner s<sub>1</sub>: err + decay + Q8 move</strong>
+              <span>UPDATE</span>
+            </div>
+            <div class="flow-arrow">&darr;</div>
             <div class="fused-box">
-              <h4>Fused in one sweep: UPDATE + NB_SCAN</h4>
+              <h4>Fused NB_SCAN pass</h4>
               <div class="fused-grid">
-                <span>&Sigma; accumulate s<sub>1</sub> error</span>
-                <span>Move s<sub>1</sub> toward &xi;</span>
-                <span>Age s<sub>1</sub> edges + prune</span>
-                <span>Move neighbors</span>
+                <span>Decay node error</span>
+                <span>Probe edge cell</span>
+                <span>Age/prune active edge</span>
+                <span>Move neighbor</span>
               </div>
-              <p>independent per-edge ops &rarr; parallelizable on FPGA</p>
+              <p>one N<sub>max</sub> scan replaces separate decay + neighbor-edge passes</p>
             </div>
             <div class="flow-arrow">&darr;</div>
             <div class="flow-node">
-              <strong>Connect (s<sub>1</sub>, s<sub>2</sub>) &middot; decay errors</strong>
+              <strong>Connect (s<sub>1</sub>, s<sub>2</sub>) &middot; reset edge age</strong>
               <span>CONNECT</span>
             </div>
             <div class="flow-arrow">&darr;</div>
             <div class="flow-node">
-              <strong>Insert node @ &lambda; &middot; remove old/isolated</strong>
+              <strong>Insert node @ &lambda; &middot; split max-error edge</strong>
               <span>INSERT</span>
             </div>
           </div>
