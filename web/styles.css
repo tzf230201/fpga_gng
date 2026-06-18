@@ -314,23 +314,10 @@ p {
 }
 
 .side-axis {
-  left: 0.35rem;
-  top: 47%;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.15rem;
-  transform: translateY(-50%);
-}
-
-.side-axis span:first-child {
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-}
-
-.axis-arrow {
-  font-size: 1.05rem;
-  line-height: 1;
+  left: 0.2rem;
+  top: 52%;
+  transform: rotate(-90deg);
+  transform-origin: center;
 }
 
 .edge-matrix {
@@ -709,7 +696,7 @@ footer p {
   }
 
   .side-axis {
-    left: 0;
+    left: -0.25rem;
     font-size: 0.78rem;
   }
 
