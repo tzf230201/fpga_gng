@@ -161,6 +161,20 @@ figure {
   text-align: center;
 }
 
+.photo-credit {
+  display: block;
+  margin-top: 0.28rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.photo-credit a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .overview-caption {
   max-width: 900px;
   margin: 2rem auto 0;
@@ -1112,6 +1126,10 @@ p {
   color: rgba(255, 255, 255, 0.78);
   font-size: 0.95rem;
   text-align: center;
+}
+
+.future-section .photo-credit {
+  color: rgba(255, 255, 255, 0.62);
 }
 
 .future-feature-copy {
