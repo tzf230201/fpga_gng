@@ -324,15 +324,17 @@
               <strong>Coordinate representation</strong> - 16-bit signed integers in
               <code>[-1000, 1000]</code> after min-max normalization:
             </p>
-            <div class="formula-display fixed-wide-formula">
-              <span class="formula-term">x<sub>norm</sub></span>
-              <span class="formula-operator">=</span>
-              <span class="formula-fraction">
-                <span class="formula-numerator">x - x<sub>min</sub></span>
-                <span class="formula-denominator">x<sub>max</sub> - x<sub>min</sub></span>
+            <div class="formula-display fixed-wide-formula stacked-formula">
+              <span class="formula-line">
+                <span class="formula-term">x<sub>norm</sub></span>
+                <span class="formula-operator">=</span>
+                <span class="formula-fraction">
+                  <span class="formula-numerator">x - x<sub>min</sub></span>
+                  <span class="formula-denominator">x<sub>max</sub> - x<sub>min</sub></span>
+                </span>
+                <span class="formula-operator">&middot;</span>
+                <span class="formula-term">2s - s</span>
               </span>
-              <span class="formula-operator">&middot;</span>
-              <span class="formula-term">2s - s</span>
               <span class="formula-note">s = 1000</span>
             </div>
           </div>
@@ -367,29 +369,33 @@
             <div class="rate-equations">
               <div class="rate-card">
                 <span class="rate-label">Winner (Q8)</span>
-                <div class="formula-display fixed-rate-formula">
-                  <span class="formula-term">&Delta;x<sub>s1</sub></span>
-                  <span class="formula-operator">=</span>
-                  <span>&lfloor;</span>
-                  <span class="formula-fraction">
-                    <span class="formula-numerator">77(&xi;<sub>x</sub> - x<sub>s1</sub>)</span>
-                    <span class="formula-denominator">2<sup>8</sup></span>
+                <div class="formula-display fixed-rate-formula stacked-formula">
+                  <span class="formula-line">
+                    <span class="formula-term">&Delta;x<sub>s1</sub></span>
+                    <span class="formula-operator">=</span>
+                    <span>&lfloor;</span>
+                    <span class="formula-fraction">
+                      <span class="formula-numerator">77(&xi;<sub>x</sub> - x<sub>s1</sub>)</span>
+                      <span class="formula-denominator">2<sup>8</sup></span>
+                    </span>
+                    <span>&rfloor;</span>
                   </span>
-                  <span>&rfloor;</span>
                   <span class="formula-note">&epsilon;<sub>w</sub> = 0.301</span>
                 </div>
               </div>
               <div class="rate-card">
                 <span class="rate-label">Neighbor (Q16)</span>
-                <div class="formula-display fixed-rate-formula">
-                  <span class="formula-term">&Delta;x<sub>n</sub></span>
-                  <span class="formula-operator">=</span>
-                  <span>&lfloor;</span>
-                  <span class="formula-fraction">
-                    <span class="formula-numerator">66(&xi;<sub>x</sub> - x<sub>n</sub>)</span>
-                    <span class="formula-denominator">2<sup>16</sup></span>
+                <div class="formula-display fixed-rate-formula stacked-formula">
+                  <span class="formula-line">
+                    <span class="formula-term">&Delta;x<sub>n</sub></span>
+                    <span class="formula-operator">=</span>
+                    <span>&lfloor;</span>
+                    <span class="formula-fraction">
+                      <span class="formula-numerator">66(&xi;<sub>x</sub> - x<sub>n</sub>)</span>
+                      <span class="formula-denominator">2<sup>16</sup></span>
+                    </span>
+                    <span>&rfloor;</span>
                   </span>
-                  <span>&rfloor;</span>
                   <span class="formula-note">&epsilon;<sub>n</sub> = 0.001</span>
                 </div>
               </div>

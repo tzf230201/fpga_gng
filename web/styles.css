@@ -628,6 +628,22 @@ p {
   font-size: clamp(1rem, 2vw, 1.22rem);
 }
 
+.stacked-formula {
+  display: grid;
+  justify-items: center;
+  overflow-x: visible;
+  white-space: normal;
+}
+
+.formula-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+}
+
 .formula-note {
   display: inline-flex;
   align-items: center;
@@ -644,9 +660,8 @@ p {
 
 .rate-card {
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr);
-  gap: 0.6rem;
-  align-items: center;
+  grid-template-columns: 1fr;
+  gap: 0.35rem;
   padding: 0.55rem 0.65rem;
   border-radius: 8px;
   background: #f1f5fb;
@@ -659,8 +674,8 @@ p {
 }
 
 .fixed-rate-formula {
-  justify-content: flex-start;
-  gap: 0.35rem;
+  justify-content: center;
+  gap: 0.25rem;
   padding: 0;
   background: transparent;
   font-size: clamp(0.9rem, 1.8vw, 1.1rem);
@@ -669,7 +684,7 @@ p {
 .fixed-code-formula {
   display: grid;
   gap: 0.4rem;
-  overflow-x: auto;
+  overflow-x: visible;
   padding: 0.68rem;
   border-radius: 10px;
   background: #f6f8fb;
@@ -677,7 +692,11 @@ p {
   font-family: "Cambria Math", "Times New Roman", serif;
   font-size: 1.02rem;
   line-height: 1.25;
-  white-space: nowrap;
+  white-space: normal;
+}
+
+.fixed-code-formula span {
+  overflow-wrap: anywhere;
 }
 
 .fixed-code-formula em {
