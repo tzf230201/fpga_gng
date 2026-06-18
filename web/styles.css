@@ -314,8 +314,20 @@ p {
 }
 
 .side-axis {
-  left: 0.2rem;
-  top: 52%;
+  left: -0.55rem;
+  top: 50%;
+  width: 72px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-50%);
+  transform-origin: center;
+}
+
+.side-axis-label {
+  display: inline-block;
+  white-space: nowrap;
   transform: rotate(-90deg);
   transform-origin: center;
 }
@@ -696,7 +708,8 @@ footer p {
   }
 
   .side-axis {
-    left: -0.25rem;
+    left: -0.8rem;
+    width: 62px;
     font-size: 0.78rem;
   }
 
