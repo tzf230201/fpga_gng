@@ -463,35 +463,6 @@ p {
   color: #ffffff;
 }
 
-.index-example {
-  display: grid;
-  gap: 0.35rem;
-  margin-top: 0.85rem;
-  padding: 0.75rem;
-  border: 1px solid #efe1c6;
-  border-left: 5px solid #e6ac46;
-  border-radius: 10px;
-  background: #fff8ec;
-  color: #263a58;
-  font-size: 0.95rem;
-}
-
-.index-example strong {
-  color: #a87320;
-  font-family: "Cambria Math", "Times New Roman", serif;
-  font-size: 1.08rem;
-}
-
-.example-label {
-  color: #a87320;
-  font-weight: 800;
-}
-
-.example-equation {
-  font-family: "Cambria Math", "Times New Roman", serif;
-  overflow-wrap: anywhere;
-}
-
 .formula-display {
   display: flex;
   align-items: center;
@@ -505,6 +476,20 @@ p {
   font-family: "Cambria Math", "Times New Roman", serif;
   font-size: clamp(1.05rem, 2.2vw, 1.45rem);
   line-height: 1.15;
+  white-space: nowrap;
+}
+
+.edge-index-formula {
+  flex-wrap: wrap;
+  overflow-x: visible;
+  white-space: normal;
+}
+
+.formula-comment {
+  margin-left: 0.6rem;
+  color: #a87320;
+  font-family: "Cambria Math", "Times New Roman", serif;
+  font-size: 0.92em;
   white-space: nowrap;
 }
 
