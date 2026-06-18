@@ -304,104 +304,161 @@
         </article>
 
         <article class="fixed-point-detail" aria-labelledby="fixed-point-title">
-          <div class="fixed-point-copy">
-            <h3 id="fixed-point-title">Fixed-Point Arithmetic</h3>
+          <div class="fixed-poster-header">
+            <div>
+              <h3 id="fixed-point-title">Fixed-Point Arithmetic</h3>
+              <p>
+                <strong>Integer-only datapath</strong> - no floating-point unit. The whole
+                engine runs on a Tang Nano 9K at 27 MHz as a single FSM with 3 BRAMs and
+                1 Mbit/s UART streaming.
+              </p>
+            </div>
+            <figure class="fixed-board">
+              <img src="images/tang-nano-9k.png" alt="Tang Nano 9K FPGA board used by the fixed-point GNG accelerator">
+              <figcaption>Tang Nano 9K - GW1NR-9C</figcaption>
+            </figure>
+          </div>
+
+          <div class="fixed-poster-section">
             <p>
-              The updated poster emphasizes that the accelerator is an integer-only datapath:
-              no floating-point unit, one synchronous FSM, three BRAMs, and UART streaming on
-              the Tang Nano 9K at 27 MHz.
+              <strong>Coordinate representation</strong> - 16-bit signed integers in
+              <code>[-1000, 1000]</code> after min-max normalization:
             </p>
-
-            <div class="fixed-badges" aria-label="Fixed-point hardware summary">
-              <span>No FPU</span>
-              <span>27 MHz FSM</span>
-              <span>3 BRAMs</span>
-              <span>1 Mbit/s UART</span>
-            </div>
-
-            <div class="node-word-panel">
-              <h4>80-bit packed node word</h4>
-              <div class="node-word-strip" aria-label="Packed node state fields">
-                <span class="node-field field-wide">x[16]</span>
-                <span class="node-field field-wide">y[16]</span>
-                <span class="node-field field-compact">act[1]</span>
-                <span class="node-field">deg[8]</span>
-                <span class="node-field field-error">err[32]</span>
-                <span class="node-field field-pad">pad[7]</span>
-              </div>
-              <p>
-                Coordinates are signed 16-bit integers in [-1000, 1000]. Degree and error stay
-                inside node BRAM, so isolated-node checks do not need a full edge scan.
-              </p>
+            <div class="formula-display fixed-wide-formula">
+              <span class="formula-term">x<sub>norm</sub></span>
+              <span class="formula-operator">=</span>
+              <span class="formula-fraction">
+                <span class="formula-numerator">x - x<sub>min</sub></span>
+                <span class="formula-denominator">x<sub>max</sub> - x<sub>min</sub></span>
+              </span>
+              <span class="formula-operator">&middot;</span>
+              <span class="formula-term">2s - s</span>
+              <span class="formula-note">s = 1000</span>
             </div>
           </div>
 
-          <div class="fixed-point-equations">
-            <div class="fixed-formula">
-              <h4>Coordinate representation</h4>
-              <div class="formula-display compact-formula">
-                <span class="formula-term">x<sub>norm</sub></span>
-                <span class="formula-operator">=</span>
-                <span class="formula-term">(x - x<sub>min</sub>)</span>
-                <span class="formula-operator">/</span>
-                <span class="formula-term">(x<sub>max</sub> - x<sub>min</sub>)</span>
-                <span class="formula-operator">&middot;</span>
-                <span class="formula-term">2s - s</span>
-              </div>
-              <p>s = 1000 after min-max normalization.</p>
-            </div>
-
-            <div class="fixed-formula">
-              <h4>Squared-distance unit</h4>
-              <div class="fixed-code-formula">
-                <span>&Delta;x = &xi;<sub>x</sub> - x<sub>n</sub>, &Delta;y = &xi;<sub>y</sub> - y<sub>n</sub></span>
-                <span>d<sup>2</sup> = &Delta;x<sup>2</sup> + &Delta;y<sup>2</sup></span>
-              </div>
-              <p>17-bit signed differences produce a 35-bit unsigned distance.</p>
-            </div>
-
-            <div class="fixed-formula">
-              <h4>Winner update (Q8)</h4>
-              <div class="formula-display compact-formula">
-                <span class="formula-term">&Delta;x<sub>s1</sub></span>
-                <span class="formula-operator">=</span>
-                <span>&lfloor;</span>
-                <span class="formula-fraction">
-                  <span class="formula-numerator">77(&xi;<sub>x</sub> - x<sub>s1</sub>)</span>
-                  <span class="formula-denominator">2<sup>8</sup></span>
-                </span>
-                <span>&rfloor;</span>
-              </div>
-              <p>EPS_WIN_Q8 = 77, so epsilon_w = 77/256 = 0.301.</p>
-            </div>
-
-            <div class="fixed-formula">
-              <h4>Neighbor update (Q16)</h4>
-              <div class="formula-display compact-formula">
-                <span class="formula-term">&Delta;x<sub>n</sub></span>
-                <span class="formula-operator">=</span>
-                <span>&lfloor;</span>
-                <span class="formula-fraction">
-                  <span class="formula-numerator">66(&xi;<sub>x</sub> - x<sub>n</sub>)</span>
-                  <span class="formula-denominator">2<sup>16</sup></span>
-                </span>
-                <span>&rfloor;</span>
-              </div>
-              <p>EPS_N_Q16 = 66, so epsilon_n = 66/65536 = 0.001.</p>
-            </div>
-
-            <div class="fixed-formula full-width">
-              <h4>Multiplierless error decay</h4>
-              <div class="fixed-code-formula inline">
-                <span>err<sub>n</sub> -= err<sub>n</sub> &gt;&gt; ERR_DECAY_SHIFT</span>
-              </div>
-              <p>
-                ERR_DECAY_SHIFT = 8, giving beta = 255/256 = 0.9961 without a multiplier.
-                Winner movement, edge aging, neighbor movement, error decay, and pruning are
-                fused into one NB_SCAN sweep.
-              </p>
+          <div class="fixed-poster-section">
+            <p><strong>80-bit node word</strong> - one BRAM entry per node:</p>
+            <div class="node-word-strip" aria-label="Packed node state fields">
+              <span class="node-field field-wide">x [16]</span>
+              <span class="node-field field-wide">y [16]</span>
+              <span class="node-field">deg [8]</span>
+              <span class="node-field field-error">err [32]</span>
+              <span class="node-field field-pad">act + pad</span>
             </div>
           </div>
+
+          <div class="fixed-poster-section">
+            <p>
+              <strong>Squared-distance unit</strong> - maps directly onto a 9x9 DSP
+              multiplier, overflow-free:
+            </p>
+            <div class="fixed-code-formula">
+              <span>&Delta;x = &xi;<sub>x</sub> - x<sub>n</sub>, &Delta;y = &xi;<sub>y</sub> - y<sub>n</sub> <em>17-bit signed</em></span>
+              <span>d<sup>2</sup> = &Delta;x<sup>2</sup> + &Delta;y<sup>2</sup> <em>35-bit unsigned</em></span>
+            </div>
+          </div>
+
+          <div class="fixed-poster-section">
+            <p>
+              <strong>Parametric learning rates</strong> - one multiply + shift each
+              (single DSP cycle):
+            </p>
+            <div class="rate-equations">
+              <div class="rate-card">
+                <span class="rate-label">Winner (Q8)</span>
+                <div class="formula-display fixed-rate-formula">
+                  <span class="formula-term">&Delta;x<sub>s1</sub></span>
+                  <span class="formula-operator">=</span>
+                  <span>&lfloor;</span>
+                  <span class="formula-fraction">
+                    <span class="formula-numerator">77(&xi;<sub>x</sub> - x<sub>s1</sub>)</span>
+                    <span class="formula-denominator">2<sup>8</sup></span>
+                  </span>
+                  <span>&rfloor;</span>
+                  <span class="formula-note">&epsilon;<sub>w</sub> = 0.301</span>
+                </div>
+              </div>
+              <div class="rate-card">
+                <span class="rate-label">Neighbor (Q16)</span>
+                <div class="formula-display fixed-rate-formula">
+                  <span class="formula-term">&Delta;x<sub>n</sub></span>
+                  <span class="formula-operator">=</span>
+                  <span>&lfloor;</span>
+                  <span class="formula-fraction">
+                    <span class="formula-numerator">66(&xi;<sub>x</sub> - x<sub>n</sub>)</span>
+                    <span class="formula-denominator">2<sup>16</sup></span>
+                  </span>
+                  <span>&rfloor;</span>
+                  <span class="formula-note">&epsilon;<sub>n</sub> = 0.001</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="decay-strip">
+            <strong>Multiplierless error decay</strong>
+            <span>err<sub>n</sub> -= err<sub>n</sub> &gt;&gt; 8</span>
+            <em>no multiplier, beta = 0.9961</em>
+          </div>
+
+          <p class="fused-update-note">
+            <strong>Fused update:</strong> winner move, edge aging, neighbor move, error decay,
+            and pruning all run in one NB_SCAN sweep, so per-edge operations remain regular and
+            FPGA-friendly.
+          </p>
+
+          <table class="fixed-param-table">
+            <thead>
+              <tr>
+                <th>Parameter</th>
+                <th>Value</th>
+                <th>Hardware mapping</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>N<sub>max</sub> (max nodes)</td>
+                <td>40</td>
+                <td>node BRAM depth</td>
+              </tr>
+              <tr>
+                <td>A<sub>max</sub> (max edge age)</td>
+                <td>50</td>
+                <td>A_MAX_STORED = 51</td>
+              </tr>
+              <tr>
+                <td>&lambda; (insertion period)</td>
+                <td>100</td>
+                <td>lambda counter</td>
+              </tr>
+              <tr>
+                <td>&epsilon;<sub>w</sub> (winner lr)</td>
+                <td>0.301</td>
+                <td>EPS_WIN_Q8 = 77, &gt;&gt; 8</td>
+              </tr>
+              <tr>
+                <td>&epsilon;<sub>n</sub> (neighbor lr)</td>
+                <td>0.001</td>
+                <td>EPS_N_Q16 = 66, &gt;&gt; 16</td>
+              </tr>
+              <tr>
+                <td>&alpha; (error split)</td>
+                <td>0.5</td>
+                <td>INS_ALPHA_SHIFT = 1</td>
+              </tr>
+              <tr>
+                <td>&beta; (error decay)</td>
+                <td>0.9961</td>
+                <td>ERR_DECAY_SHIFT = 8</td>
+              </tr>
+              <tr>
+                <td>ERR_SHIFT (acc. scale)</td>
+                <td>4</td>
+                <td>d<sup>2</sup> &gt;&gt; 4 before accumulation</td>
+              </tr>
+            </tbody>
+          </table>
         </article>
       </div>
     </section>
