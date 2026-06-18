@@ -997,13 +997,32 @@ p {
 .motivation-flow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(190px, 0.62fr) minmax(0, 1fr);
-  gap: 1rem;
+  gap: 1.7rem;
   align-items: center;
   margin-top: 1.9rem;
 }
 
 .motivation-flow figure {
   position: relative;
+}
+
+.motivation-flow figure:not(:last-child)::after {
+  position: absolute;
+  top: 40%;
+  right: -2rem;
+  z-index: 2;
+  display: grid;
+  width: 2.35rem;
+  height: 2.35rem;
+  place-items: center;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: #a87320;
+  color: #ffffff;
+  content: "→";
+  font-size: 1.32rem;
+  font-weight: 800;
+  box-shadow: 0 6px 16px rgba(20, 26, 34, 0.12);
 }
 
 .motivation-flow img {
@@ -1149,6 +1168,20 @@ p {
   font-size: 0.98rem;
 }
 
+.future-source {
+  margin-top: 0.2rem;
+  padding: 0.55rem 0.65rem;
+  border-left: 4px solid #98bde8;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.future-source a {
+  color: #ffffff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .future-tags {
   display: flex;
   flex-wrap: wrap;
@@ -1283,6 +1316,14 @@ footer p {
 
   .future-feature img {
     min-height: 190px;
+  }
+
+  .motivation-flow figure:not(:last-child)::after {
+    top: auto;
+    right: 50%;
+    bottom: -1.55rem;
+    transform: translateX(50%);
+    content: "↓";
   }
 
   .problem-grid article {
