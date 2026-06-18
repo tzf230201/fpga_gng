@@ -375,12 +375,12 @@
                     <span class="formula-operator">=</span>
                     <span>&lfloor;</span>
                     <span class="formula-fraction">
-                      <span class="formula-numerator">77(&xi;<sub>x</sub> - x<sub>s1</sub>)</span>
+                      <span class="formula-numerator">EPS_WIN_Q8(&xi;<sub>x</sub> - x<sub>s1</sub>)</span>
                       <span class="formula-denominator">2<sup>8</sup></span>
                     </span>
                     <span>&rfloor;</span>
                   </span>
-                  <span class="formula-note">&epsilon;<sub>w</sub> = 0.301</span>
+                  <span class="formula-note">&epsilon;<sub>w</sub> = EPS_WIN_Q8 / 2<sup>8</sup></span>
                 </div>
               </div>
               <div class="rate-card">
@@ -391,14 +391,21 @@
                     <span class="formula-operator">=</span>
                     <span>&lfloor;</span>
                     <span class="formula-fraction">
-                      <span class="formula-numerator">66(&xi;<sub>x</sub> - x<sub>n</sub>)</span>
+                      <span class="formula-numerator">EPS_N_Q16(&xi;<sub>x</sub> - x<sub>n</sub>)</span>
                       <span class="formula-denominator">2<sup>16</sup></span>
                     </span>
                     <span>&rfloor;</span>
                   </span>
-                  <span class="formula-note">&epsilon;<sub>n</sub> = 0.001</span>
+                  <span class="formula-note">&epsilon;<sub>n</sub> = EPS_N_Q16 / 2<sup>16</sup></span>
                 </div>
               </div>
+            </div>
+            <div class="quantization-note">
+              <strong>Where 77 and 66 come from:</strong>
+              fixed-point learning rates quantize a real-valued learning rate by
+              <span>EPS_Q = round(&epsilon; &middot; 2<sup>Q</sup>)</span>.
+              Thus <span>EPS_WIN_Q8 = round(0.301 &middot; 256) = 77</span>, and
+              <span>EPS_N_Q16 = round(0.001 &middot; 65536) = 66</span>.
             </div>
           </div>
 

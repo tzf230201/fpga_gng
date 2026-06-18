@@ -663,8 +663,9 @@ p {
   grid-template-columns: 1fr;
   gap: 0.35rem;
   padding: 0.55rem 0.65rem;
+  border: 1px solid #d9e5f5;
   border-radius: 8px;
-  background: #f1f5fb;
+  background: #ffffff;
 }
 
 .rate-label {
@@ -676,9 +677,31 @@ p {
 .fixed-rate-formula {
   justify-content: center;
   gap: 0.25rem;
-  padding: 0;
-  background: transparent;
+  padding: 0.55rem;
+  border: 1px solid #d9e5f5;
+  background: #f6f8fb;
   font-size: clamp(0.9rem, 1.8vw, 1.1rem);
+}
+
+.quantization-note {
+  margin-top: 0.7rem;
+  padding: 0.75rem;
+  border: 1px solid #d9e5f5;
+  border-left: 5px solid #2f67b1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.quantization-note strong {
+  color: #17375f;
+}
+
+.quantization-note span {
+  color: #263a58;
+  font-family: "Cambria Math", "Times New Roman", serif;
+  font-weight: 800;
 }
 
 .fixed-code-formula {
