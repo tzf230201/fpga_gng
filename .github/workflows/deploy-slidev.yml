@@ -35,14 +35,33 @@ jobs:
         run: npm ci
         working-directory: slidev
 
+      - name: Prepare website shell
+        run: |
+          rm -rf out
+          mkdir -p out
+          cp -R web/. out/
+
+          if [ -f WEB_VERSION_SCIENTIFIC_STUDY.md ]; then
+            cp WEB_VERSION_SCIENTIFIC_STUDY.md out/WEB_VERSION_SCIENTIFIC_STUDY.md
+          fi
+
+          if [ -d images ]; then
+            mkdir -p out/images
+            cp -R images/. out/images/
+          fi
+
+          mkdir -p out/WCCI2026_5
+          if [ -f WCCI2026_5/main.pdf ]; then cp WCCI2026_5/main.pdf out/WCCI2026_5/main.pdf; fi
+          if [ -f WCCI2026_5/poster.pdf ]; then cp WCCI2026_5/poster.pdf out/WCCI2026_5/poster.pdf; fi
+
       - name: Build Slidev
-        run: npm run build -- --base /fpga_gng/
+        run: npm run build:gh
         working-directory: slidev
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: slidev/dist
+          path: out
 
   deploy:
     environment:

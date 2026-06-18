@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FPGA GNG | Growing Neural Gas on FPGA</title>
+  <meta name="description" content="Scientific project website for FPGA-based Growing Neural Gas using edge-cell graph encoding and fixed-point arithmetic.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header" aria-label="Primary navigation">
+    <a class="brand" href="./">FPGA GNG</a>
+    <nav>
+      <a href="#method">Method</a>
+      <a href="#results">Results</a>
+      <a href="#deploy">Deploy</a>
+      <a class="nav-action" href="slides/">Slidev</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-overlay"></div>
+      <div class="hero-content">
+        <p class="eyebrow">Hardware-software co-design for embedded self-organizing learning</p>
+        <h1 id="hero-title">Growing Neural Gas on resource-constrained FPGA</h1>
+        <p class="hero-copy">
+          A research implementation of Growing Neural Gas for Tang Nano 9K and NEORV32,
+          using compact edge-cell graph encoding, integer arithmetic, UART visualization,
+          and reproducible experiment logs.
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="slides/">Open Slidev presentation</a>
+          <a class="button secondary" href="https://github.com/tzf230201/fpga_gng">View GitHub repository</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="summary-band" aria-label="Project summary">
+      <div class="summary-grid">
+        <div>
+          <span class="metric">41%</span>
+          <span class="metric-label">total BRAM state reduction versus dense adjacency at Nmax=40</span>
+        </div>
+        <div>
+          <span class="metric">27 MHz</span>
+          <span class="metric-label">target FPGA clock for deterministic sample-by-sample training</span>
+        </div>
+        <div>
+          <span class="metric">1.6k/s</span>
+          <span class="metric-label">measured FPGA sample throughput with UART debug frames</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="content-section" id="method">
+      <div class="section-heading">
+        <p class="eyebrow">Method</p>
+        <h2>Bounded-memory GNG for small FPGA devices</h2>
+        <p>
+          The project maps the canonical GNG update rule into fixed-size hardware state:
+          node BRAM stores coordinates, degree, activity, and error; edge BRAM stores only
+          upper-triangular edge cells encoded as age+1 values.
+        </p>
+      </div>
+
+      <div class="feature-grid">
+        <article class="feature-card">
+          <h3>Edge-cell graph encoding</h3>
+          <p>
+            Each edge uses one byte. A value of 0 means inactive, while values above 0
+            represent an active edge with age equal to value minus 1. This avoids a dense
+            adjacency matrix and removes a separate active flag.
+          </p>
+        </article>
+        <article class="feature-card">
+          <h3>Integer and fixed-point arithmetic</h3>
+          <p>
+            Winner search, node movement, error decay, and edge aging are implemented with
+            integer datapaths, Q-format learning rates, and shift-based approximations
+            instead of a floating-point unit.
+          </p>
+        </article>
+        <article class="feature-card">
+          <h3>UART experiment interface</h3>
+          <p>
+            Dataset samples, node snapshots, edge snapshots, and profiling frames are sent
+            through UART so the host can render the evolving topology and calculate
+            scientific metrics from hardware output.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section class="visual-section" id="results">
+      <div class="section-heading">
+        <p class="eyebrow">Results</p>
+        <h2>Topology learning can be inspected from real experiment artifacts</h2>
+      </div>
+      <div class="result-layout">
+        <figure>
+          <img src="images/fig1_gng_result.png" alt="GNG learned topology on a two moons dataset">
+          <figcaption>Learned GNG topology on a two-dimensional benchmark dataset.</figcaption>
+        </figure>
+        <figure>
+          <img src="images/fig2_training_progress.png" alt="Training progress plot showing node growth and error convergence">
+          <figcaption>Training dynamics from experiment logs, including graph growth and convergence behavior.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="content-section" id="deploy">
+      <div class="section-heading">
+        <p class="eyebrow">Web deployment</p>
+        <h2>Website first, Slidev as a linked presentation</h2>
+        <p>
+          This GitHub Pages site is deployed as a static research website. The Slidev deck is
+          built into the <code>/slides/</code> subpath, so visitors start from the website and
+          open the presentation only when needed.
+        </p>
+      </div>
+
+      <div class="link-grid">
+        <a class="link-card" href="slides/">
+          <span>Presentation</span>
+          <strong>Open Slidev deck</strong>
+        </a>
+        <a class="link-card" href="WEB_VERSION_SCIENTIFIC_STUDY.md">
+          <span>Report</span>
+          <strong>Read scientific study markdown</strong>
+        </a>
+        <a class="link-card" href="WCCI2026_5/main.pdf">
+          <span>Paper artifact</span>
+          <strong>Open WCCI/IJCNN paper PDF</strong>
+        </a>
+        <a class="link-card" href="https://github.com/tzf230201/fpga_gng">
+          <span>Source</span>
+          <strong>Browse repository</strong>
+        </a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span>FPGA GNG research website</span>
+    <span>Growing Neural Gas, NEORV32, Tang Nano 9K, fixed-point topology learning</span>
+  </footer>
+</body>
+</html>

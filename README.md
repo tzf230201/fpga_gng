@@ -1,6 +1,8 @@
 # fpga_gng
 
-📊 **[View Presentation Slides](https://tzf230201.github.io/fpga_gng/)**
+**[View Project Website](https://tzf230201.github.io/fpga_gng/)**
+
+**[View Presentation Slides](https://tzf230201.github.io/fpga_gng/slides/)**
 
 # 📘 **README – Build & Flash Firmware on Windows Using MSYS2 + MinGW64 + xPack RISC-V Toolchain**
 
