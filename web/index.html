@@ -112,6 +112,115 @@
           </article>
         </div>
 
+        <article class="edge-cell-detail" aria-labelledby="edge-cell-title">
+          <div class="edge-cell-copy">
+            <p class="detail-label">Poster Detail</p>
+            <h3 id="edge-cell-title">Edge-Cell Encoding</h3>
+            <p>
+              Edges are undirected, so the FPGA stores only the upper triangle of the adjacency
+              matrix. Each one-byte cell codes presence and age together.
+            </p>
+            <div class="edge-legend" aria-label="Edge-cell legend">
+              <span><i class="legend-edge"></i><strong>cell = age + 1</strong> stored edge</span>
+              <span><i class="legend-empty"></i><strong>cell = 0</strong> no edge</span>
+              <span><i class="legend-skipped"></i>Lower triangle and diagonal are never stored</span>
+            </div>
+          </div>
+
+          <div class="edge-matrix-wrap" aria-label="Upper triangular edge-cell matrix">
+            <div class="matrix-axis top-axis">node j -></div>
+            <div class="matrix-axis side-axis">node i -></div>
+            <div class="edge-matrix">
+              <span class="matrix-header"></span>
+              <span class="matrix-header">0</span>
+              <span class="matrix-header">1</span>
+              <span class="matrix-header">2</span>
+              <span class="matrix-header">3</span>
+              <span class="matrix-header">4</span>
+              <span class="matrix-header">5</span>
+              <span class="matrix-header">0</span>
+              <span class="cell skipped"></span>
+              <span class="cell edge">3</span>
+              <span class="cell edge">1</span>
+              <span class="cell empty">0</span>
+              <span class="cell empty">0</span>
+              <span class="cell empty">0</span>
+              <span class="matrix-header">1</span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell empty">0</span>
+              <span class="cell edge">7</span>
+              <span class="cell empty">0</span>
+              <span class="cell empty">0</span>
+              <span class="matrix-header">2</span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell edge">2</span>
+              <span class="cell edge">5</span>
+              <span class="cell empty">0</span>
+              <span class="matrix-header">3</span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell empty">0</span>
+              <span class="cell edge">1</span>
+              <span class="matrix-header">4</span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell edge">4</span>
+              <span class="matrix-header">5</span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+            </div>
+          </div>
+
+          <div class="edge-indexing">
+            <h4>Half-adjacency indexing</h4>
+            <p>Flatten the 2D upper triangle into one 1D array, row by row.</p>
+            <div class="index-strip" aria-label="Flattened edge-cell array">
+              <span>0</span><span>1</span><span>2</span><span>3</span><span>4</span>
+              <span>5</span><span class="active">6</span><span>7</span><span>8</span>
+              <span>9</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span>
+            </div>
+            <code>idx(i,j) = i(2Nmax - i - 1)/2 + (j - i - 1)</code>
+          </div>
+
+          <table class="memory-table">
+            <thead>
+              <tr>
+                <th>Implementation</th>
+                <th>Node</th>
+                <th>Edge</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Dense adjacency (baseline)</td>
+                <td>400 B</td>
+                <td>1,600 B</td>
+                <td>2,000 B</td>
+              </tr>
+              <tr>
+                <td>Edge-cells (proposed)</td>
+                <td>400 B</td>
+                <td>780 B</td>
+                <td>1,180 B</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="edge-saving">-51.25% edge storage and -41% total graph state at Nmax = 40.</p>
+        </article>
+
         <div class="motivation-flow" aria-label="Motivation and problem pipeline">
           <figure>
             <img src="images/motivation-embedded-scene.png" alt="Constrained embedded environment with geometric obstacles">
