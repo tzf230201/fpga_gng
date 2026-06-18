@@ -53,6 +53,12 @@ jobs:
           mkdir -p out/WCCI2026_5
           if [ -f WCCI2026_5/main.pdf ]; then cp WCCI2026_5/main.pdf out/WCCI2026_5/main.pdf; fi
           if [ -f WCCI2026_5/poster.pdf ]; then cp WCCI2026_5/poster.pdf out/WCCI2026_5/poster.pdf; fi
+          if [ -f "WCCI2026_5/WCCI2026-Poster-A0-Portrait (3).pptx" ]; then cp "WCCI2026_5/WCCI2026-Poster-A0-Portrait (3).pptx" out/WCCI2026_5/wcci2026-poster-a0-portrait.pptx; fi
+          if [ -f WCCI2026_5/wcci2026_poster_web_preview.png ]; then cp WCCI2026_5/wcci2026_poster_web_preview.png out/WCCI2026_5/wcci2026_poster_web_preview.png; fi
+          if [ -f WCCI2026_5/problem.png ]; then cp WCCI2026_5/problem.png out/WCCI2026_5/problem.png; fi
+          if [ -f WCCI2026_5/two_moons_result.png ]; then cp WCCI2026_5/two_moons_result.png out/WCCI2026_5/two_moons_result.png; fi
+          if [ -f WCCI2026_5/concentric_circles_result.png ]; then cp WCCI2026_5/concentric_circles_result.png out/WCCI2026_5/concentric_circles_result.png; fi
+          if [ -f WCCI2026_5/two_moons_training.png ]; then cp WCCI2026_5/two_moons_training.png out/WCCI2026_5/two_moons_training.png; fi
 
       - name: Build Slidev
         run: npm run build:gh

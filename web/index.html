@@ -3,17 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FPGA GNG | Growing Neural Gas on FPGA</title>
-  <meta name="description" content="Scientific project website for FPGA-based Growing Neural Gas using edge-cell graph encoding and fixed-point arithmetic.">
+  <title>FPGA GNG | WCCI 2026 Poster</title>
+  <meta name="description" content="WCCI 2026 research website for Edge-Cell Graph Encoding and Fixed-Point Arithmetic for FPGA Growing Neural Gas.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="site-header" aria-label="Primary navigation">
     <a class="brand" href="./">FPGA GNG</a>
     <nav>
+      <a href="#poster">Poster</a>
       <a href="#method">Method</a>
       <a href="#results">Results</a>
-      <a href="#deploy">Deploy</a>
+      <a href="#downloads">Downloads</a>
       <a class="nav-action" href="slides/">Slidev</a>
     </nav>
   </header>
@@ -22,128 +23,230 @@
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-overlay"></div>
       <div class="hero-content">
-        <p class="eyebrow">Hardware-software co-design for embedded self-organizing learning</p>
-        <h1 id="hero-title">Growing Neural Gas on resource-constrained FPGA</h1>
+        <p class="event-line">IEEE WCCI 2026 - Maastricht, Netherlands - Poster Session</p>
+        <h1 id="hero-title">Edge-Cell Graph Encoding and Fixed-Point Arithmetic for FPGA Growing Neural Gas</h1>
+        <p class="tagline">Bringing unsupervised learning down to the embedded level</p>
         <p class="hero-copy">
-          A research implementation of Growing Neural Gas for Tang Nano 9K and NEORV32,
-          using compact edge-cell graph encoding, integer arithmetic, UART visualization,
-          and reproducible experiment logs.
+          A fully integer, single-FSM GNG engine for the Sipeed Tang Nano 9K, designed for
+          bounded graph-state memory, deterministic latency, and on-device topology learning.
         </p>
         <div class="hero-actions">
-          <a class="button primary" href="slides/">Open Slidev presentation</a>
-          <a class="button secondary" href="https://github.com/tzf230201/fpga_gng">View GitHub repository</a>
+          <a class="button primary" href="#poster">View poster summary</a>
+          <a class="button secondary" href="slides/">Open Slidev presentation</a>
         </div>
       </div>
     </section>
 
-    <section class="summary-band" aria-label="Project summary">
-      <div class="summary-grid">
-        <div>
-          <span class="metric">41%</span>
-          <span class="metric-label">total BRAM state reduction versus dense adjacency at Nmax=40</span>
-        </div>
-        <div>
-          <span class="metric">27 MHz</span>
-          <span class="metric-label">target FPGA clock for deterministic sample-by-sample training</span>
-        </div>
-        <div>
-          <span class="metric">1.6k/s</span>
-          <span class="metric-label">measured FPGA sample throughput with UART debug frames</span>
-        </div>
+    <section class="kpi-band" aria-label="Poster key metrics">
+      <div class="kpi">
+        <span class="metric amber">-41%</span>
+        <span>smaller graph-state memory<br>(2,000 B to 1,180 B)</span>
+      </div>
+      <div class="kpi">
+        <span class="metric blue">~625 us</span>
+        <span>deterministic latency / sample<br>(about 1,600 samples/s)</span>
+      </div>
+      <div class="kpi">
+        <span class="metric blue">38%</span>
+        <span>LUT used on a 9K FPGA<br>62% headroom left</span>
       </div>
     </section>
 
-    <section class="content-section" id="method">
+    <section class="poster-section" id="poster">
       <div class="section-heading">
-        <p class="eyebrow">Method</p>
-        <h2>Bounded-memory GNG for small FPGA devices</h2>
+        <p class="section-index">Poster</p>
+        <h2>WCCI 2026 poster overview</h2>
         <p>
-          The project maps the canonical GNG update rule into fixed-size hardware state:
-          node BRAM stores coordinates, degree, activity, and error; edge BRAM stores only
-          upper-triangular edge cells encoded as age+1 values.
+          The website now follows the A0 portrait poster structure: motivation, compact graph
+          memory, fixed-point datapath, measured FPGA utilization, learned topologies, and
+          real-time throughput.
+        </p>
+      </div>
+      <figure class="poster-frame">
+        <img src="WCCI2026_5/wcci2026_poster_web_preview.png" alt="WCCI 2026 A0 poster preview for FPGA Growing Neural Gas">
+      </figure>
+    </section>
+
+    <section class="content-grid" id="method">
+      <article class="panel wide">
+        <div class="panel-title">1 - Motivation & Problem</div>
+        <div class="panel-body motivation">
+          <div>
+            <p>
+              Micro-UAV swarms and field robots need <strong>on-board unsupervised adaptation</strong>.
+              Cloud streaming is not reliable enough for payload-, power-, and link-constrained
+              systems, so learning must run locally with bounded memory and deterministic timing.
+            </p>
+            <ul>
+              <li>Dense adjacency is <strong>O(N^2)</strong>: 40 x 40 8-bit storage needs <strong>1,600 B</strong>.</li>
+              <li>Floating-point units are expensive on small FPGA targets.</li>
+              <li>GNG has dynamic edge insert, age, and prune operations unlike static-lattice SOMs.</li>
+            </ul>
+          </div>
+          <img src="WCCI2026_5/problem.png" alt="Embedded GNG problem and solution illustration">
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-title">2 - Method Overview</div>
+        <div class="panel-body">
+          <p>
+            The core contribution is a synthesizable VHDL engine on the <strong>Sipeed Tang Nano 9K</strong>:
+            no soft-core CPU, no FPU, no PLL.
+          </p>
+          <ol class="roman-list">
+            <li><strong>Edge-cell encoding</strong>: upper-triangular age+1 cells.</li>
+            <li><strong>Q8/Q16 learning rates</strong>: one multiply plus shift.</li>
+            <li><strong>Fused NB_SCAN</strong>: decay, aging, movement, and pruning in one pass.</li>
+            <li><strong>Degree counters</strong>: O(Nmax) isolated-node detection.</li>
+          </ol>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-title">3 - GNG Loop & Parameters</div>
+        <div class="panel-body">
+          <p>For each input sample, the engine finds winner <strong>s1</strong> and runner-up <strong>s2</strong>, then updates graph topology incrementally.</p>
+          <div class="parameter-table" role="table" aria-label="GNG parameters">
+            <span>Nmax</span><strong>40</strong>
+            <span>Amax</span><strong>50</strong>
+            <span>lambda</span><strong>100</strong>
+            <span>epsilon winner</span><strong>~0.301</strong>
+            <span>epsilon neighbor</span><strong>~0.001</strong>
+            <span>beta decay</span><strong>~0.9961</strong>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel wide focus-panel">
+        <div class="panel-title">4 - Edge-Cell Encoding</div>
+        <div class="panel-body split">
+          <div>
+            <p>
+              Edges are undirected, so only the <strong>upper triangle</strong> of the adjacency is stored.
+              Each byte combines presence and age:
+            </p>
+            <ul>
+              <li><code>cell = 0</code>: no edge</li>
+              <li><code>cell = age + 1</code>: active edge</li>
+              <li>Over-age pruning becomes one compare against <code>v &gt; 51</code>.</li>
+            </ul>
+          </div>
+          <div class="memory-card">
+            <span class="formula">Ecells = Nmax(Nmax - 1) / 2</span>
+            <strong>780 B</strong>
+            <span>versus 1,600 B dense edge storage</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-title">5 - Fixed-Point Arithmetic</div>
+        <div class="panel-body">
+          <p>
+            Coordinates use signed integers in <strong>[-1000, 1000]</strong>. Distance computation
+            produces a 35-bit unsigned result and maps cleanly to DSP resources.
+          </p>
+          <div class="code-box">
+            <span>d2 = dx^2 + dy^2</span>
+            <span>winner: 77 * delta &gt;&gt; 8</span>
+            <span>neighbor: 66 * delta &gt;&gt; 16</span>
+            <span>decay: err -= err &gt;&gt; 8</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-title">6 - FPGA Utilization</div>
+        <div class="panel-body utilization">
+          <div><strong>38%</strong><span>LUT<br>3,205 / 8,640</span></div>
+          <div><strong>22%</strong><span>FF<br>1,408 / 6,693</span></div>
+          <div><strong>24%</strong><span>BSRAM<br>6 / 26</span></div>
+          <div><strong>50%</strong><span>DSP<br>5 / 10</span></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="results-section" id="results">
+      <div class="section-heading">
+        <p class="section-index">6-7 - Results</p>
+        <h2>It fits, it learns, and it runs deterministically</h2>
+        <p>
+          Topologies are learned on FPGA and streamed through UART snapshots. The measured
+          runtime stays near-identical across datasets because latency is dominated by bounded
+          O(Nmax) BRAM scans.
         </p>
       </div>
 
-      <div class="feature-grid">
-        <article class="feature-card">
-          <h3>Edge-cell graph encoding</h3>
-          <p>
-            Each edge uses one byte. A value of 0 means inactive, while values above 0
-            represent an active edge with age equal to value minus 1. This avoids a dense
-            adjacency matrix and removes a separate active flag.
-          </p>
-        </article>
-        <article class="feature-card">
-          <h3>Integer and fixed-point arithmetic</h3>
-          <p>
-            Winner search, node movement, error decay, and edge aging are implemented with
-            integer datapaths, Q-format learning rates, and shift-based approximations
-            instead of a floating-point unit.
-          </p>
-        </article>
-        <article class="feature-card">
-          <h3>UART experiment interface</h3>
-          <p>
-            Dataset samples, node snapshots, edge snapshots, and profiling frames are sent
-            through UART so the host can render the evolving topology and calculate
-            scientific metrics from hardware output.
-          </p>
-        </article>
+      <div class="result-grid">
+        <figure>
+          <img src="WCCI2026_5/two_moons_result.png" alt="Two Moons learned topology from FPGA">
+          <figcaption><strong>Two Moons final:</strong> QE 0.146, TE 0.01, epoch 32.</figcaption>
+        </figure>
+        <figure>
+          <img src="WCCI2026_5/concentric_circles_result.png" alt="Concentric Circles learned topology from FPGA">
+          <figcaption><strong>Concentric Circles final:</strong> QE 0.196, TE 0.07, epoch 64.</figcaption>
+        </figure>
+        <figure class="wide-figure">
+          <img src="WCCI2026_5/two_moons_training.png" alt="Two Moons training dynamics">
+          <figcaption>Training dynamics: node/edge growth, quantization error convergence, and topological error.</figcaption>
+        </figure>
+      </div>
+
+      <div class="throughput-band">
+        <div><strong>~625 us</strong><span>per sample</span></div>
+        <div><strong>~16.9k</strong><span>cycles at 27 MHz</span></div>
+        <div><strong>~1,600</strong><span>samples per second</span></div>
       </div>
     </section>
 
-    <section class="visual-section" id="results">
-      <div class="section-heading">
-        <p class="eyebrow">Results</p>
-        <h2>Topology learning can be inspected from real experiment artifacts</h2>
-      </div>
-      <div class="result-layout">
-        <figure>
-          <img src="images/fig1_gng_result.png" alt="GNG learned topology on a two moons dataset">
-          <figcaption>Learned GNG topology on a two-dimensional benchmark dataset.</figcaption>
-        </figure>
-        <figure>
-          <img src="images/fig2_training_progress.png" alt="Training progress plot showing node growth and error convergence">
-          <figcaption>Training dynamics from experiment logs, including graph growth and convergence behavior.</figcaption>
-        </figure>
-      </div>
-    </section>
-
-    <section class="content-section" id="deploy">
-      <div class="section-heading">
-        <p class="eyebrow">Web deployment</p>
-        <h2>Website first, Slidev as a linked presentation</h2>
+    <section class="takeaway-section">
+      <div class="takeaway-panel">
+        <p class="section-index">8 - Takeaway & Future Work</p>
+        <h2>Dynamic topology learning is feasible on a sub-10K-LUT FPGA</h2>
         <p>
-          This GitHub Pages site is deployed as a static research website. The Slidev deck is
-          built into the <code>/slides/</code> subpath, so visitors start from the website and
-          open the presentation only when needed.
+          The poster's main message is that memory layout and arithmetic format are first-class
+          design decisions. Bounded state plus incremental updates make this implementation a
+          hardware substrate for continual learning at the edge.
         </p>
+        <div class="future-grid">
+          <span>Streaming sensor input</span>
+          <span>Pipelined O(log N) winner search</span>
+          <span>Q-format precision via VHDL generics</span>
+          <span>Multi-stream on-board mapping</span>
+        </div>
       </div>
+    </section>
 
+    <section class="downloads-section" id="downloads">
+      <div class="section-heading">
+        <p class="section-index">Code & Data</p>
+        <h2>Open the poster, slides, paper, and repository</h2>
+      </div>
       <div class="link-grid">
+        <a class="link-card" href="WCCI2026_5/wcci2026-poster-a0-portrait.pptx">
+          <span>Poster PPTX</span>
+          <strong>Download WCCI A0 poster</strong>
+        </a>
         <a class="link-card" href="slides/">
           <span>Presentation</span>
           <strong>Open Slidev deck</strong>
         </a>
-        <a class="link-card" href="WEB_VERSION_SCIENTIFIC_STUDY.md">
-          <span>Report</span>
-          <strong>Read scientific study markdown</strong>
-        </a>
         <a class="link-card" href="WCCI2026_5/main.pdf">
-          <span>Paper artifact</span>
+          <span>Paper</span>
           <strong>Open WCCI/IJCNN paper PDF</strong>
         </a>
         <a class="link-card" href="https://github.com/tzf230201/fpga_gng">
           <span>Source</span>
-          <strong>Browse repository</strong>
+          <strong>Browse GitHub code and data</strong>
         </a>
       </div>
     </section>
   </main>
 
   <footer class="site-footer">
-    <span>FPGA GNG research website</span>
-    <span>Growing Neural Gas, NEORV32, Tang Nano 9K, fixed-point topology learning</span>
+    <span>Supported by JST Moonshot R&amp;D Program, grant JPMJMS2034.</span>
+    <span>FPGA GNG - Edge-Cell Encoding - Fixed-Point Arithmetic</span>
   </footer>
 </body>
 </html>
