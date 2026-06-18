@@ -260,9 +260,21 @@
             <h4>Half-adjacency indexing</h4>
             <p>Flatten the 2D upper triangle into one 1D array, row by row.</p>
             <div class="index-strip" aria-label="Flattened edge-cell array">
-              <span>0</span><span>1</span><span>2</span><span>3</span><span>4</span>
-              <span>5</span><span class="active">6</span><span>7</span><span>8</span>
-              <span>9</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span>
+              <span><strong>0</strong><small>0,1</small></span>
+              <span><strong>1</strong><small>0,2</small></span>
+              <span><strong>2</strong><small>0,3</small></span>
+              <span><strong>3</strong><small>0,4</small></span>
+              <span><strong>4</strong><small>0,5</small></span>
+              <span><strong>5</strong><small>1,2</small></span>
+              <span class="active"><strong>6</strong><small>1,3</small></span>
+              <span><strong>7</strong><small>1,4</small></span>
+              <span><strong>8</strong><small>1,5</small></span>
+              <span><strong>9</strong><small>2,3</small></span>
+              <span><strong>10</strong><small>2,4</small></span>
+              <span><strong>11</strong><small>2,5</small></span>
+              <span><strong>12</strong><small>3,4</small></span>
+              <span><strong>13</strong><small>3,5</small></span>
+              <span><strong>14</strong><small>4,5</small></span>
             </div>
             <div class="formula-display" aria-label="idx i comma j equals i times open parenthesis two N max minus i minus one close parenthesis divided by two plus open parenthesis j minus i minus one close parenthesis">
               <span class="formula-term">idx(i,j)</span>
@@ -273,6 +285,14 @@
               </span>
               <span class="formula-operator">+</span>
               <span class="formula-term">(j - i - 1)</span>
+            </div>
+            <div class="index-example">
+              <span class="example-label">Example with N<sub>max</sub> = 6 and (i,j) = (1,3)</span>
+              <span class="example-equation">
+                idx(1,3) = 1(2 &times; 6 - 1 - 1) / 2 + (3 - 1 - 1)
+              </span>
+              <span class="example-equation">idx(1,3) = 10 / 2 + 1 = 6</span>
+              <strong>(1,3) &rarr; cell 6</strong>
             </div>
           </div>
 

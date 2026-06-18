@@ -424,25 +424,72 @@ p {
 
 .index-strip {
   display: grid;
-  grid-template-columns: repeat(15, minmax(28px, 1fr));
+  grid-template-columns: repeat(15, minmax(44px, 1fr));
   gap: 0.25rem;
   margin: 0.8rem 0;
 }
 
 .index-strip span {
   display: grid;
-  min-height: 30px;
+  min-height: 52px;
   place-items: center;
   border-radius: 6px;
   background: #edf1f6;
   color: #718096;
-  font-size: 0.82rem;
   font-weight: 800;
+}
+
+.index-strip strong {
+  color: #17375f;
+  font-size: 0.92rem;
+  line-height: 1;
+}
+
+.index-strip small {
+  color: #8fa0b8;
+  font-family: "Cambria Math", "Times New Roman", serif;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .index-strip .active {
   background: #e6ac46;
   color: #ffffff;
+}
+
+.index-strip .active strong,
+.index-strip .active small {
+  color: #ffffff;
+}
+
+.index-example {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.85rem;
+  padding: 0.75rem;
+  border: 1px solid #efe1c6;
+  border-left: 5px solid #e6ac46;
+  border-radius: 10px;
+  background: #fff8ec;
+  color: #263a58;
+  font-size: 0.95rem;
+}
+
+.index-example strong {
+  color: #a87320;
+  font-family: "Cambria Math", "Times New Roman", serif;
+  font-size: 1.08rem;
+}
+
+.example-label {
+  color: #a87320;
+  font-weight: 800;
+}
+
+.example-equation {
+  font-family: "Cambria Math", "Times New Roman", serif;
+  overflow-wrap: anywhere;
 }
 
 .formula-display {
@@ -1057,14 +1104,21 @@ footer p {
   }
 
   .index-strip {
-    grid-template-columns: repeat(15, 24px);
+    grid-template-columns: repeat(15, 54px);
     overflow-x: auto;
     padding-bottom: 0.2rem;
   }
 
   .index-strip span {
-    min-height: 24px;
-    font-size: 0.72rem;
+    min-height: 46px;
+  }
+
+  .index-strip strong {
+    font-size: 0.82rem;
+  }
+
+  .index-strip small {
+    font-size: 0.68rem;
   }
 
   .memory-table {
