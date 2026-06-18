@@ -1082,6 +1082,71 @@ p {
   text-align: center;
 }
 
+.future-feature {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: 1rem;
+  align-items: stretch;
+  margin: 1.8rem 0;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.future-feature figure {
+  overflow: hidden;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.future-feature img {
+  height: 100%;
+  min-height: 260px;
+  aspect-ratio: 16 / 7;
+  object-fit: cover;
+}
+
+.future-feature figcaption {
+  padding: 0.6rem 0.7rem 0.75rem;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+.future-feature-copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0.45rem 0.35rem;
+}
+
+.future-feature-copy h3 {
+  color: #ffffff;
+  font-size: 1.25rem;
+}
+
+.future-feature-copy p {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.98rem;
+}
+
+.future-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.future-tags span {
+  padding: 0.32rem 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .future-image-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1192,6 +1257,14 @@ footer p {
     width: min(100%, 320px);
     margin-right: auto;
     margin-left: auto;
+  }
+
+  .future-feature {
+    grid-template-columns: 1fr;
+  }
+
+  .future-feature img {
+    min-height: 190px;
   }
 
   .problem-grid article {

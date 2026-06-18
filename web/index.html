@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260619-gng-paper">
+  <link rel="stylesheet" href="styles.css?v=20260619-future-robot">
 </head>
 <body>
   <main>
@@ -595,10 +595,37 @@
         <p class="detail-label future-label">Takeaway & Future Work</p>
         <h2>Future Prospects</h2>
         <p class="future-lead">
-          Self-organizing clustering with dynamic topology is feasible on a sub-10K-LUT FPGA.
-          The next step is to turn this hardware substrate into a continual edge-learning module
-          for robots, swarms, and exploration systems.
+          Self-organizing clustering with dynamic topology is feasible on a sub-10K-LUT FPGA,
+          making it relevant for robots and embedded devices with strict power, weight,
+          physical-size, compute, and memory limits.
         </p>
+
+        <div class="future-feature">
+          <figure>
+            <img src="images/future-pipe-exploration-robot.jpg" alt="Compact exploration robot operating inside a constrained pipe">
+            <figcaption>Confined-space exploration robot</figcaption>
+          </figure>
+          <div class="future-feature-copy">
+            <h3>Why this hardware direction matters</h3>
+            <p>
+              Robots for pipe inspection, exploration, long-term deployment, and distributed
+              sensing cannot assume large batteries, high-end processors, or abundant memory.
+              A bounded-memory FPGA GNG module can keep learning local topology while staying
+              lightweight, low power, and physically compact.
+            </p>
+            <div class="future-tags" aria-label="Target constraints and deployment modes">
+              <span>Low power</span>
+              <span>Lightweight</span>
+              <span>Strict physical size</span>
+              <span>Long-term mission</span>
+              <span>Exploration</span>
+              <span>Swarm devices</span>
+              <span>Distributed intelligence</span>
+              <span>Compute constrained</span>
+              <span>Low memory</span>
+            </div>
+          </div>
+        </div>
 
         <div class="future-image-grid" aria-label="Prospective application images">
           <figure>
@@ -621,20 +648,20 @@
 
         <div class="future-card-grid">
           <article>
-            <h3>Continual sensor input</h3>
-            <p>Adapt continuously without restarting as new streaming observations arrive.</p>
+            <h3>Constrained devices</h3>
+            <p>Fit online topology learning into low-power, lightweight, size-limited platforms.</p>
           </article>
           <article>
-            <h3>Pipelined winner search</h3>
-            <p>Replace sequential scans with an O(log Nmax) winner-search tree.</p>
+            <h3>Long-term exploration</h3>
+            <p>Adapt continuously as robots traverse unknown or changing environments.</p>
           </article>
           <article>
-            <h3>Configurable precision</h3>
-            <p>Expose Q-format constants through VHDL generics for device-level tuning.</p>
+            <h3>Swarm intelligence</h3>
+            <p>Enable many small devices to learn local maps with limited communication.</p>
           </article>
           <article>
-            <h3>Multi-stream mapping</h3>
-            <p>Fuse real-time sensor streams for on-board unsupervised spatial mapping.</p>
+            <h3>Memory-aware autonomy</h3>
+            <p>Use fixed-capacity graph storage where RAM and compute are tightly constrained.</p>
           </article>
         </div>
       </div>
