@@ -1,0 +1,723 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Edge-Cell Graph Encoding and Fixed-Point Arithmetic for FPGA Growing Neural Gas</title>
+  <meta name="description" content="Project page for a WCCI 2026 FPGA Growing Neural Gas implementation using edge-cell graph encoding and fixed-point arithmetic.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=20260619-flow-arrows">
+</head>
+<body>
+  <main>
+    <section class="hero">
+      <div class="container centered">
+        <p class="venue">IEEE WCCI 2026 Poster Session</p>
+        <h1 class="publication-title">Edge-Cell Graph Encoding and Fixed-Point Arithmetic for FPGA Growing Neural Gas</h1>
+
+        <div class="publication-authors">
+          <span>Teuku Zikri Fatahillah<sup>1</sup></span>
+          <span>Raditya Artha Rochmanto<sup>1,2</sup></span>
+          <span>Achmad Fahrul Aji<sup>1,2</sup></span>
+          <span>Anhar Risnumawan<sup>1,3</sup></span>
+          <span>Chyan Zheng Siow<sup>1,4</sup></span>
+          <span>Naoyuki Kubota<sup>1</sup></span>
+        </div>
+
+        <div class="publication-affiliations">
+          <span><sup>1</sup>Tokyo Metropolitan University</span>
+          <span><sup>2</sup>Politeknik Negeri Semarang</span>
+          <span><sup>3</sup>Politeknik Elektronika Negeri Surabaya</span>
+          <span><sup>4</sup>Changsha Cultural and Creative Arts Vocational College</span>
+        </div>
+
+        <div class="publication-links" aria-label="Project links">
+          <a class="button" href="publication_materials/main.pdf">Paper</a>
+          <a class="button" href="publication_materials/wcci2026-poster-a0-portrait.pptx">Poster</a>
+          <a class="button" href="slides/">Slides</a>
+          <a class="button" href="https://github.com/tzf230201/fpga_gng">Code</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Problem &amp; Motivation</h2>
+        <p class="section-intro">
+          Edge robots and micro-UAVs need unsupervised learning close to the sensor, where
+          communication links, payload, and energy are limited. GNG is a strong candidate
+          because it learns both prototypes and topology online, but its graph operations are
+          not naturally matched to a small FPGA fabric.
+        </p>
+
+        <div class="problem-grid">
+          <article>
+            <span class="problem-tag">Problem 1</span>
+            <h3>Dynamic topology on static hardware</h3>
+            <p>
+              GNG continually creates, ages, reconnects, and removes graph edges. These
+              data-dependent operations are simple in software, but they create irregular
+              memory access and control-flow pressure on a small FPGA.
+            </p>
+          </article>
+          <article>
+            <span class="problem-tag">Problem 2</span>
+            <h3>Dense adjacency wastes graph memory</h3>
+            <p>
+              A conventional Nmax by Nmax adjacency matrix stores both halves of an undirected
+              graph. At Nmax = 40, the dense edge table alone consumes 1,600 B before any node
+              coordinate or error state is stored.
+            </p>
+          </article>
+          <article>
+            <span class="problem-tag">Problem 3</span>
+            <h3>Floating-point units are too costly</h3>
+            <p>
+              Winner search, distance evaluation, and learning-rate updates are repeated for
+              every input sample. Floating-point datapaths increase area and latency, limiting
+              their usefulness on a sub-10K-LUT FPGA.
+            </p>
+          </article>
+          <article>
+            <span class="problem-tag">Motivation</span>
+            <h3>Make online GNG practical at the edge</h3>
+            <p>
+              The design target is a bounded-memory, integer-only GNG accelerator that keeps
+              the dynamic topology behavior of the algorithm while fitting the Tang Nano 9K
+              resource envelope.
+            </p>
+          </article>
+        </div>
+
+        <div class="motivation-flow" aria-label="Motivation and problem pipeline">
+          <figure>
+            <img src="images/motivation-embedded-scene.png" alt="Constrained embedded environment with geometric obstacles">
+            <figcaption>Unstructured field scene</figcaption>
+          </figure>
+
+          <figure class="hardware-node">
+            <img src="images/tang-nano-9k.png" alt="Sipeed Tang Nano 9K FPGA board">
+            <figcaption>Tang Nano 9K FPGA</figcaption>
+          </figure>
+
+          <figure>
+            <img src="images/motivation-topology-map.png" alt="Growing Neural Gas topology graph over a navigation-like map">
+            <figcaption>Online topology graph</figcaption>
+          </figure>
+        </div>
+        <p class="motivation-caption">
+          Motivation: convert continuous, sensor-like spatial observations into a compact GNG
+          graph directly on a small FPGA, without floating-point hardware or dynamic memory.
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container narrow">
+        <h2>Abstract</h2>
+        <p>
+          Growing Neural Gas (GNG) is a self-organizing clustering algorithm that incrementally
+          learns a graph representation from unlabeled data. Its dynamic topology is attractive
+          for edge robotics and field systems, but conventional implementations rely on dense
+          adjacency structures, floating-point arithmetic, and dynamic memory patterns that do
+          not map cleanly to small FPGAs.
+        </p>
+        <p>
+          This project implements GNG on a Sipeed Tang Nano 9K FPGA using a bounded-memory
+          datapath. Edge-cell graph encoding stores only the upper triangle of the adjacency as
+          8-bit age+1 values, while Q8/Q16 fixed-point updates replace floating-point learning
+          rates. The design fits within the GW1NR-9C resource budget and preserves topology
+          quality on Two Moons and Concentric Circles benchmarks.
+        </p>
+      </div>
+    </section>
+
+    <section class="section section-gray">
+      <div class="container">
+        <h2>Method Overview</h2>
+        <div class="method-grid">
+          <article>
+            <h3>Fused update pass</h3>
+            <p>
+              Error decay, edge aging, neighbor movement, and over-age pruning are combined
+              inside one NB_SCAN sweep. Per-node degree counters support isolated-node
+              monitoring without scanning the full edge array.
+            </p>
+          </article>
+          <article>
+            <h3>Edge-cell encoding</h3>
+            <p>
+              The graph stores one byte per undirected node pair. A zero value means no edge;
+              a nonzero value stores edge age plus one. At Nmax = 40, edge storage drops from
+              1,600 B to 780 B.
+            </p>
+          </article>
+          <article>
+            <h3>Fixed-point arithmetic</h3>
+            <p>
+              Node coordinates are signed integers normalized to [-1000, 1000]. Winner and
+              neighbor adaptation use Q8/Q16 shift-scaled learning rates with DSP-friendly
+              multiply-and-shift operations.
+            </p>
+          </article>
+        </div>
+
+        <article class="gng-loop-detail" aria-labelledby="gng-loop-title">
+          <div class="gng-loop-copy">
+            <h3 id="gng-loop-title">GNG Loop &amp; Fused FPGA Update</h3>
+            <p>
+              In the paper, the current implementation is a sequential single-clock FSM.
+              <strong>UPDATE</strong> handles the winner first: accumulate
+              <span>err<sub>s1</sub></span>, apply winner error decay, and move
+              <span>s<sub>1</sub></span> with the Q8 learning rate.
+            </p>
+            <p>
+              The fused part is the <strong>NB_SCAN</strong> pass. While scanning each active
+              node slot <span>n &ne; s<sub>1</sub></span>, the FSM decays that node's error,
+              probes <code>edge_cell[idx(s1,n)]</code>, and only for active winner-incident
+              edges performs aging, neighbor movement, and old-edge pruning inline.
+            </p>
+            <div class="parallel-note">
+              <strong>FPGA implication:</strong> the current paper reports this as a bounded
+              sequential read-modify-write pipeline; the same regular per-node/per-edge-cell
+              structure is the path to wider parallel datapaths when BRAM ports and resources
+              are provisioned.
+            </div>
+          </div>
+
+          <div class="gng-flow" aria-label="GNG fused loop pipeline">
+            <div class="flow-node">
+              <strong>Sample input &xi;</strong>
+              <span>SAMPLE</span>
+            </div>
+            <div class="flow-arrow">&darr;</div>
+            <div class="flow-node">
+              <strong>Find winner s<sub>1</sub>, runner-up s<sub>2</sub></strong>
+              <span>WIN_SCAN</span>
+            </div>
+            <div class="flow-arrow">&darr;</div>
+            <div class="flow-node update-node">
+              <strong>Update winner s<sub>1</sub>: err + decay + Q8 move</strong>
+              <span>UPDATE</span>
+            </div>
+            <div class="flow-arrow">&darr;</div>
+            <div class="fused-box">
+              <h4>Fused NB_SCAN pass</h4>
+              <div class="fused-grid">
+                <span>Decay node error</span>
+                <span>Probe edge cell</span>
+                <span>Age/prune active edge</span>
+                <span>Move neighbor</span>
+              </div>
+              <p>one N<sub>max</sub> scan replaces separate decay + neighbor-edge passes</p>
+            </div>
+            <div class="flow-arrow">&darr;</div>
+            <div class="flow-node">
+              <strong>Connect (s<sub>1</sub>, s<sub>2</sub>) &middot; reset edge age</strong>
+              <span>CONNECT</span>
+            </div>
+            <div class="flow-arrow">&darr;</div>
+            <div class="flow-node">
+              <strong>Insert node @ &lambda; &middot; split max-error edge</strong>
+              <span>INSERT</span>
+            </div>
+          </div>
+
+          <p class="gng-loop-note">
+            Each BRAM read-modify-write takes at least three cycles, so the implemented loop
+            remains deterministic and bounded per sample even before wider parallel datapaths
+            are introduced.
+          </p>
+        </article>
+
+        <article class="edge-cell-detail" aria-labelledby="edge-cell-title">
+          <div class="edge-cell-copy">
+            <h3 id="edge-cell-title">Edge-Cell Encoding</h3>
+            <p>
+              Edges are undirected, so the FPGA stores only the upper triangle of the adjacency
+              matrix. Each one-byte cell codes presence and age together.
+            </p>
+            <div class="edge-legend" aria-label="Edge-cell legend">
+              <span><i class="legend-edge"></i><strong>cell = age + 1</strong> stored edge</span>
+              <span><i class="legend-empty"></i><strong>cell = 0</strong> no edge</span>
+              <span><i class="legend-skipped"></i>Lower triangle and diagonal are never stored</span>
+            </div>
+          </div>
+
+          <div class="edge-matrix-wrap" aria-label="Upper triangular edge-cell matrix">
+            <div class="matrix-axis top-axis">node j &rarr;</div>
+            <div class="matrix-axis side-axis">
+              <span class="side-axis-label">&larr; node</span>
+            </div>
+            <div class="edge-matrix">
+              <span class="matrix-header"></span>
+              <span class="matrix-header">0</span>
+              <span class="matrix-header">1</span>
+              <span class="matrix-header">2</span>
+              <span class="matrix-header">3</span>
+              <span class="matrix-header">4</span>
+              <span class="matrix-header">5</span>
+              <span class="matrix-header">0</span>
+              <span class="cell skipped"></span>
+              <span class="cell edge">3</span>
+              <span class="cell edge">1</span>
+              <span class="cell empty">0</span>
+              <span class="cell empty">0</span>
+              <span class="cell empty">0</span>
+              <span class="matrix-header">1</span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell empty">0</span>
+              <span class="cell edge">7</span>
+              <span class="cell empty">0</span>
+              <span class="cell empty">0</span>
+              <span class="matrix-header">2</span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell edge">2</span>
+              <span class="cell edge">5</span>
+              <span class="cell empty">0</span>
+              <span class="matrix-header">3</span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell empty">0</span>
+              <span class="cell edge">1</span>
+              <span class="matrix-header">4</span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell edge">4</span>
+              <span class="matrix-header">5</span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+              <span class="cell skipped"></span>
+            </div>
+          </div>
+
+          <div class="edge-indexing">
+            <h4>Half-adjacency indexing</h4>
+            <p>Flatten the 2D upper triangle into one 1D array, row by row.</p>
+            <div class="index-strip" aria-label="Flattened edge-cell array">
+              <span><strong>0</strong><small>0,1</small></span>
+              <span><strong>1</strong><small>0,2</small></span>
+              <span><strong>2</strong><small>0,3</small></span>
+              <span><strong>3</strong><small>0,4</small></span>
+              <span><strong>4</strong><small>0,5</small></span>
+              <span><strong>5</strong><small>1,2</small></span>
+              <span class="active"><strong>6</strong><small>1,3</small></span>
+              <span><strong>7</strong><small>1,4</small></span>
+              <span><strong>8</strong><small>1,5</small></span>
+              <span><strong>9</strong><small>2,3</small></span>
+              <span><strong>10</strong><small>2,4</small></span>
+              <span><strong>11</strong><small>2,5</small></span>
+              <span><strong>12</strong><small>3,4</small></span>
+              <span><strong>13</strong><small>3,5</small></span>
+              <span><strong>14</strong><small>4,5</small></span>
+            </div>
+            <div class="formula-display edge-index-formula" aria-label="idx i comma j equals i times open parenthesis two N max minus i minus one close parenthesis divided by two plus open parenthesis j minus i minus one close parenthesis">
+              <span class="formula-term">idx(i,j)</span>
+              <span class="formula-operator">=</span>
+              <span class="formula-fraction">
+                <span class="formula-numerator">i(2N<sub>max</sub> - i - 1)</span>
+                <span class="formula-denominator">2</span>
+              </span>
+              <span class="formula-operator">+</span>
+              <span class="formula-term">(j - i - 1)</span>
+              <span class="formula-comment">(1,3) &rarr; cell 6</span>
+            </div>
+          </div>
+
+          <table class="memory-table">
+            <thead>
+              <tr>
+                <th>Implementation</th>
+                <th>Node</th>
+                <th>Edge</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Dense adjacency (baseline)</td>
+                <td>400 B</td>
+                <td>1,600 B</td>
+                <td>2,000 B</td>
+              </tr>
+              <tr>
+                <td>Edge-cells (proposed)</td>
+                <td>400 B</td>
+                <td>780 B</td>
+                <td>1,180 B</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="edge-saving">-51.25% edge storage and -41% total graph state at Nmax = 40.</p>
+        </article>
+
+        <article class="fixed-point-detail" aria-labelledby="fixed-point-title">
+          <div class="fixed-poster-header">
+            <div>
+              <h3 id="fixed-point-title">Fixed-Point Arithmetic</h3>
+              <p>
+                <strong>Integer-only datapath</strong> - no floating-point unit. The whole
+                engine runs on a Tang Nano 9K at 27 MHz as a single FSM with 3 BRAMs and
+                1 Mbit/s UART streaming.
+              </p>
+            </div>
+            <figure class="fixed-board">
+              <img src="images/tang-nano-9k.png" alt="Tang Nano 9K FPGA board used by the fixed-point GNG accelerator">
+              <figcaption>Tang Nano 9K - GW1NR-9C</figcaption>
+            </figure>
+          </div>
+
+          <div class="fixed-poster-section">
+            <p>
+              <strong>Coordinate representation</strong> - 16-bit signed integers in
+              <code>[-1000, 1000]</code> after min-max normalization:
+            </p>
+            <div class="formula-display fixed-wide-formula stacked-formula">
+              <span class="formula-line">
+                <span class="formula-term">x<sub>norm</sub></span>
+                <span class="formula-operator">=</span>
+                <span class="formula-fraction">
+                  <span class="formula-numerator">x - x<sub>min</sub></span>
+                  <span class="formula-denominator">x<sub>max</sub> - x<sub>min</sub></span>
+                </span>
+                <span class="formula-operator">&middot;</span>
+                <span class="formula-term">2s - s</span>
+              </span>
+              <span class="formula-note">s = 1000</span>
+            </div>
+          </div>
+
+          <div class="fixed-poster-section">
+            <p><strong>80-bit node word</strong> - one BRAM entry per node:</p>
+            <div class="node-word-strip" aria-label="Packed node state fields">
+              <span class="node-field field-wide">x [16]</span>
+              <span class="node-field field-wide">y [16]</span>
+              <span class="node-field">deg [8]</span>
+              <span class="node-field field-error">err [32]</span>
+              <span class="node-field field-pad">act + pad</span>
+            </div>
+          </div>
+
+          <div class="fixed-poster-section">
+            <p>
+              <strong>Squared-distance unit</strong> - maps directly onto a 9x9 DSP
+              multiplier, overflow-free:
+            </p>
+            <div class="fixed-code-formula">
+              <span>&Delta;x = &xi;<sub>x</sub> - x<sub>n</sub>, &Delta;y = &xi;<sub>y</sub> - y<sub>n</sub> <em>17-bit signed</em></span>
+              <span>d<sup>2</sup> = &Delta;x<sup>2</sup> + &Delta;y<sup>2</sup> <em>35-bit unsigned</em></span>
+            </div>
+          </div>
+
+          <div class="fixed-poster-section">
+            <p>
+              <strong>Parametric learning rates</strong> - one multiply + shift each
+              (single DSP cycle):
+            </p>
+            <div class="rate-equations">
+              <div class="rate-card">
+                <span class="rate-label">Winner (Q8)</span>
+                <div class="formula-display fixed-rate-formula stacked-formula">
+                  <span class="formula-line">
+                    <span class="formula-term">&Delta;x<sub>s1</sub></span>
+                    <span class="formula-operator">=</span>
+                    <span>&lfloor;</span>
+                    <span class="formula-fraction">
+                      <span class="formula-numerator">EPS_WIN_Q8(&xi;<sub>x</sub> - x<sub>s1</sub>)</span>
+                      <span class="formula-denominator">2<sup>8</sup></span>
+                    </span>
+                    <span>&rfloor;</span>
+                  </span>
+                  <span class="formula-note">&epsilon;<sub>w</sub> = EPS_WIN_Q8 / 2<sup>8</sup></span>
+                </div>
+              </div>
+              <div class="rate-card">
+                <span class="rate-label">Neighbor (Q16)</span>
+                <div class="formula-display fixed-rate-formula stacked-formula">
+                  <span class="formula-line">
+                    <span class="formula-term">&Delta;x<sub>n</sub></span>
+                    <span class="formula-operator">=</span>
+                    <span>&lfloor;</span>
+                    <span class="formula-fraction">
+                      <span class="formula-numerator">EPS_N_Q16(&xi;<sub>x</sub> - x<sub>n</sub>)</span>
+                      <span class="formula-denominator">2<sup>16</sup></span>
+                    </span>
+                    <span>&rfloor;</span>
+                  </span>
+                  <span class="formula-note">&epsilon;<sub>n</sub> = EPS_N_Q16 / 2<sup>16</sup></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="decay-strip">
+            <strong>Multiplierless error decay</strong>
+            <span>err<sub>n</sub> -= err<sub>n</sub> &gt;&gt; 8</span>
+            <em>no multiplier, beta = 0.9961</em>
+          </div>
+
+          <p class="fused-update-note">
+            <strong>Fused update:</strong> winner move, edge aging, neighbor move, error decay,
+            and pruning all run in one NB_SCAN sweep, so per-edge operations remain regular and
+            FPGA-friendly.
+          </p>
+
+          <table class="fixed-param-table">
+            <thead>
+              <tr>
+                <th>Parameter</th>
+                <th>Value</th>
+                <th>Hardware mapping</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>N<sub>max</sub> (max nodes)</td>
+                <td>40</td>
+                <td>node BRAM depth</td>
+              </tr>
+              <tr>
+                <td>A<sub>max</sub> (max edge age)</td>
+                <td>50</td>
+                <td>A_MAX_STORED = 51</td>
+              </tr>
+              <tr>
+                <td>&lambda; (insertion period)</td>
+                <td>100</td>
+                <td>lambda counter</td>
+              </tr>
+              <tr>
+                <td>&epsilon;<sub>w</sub> (winner lr)</td>
+                <td>0.301</td>
+                <td>EPS_WIN_Q8 = 77, &gt;&gt; 8</td>
+              </tr>
+              <tr>
+                <td>&epsilon;<sub>n</sub> (neighbor lr)</td>
+                <td>0.001</td>
+                <td>EPS_N_Q16 = 66, &gt;&gt; 16</td>
+              </tr>
+              <tr>
+                <td>&alpha; (error split)</td>
+                <td>0.5</td>
+                <td>INS_ALPHA_SHIFT = 1</td>
+              </tr>
+              <tr>
+                <td>&beta; (error decay)</td>
+                <td>0.9961</td>
+                <td>ERR_DECAY_SHIFT = 8</td>
+              </tr>
+              <tr>
+                <td>ERR_SHIFT (acc. scale)</td>
+                <td>4</td>
+                <td>d<sup>2</sup> &gt;&gt; 4 before accumulation</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="quantization-note">
+            <strong>Where 77 and 66 come from:</strong>
+            the author selected fixed-point coefficients that approximate the target learning
+            rates, namely a winner rate close to <span>&epsilon;<sub>w</sub> = 0.3</span> and
+            a neighbor rate close to <span>&epsilon;<sub>n</sub> = 0.001</span>. In a Q-format
+            implementation, <span>EPS_Q = round(&epsilon; &middot; 2<sup>Q</sup>)</span>, so
+            <span>EPS_WIN_Q8 = round(0.3 &middot; 256) = 77</span> and
+            <span>EPS_N_Q16 = round(0.001 &middot; 65536) = 66</span>.
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Experiments</h2>
+        <p class="section-intro">
+          The prototype is evaluated on two 2D topology-learning benchmarks using FPGA snapshots
+          and an on-chip cycle counter. The measured latency remains near-identical across
+          datasets because execution is bounded by O(Nmax) BRAM scans.
+        </p>
+
+        <p class="result-callout">Integer-only GNG learns dynamic topology on a sub-10K-LUT FPGA.</p>
+        <div class="hero-media">
+          <figure>
+            <img src="publication_materials/two_moons_result.png" alt="Two Moons topology learned by FPGA GNG">
+            <figcaption>Two Moons learned topology</figcaption>
+          </figure>
+          <figure>
+            <img src="publication_materials/concentric_circles_result.png" alt="Concentric Circles topology learned by FPGA GNG">
+            <figcaption>Concentric Circles learned topology</figcaption>
+          </figure>
+        </div>
+        <p class="overview-caption">
+          The FPGA streams node and edge snapshots through UART. The host reconstructs the
+          learned topology and evaluates quantization error, topological error, and runtime.
+        </p>
+
+        <div class="metrics">
+          <div>
+            <strong>-41%</strong>
+            <span>total graph-state memory</span>
+          </div>
+          <div>
+            <strong>~625 us</strong>
+            <span>deterministic latency per sample</span>
+          </div>
+          <div>
+            <strong>~1,600/s</strong>
+            <span>measured sample throughput</span>
+          </div>
+          <div>
+            <strong>38%</strong>
+            <span>LUT utilization on GW1NR-9C</span>
+          </div>
+        </div>
+
+        <figure class="wide-figure">
+          <img src="publication_materials/two_moons_training.png" alt="Training dynamics for the Two Moons experiment">
+          <figcaption>Training dynamics for Two Moons: graph growth, quantization error convergence, and topological error.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section future-section">
+      <div class="container">
+        <p class="detail-label future-label">Takeaway & Future Work</p>
+        <h2>Future Prospects</h2>
+        <p class="future-lead">
+          Self-organizing clustering with dynamic topology is feasible on a sub-10K-LUT FPGA,
+          making it relevant for robots and embedded devices with strict power, weight,
+          physical-size, compute, and memory limits.
+        </p>
+
+        <div class="future-feature">
+          <figure>
+            <img src="images/future-pipe-exploration-robot.jpg" alt="Compact exploration robot operating inside a constrained pipe">
+            <figcaption>Confined-space exploration robot</figcaption>
+          </figure>
+          <div class="future-feature-copy">
+            <h3>Why this hardware direction matters</h3>
+            <p>
+              Robots for pipe inspection, exploration, long-term deployment, and distributed
+              sensing cannot assume large batteries, high-end processors, or abundant memory.
+              A bounded-memory FPGA GNG module can keep learning local topology while staying
+              lightweight, low power, and physically compact.
+            </p>
+            <p class="future-source">
+              Pipe inspection image source:
+              <a href="https://jet-mfg.com/category/service-robots/inspection-robot/narrow-space-inspection-robot">JET Manufacturing</a>,
+              accessed June 2026.
+            </p>
+            <div class="future-tags" aria-label="Target constraints and deployment modes">
+              <span>Low power</span>
+              <span>Lightweight</span>
+              <span>Strict physical size</span>
+              <span>Long-term mission</span>
+              <span>Exploration</span>
+              <span>Swarm devices</span>
+              <span>Distributed intelligence</span>
+              <span>Compute constrained</span>
+              <span>Low memory</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="future-image-grid" aria-label="Prospective application images">
+          <figure>
+            <img src="images/future-aerial-robot.png" alt="Topological mapping for lightweight flapping robot prospective application">
+            <figcaption>
+              Topological mapping for lightweight flapping robot
+              <span class="photo-credit">Credit: EPFL / Raphael Zufferey</span>
+            </figcaption>
+          </figure>
+          <figure>
+            <img src="images/future-bio-inspired-robot.jpg" alt="Bio-inspired robot prospective application">
+            <figcaption>
+              Bio-inspired robot
+              <span class="photo-credit">The Pleurobot. Photo: Hillary Sanctuary &amp; BioRob</span>
+            </figcaption>
+          </figure>
+          <figure>
+            <img src="images/future-swarm-robot.jpg" alt="Swarm robot prospective application">
+            <figcaption>
+              Swarm robot
+              <span class="photo-credit">Kilobot swarm. Photo: Mike Rubenstein and Science/AAAS; Harvard SEAS</span>
+            </figcaption>
+          </figure>
+          <figure>
+            <img src="images/future-exploration-robot.png" alt="Long-term exploration robot prospective application">
+            <figcaption>
+              Long-term exploration robot
+              <span class="photo-credit">Credit: Canadian Space Agency</span>
+            </figcaption>
+          </figure>
+        </div>
+
+        <div class="future-card-grid">
+          <article>
+            <h3>Lightweight flapping robots</h3>
+            <p>Map local topology on tiny aerial platforms where payload and compute budget are minimal.</p>
+          </article>
+          <article>
+            <h3>Bio-inspired physical constraints</h3>
+            <p>Support compact robots whose body shape, actuator layout, and memory budget are tightly limited.</p>
+          </article>
+          <article>
+            <h3>Swarm intelligence</h3>
+            <p>Let many small robots learn local structure with distributed intelligence and limited communication.</p>
+          </article>
+          <article>
+            <h3>Low-power long missions</h3>
+            <p>Keep exploration robots adapting over long deployments without high-power processors or large RAM.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-gray">
+      <div class="container">
+        <h2>Poster</h2>
+        <figure class="poster-preview">
+          <img src="publication_materials/wcci2026_poster_web_preview.png" alt="WCCI 2026 A0 poster preview">
+        </figure>
+      </div>
+    </section>
+
+    <section class="section" id="downloads">
+      <div class="container narrow centered">
+        <h2>Resources</h2>
+        <p>
+          The paper, poster, slide deck, CSV datasets, source code, and reproducibility report are available
+          from the links below.
+        </p>
+        <div class="publication-links bottom-links">
+          <a class="button" href="publication_materials/main.pdf">Paper PDF</a>
+          <a class="button" href="publication_materials/wcci2026-poster-a0-portrait.pptx">Poster PPTX</a>
+          <a class="button" href="slides/">Slidev</a>
+          <a class="button" href="publication_materials/dataset_two_moons.csv" download>Two Moons CSV</a>
+          <a class="button" href="publication_materials/dataset_concentric_circle.csv" download>Concentric Circles CSV</a>
+          <a class="button" href="WEB_VERSION_SCIENTIFIC_STUDY.md">Web Report</a>
+          <a class="button" href="https://github.com/tzf230201/fpga_gng">GitHub</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container centered">
+      <p>Supported by JST Moonshot R&amp;D Program, grant JPMJMS2034.</p>
+      <p class="credit">Project page style inspired by modern academic project pages.</p>
+    </div>
+  </footer>
+</body>
+</html>

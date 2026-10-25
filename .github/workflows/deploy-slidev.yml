@@ -26,48 +26,34 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: slidev/package-lock.json
+          cache-dependency-path: web_page/slidev/package-lock.json
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
       - name: Install dependencies
         run: npm ci
-        working-directory: slidev
+        working-directory: web_page/slidev
 
       - name: Prepare website shell
+        working-directory: web_page
         run: |
           rm -rf out
           mkdir -p out
-          cp -R web/. out/
-
-          if [ -f WEB_VERSION_SCIENTIFIC_STUDY.md ]; then
-            cp WEB_VERSION_SCIENTIFIC_STUDY.md out/WEB_VERSION_SCIENTIFIC_STUDY.md
-          fi
-
-          if [ -d images ]; then
-            mkdir -p out/images
-            cp -R images/. out/images/
-          fi
-
-          mkdir -p out/WCCI2026_5
-          if [ -f WCCI2026_5/main.pdf ]; then cp WCCI2026_5/main.pdf out/WCCI2026_5/main.pdf; fi
-          if [ -f WCCI2026_5/poster.pdf ]; then cp WCCI2026_5/poster.pdf out/WCCI2026_5/poster.pdf; fi
-          if [ -f "WCCI2026_5/WCCI2026-Poster-A0-Portrait (3).pptx" ]; then cp "WCCI2026_5/WCCI2026-Poster-A0-Portrait (3).pptx" out/WCCI2026_5/wcci2026-poster-a0-portrait.pptx; fi
-          if [ -f WCCI2026_5/wcci2026_poster_web_preview.png ]; then cp WCCI2026_5/wcci2026_poster_web_preview.png out/WCCI2026_5/wcci2026_poster_web_preview.png; fi
-          if [ -f WCCI2026_5/problem.png ]; then cp WCCI2026_5/problem.png out/WCCI2026_5/problem.png; fi
-          if [ -f WCCI2026_5/two_moons_result.png ]; then cp WCCI2026_5/two_moons_result.png out/WCCI2026_5/two_moons_result.png; fi
-          if [ -f WCCI2026_5/concentric_circles_result.png ]; then cp WCCI2026_5/concentric_circles_result.png out/WCCI2026_5/concentric_circles_result.png; fi
-          if [ -f WCCI2026_5/two_moons_training.png ]; then cp WCCI2026_5/two_moons_training.png out/WCCI2026_5/two_moons_training.png; fi
+          cp index.html styles.css README.md WEB_VERSION_SCIENTIFIC_STUDY.md out/
+          cp -R images out/
+          mkdir -p out/publication_materials
+          cp -R publication_materials/published/. out/publication_materials/
+          cp publication_materials/dataset_two_moons.csv publication_materials/dataset_concentric_circle.csv out/publication_materials/
 
       - name: Build Slidev
         run: npm run build:gh
-        working-directory: slidev
+        working-directory: web_page/slidev
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: out
+          path: web_page/out
 
   deploy:
     environment:

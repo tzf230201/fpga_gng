@@ -1,41 +1,81 @@
 # fpga_gng
 
+Growing Neural Gas (GNG) implementations on a low-cost Gowin FPGA (Tang Nano 9K), using RISC-V soft-core CPUs (PicoRV32 and NEORV32) and VHDL hardware accelerators.
+
 **[View Project Website](https://tzf230201.github.io/fpga_gng/)**
 
 **[View Presentation Slides](https://tzf230201.github.io/fpga_gng/slides/)**
 
-# 📘 **README – Build & Flash Firmware on Windows Using MSYS2 + MinGW64 + xPack RISC-V Toolchain**
+All webpage materials are in [`web_page/`](web_page/), including the project page, images, publication downloads, Slidev sources, and web report. See the [webpage guide](web_page/README.md) for the folder layout and build instructions.
 
-This tutorial explains how to:
+![GNG result on the Two Moons dataset after 30 epochs on the FPGA](web_page/images/image.png)
 
-1. Install **MSYS2** on Windows
-2. Install **MinGW64 build tools**
-3. Install **Python (MinGW64)**
-4. Install **pyserial**
-5. Install **xPack RISC-V Embedded GCC** (required for RISC-V firmware compilation)
-6. Configure the Makefile to use the correct Python interpreter
-7. Build the firmware
-8. Flash the firmware using `make program`
-9. Install processing 4.4.10
-10. Use dataset form processing_gng_dataset folder
+# 📁 GNG Implementations
 
-This documentation is intended for the **fpga_gng/picotiny** project.
+| Folder | Description |
+| ------ | ----------- |
+| [`gng_neorv32`](gng_neorv32/) | Full CPU GNG on embedded (GNG runs entirely as firmware on the NEORV32 RISC-V CPU) |
+| [`gng_neorv32_accelerator_V2`](gng_neorv32_accelerator_V2/) | Full FPGA GNG (GNG implemented entirely in VHDL) |
+| [`gng_neorv32_accelerator_V3`](gng_neorv32_accelerator_V3/) | Combination of FPGA and CPU GNG (hardware-software co-design) |
+
+# Datasets
+
+The experiment datasets are available directly in [`web_page/publication_materials/`](web_page/publication_materials/):
+
+- [Two Moons CSV](web_page/publication_materials/dataset_two_moons.csv)
+- [Concentric Circles CSV](web_page/publication_materials/dataset_concentric_circle.csv)
+
+These files are copied from [`experiment_logs/`](web_page/publication_materials/experiment_logs/). The original Concentric Circles file is named `dataset_concentric_circles.csv`.
+
+# 📄 Citation
+
+If you use this work, please cite:
+
+> T. Z. Fatahillah, R. A. Rochmanto, A. F. Aji, A. Risnumawan, C. Z. Siow, and N. Kubota, "Edge-Cell Graph Encoding and Fixed-Point Arithmetic for FPGA Growing Neural Gas," in *2026 International Joint Conference on Neural Networks (IJCNN)*, 2026, doi: [10.1109/IJCNN69854.2026.11728420](https://doi.org/10.1109/IJCNN69854.2026.11728420).
+
+```bibtex
+@inproceedings{fatahillah2026edgecell,
+  author    = {Fatahillah, Teuku Zikri and Rochmanto, Raditya Artha and Aji, Achmad Fahrul and Risnumawan, Anhar and Siow, Chyan Zheng and Kubota, Naoyuki},
+  title     = {Edge-Cell Graph Encoding and Fixed-Point Arithmetic for {FPGA} Growing Neural Gas},
+  booktitle = {2026 International Joint Conference on Neural Networks (IJCNN)},
+  year      = {2026},
+  doi       = {10.1109/IJCNN69854.2026.11728420}
+}
+```
 
 ---
-![alt text](image.png)
+
+# 📘 Build & Flash Firmware on Windows (MSYS2 + MinGW64 + xPack RISC-V Toolchain)
+
+This guide applies to the [`gng_picotiny`](gng_picotiny/) (PicoRV32) project and covers:
+
+1. Installing **MSYS2**
+2. Updating the MSYS2 package database
+3. Installing the **MinGW64 build tools**
+4. Installing **Python (MinGW64)**
+5. Installing **pyserial**
+6. Installing the **xPack RISC-V Embedded GCC** toolchain
+7. Cloning the repository
+8. Configuring the Makefile to use the correct Python interpreter
+9. Building the firmware
+10. Flashing the firmware with `make program`
+11. Visualizing the results with **Processing 4.4.10**
+
+---
+
 # 🧰 1. Install MSYS2
 
-Download from:
+Download the installer from:
 
 👉 [https://www.msys2.org/](https://www.msys2.org/)
 
-Install using default settings.
+Install it with the default settings.
 
-After installation, **open MSYS2 MinGW64 terminal**, not MSYS or UCRT64.
+After installation, open the **MSYS2 MinGW64** terminal (not MSYS or UCRT64).
 
 ---
 
-# 🔄 2. Update MSYS2 Package Database
+# 🔄 2. Update the MSYS2 Package Database
 
 Run:
 
@@ -43,7 +83,7 @@ Run:
 pacman -Syu
 ```
 
-Close MSYS2 → reopen MinGW64 terminal → run again:
+Close MSYS2, reopen the MinGW64 terminal, and run the same command again:
 
 ```
 pacman -Syu
@@ -51,16 +91,14 @@ pacman -Syu
 
 ---
 
-# 🛠️ 3. Install MinGW64 Build Tools
-
-Install development tools:
+# 🛠️ 3. Install the MinGW64 Build Tools
 
 ```
 pacman -S --needed base-devel
 pacman -S --needed mingw-w64-x86_64-toolchain
 ```
 
-Verify installation:
+Verify the installation:
 
 ```
 make --version
@@ -71,13 +109,11 @@ gcc --version
 
 # 🐍 4. Install Python (MinGW64 Version)
 
-Install Python for MinGW64:
-
 ```
 pacman -S mingw-w64-x86_64-python
 ```
 
-Check:
+Verify the installation:
 
 ```
 /mingw64/bin/python --version
@@ -85,120 +121,99 @@ Check:
 
 ---
 
-# 🔌 5. Install pyserial (Required for Flashing via COM Port)
+# 🔌 5. Install pyserial (Required for Flashing via the COM Port)
 
 ```
 pacman -S mingw-w64-x86_64-python-pyserial
 ```
 
-Test:
+Verify the installation:
 
 ```
 /mingw64/bin/python -c "import serial; print('OK')"
 ```
 
-If it prints “OK”, pyserial is correctly installed.
+If it prints `OK`, pyserial is installed correctly.
 
 ---
 
-# 🧩 6. Install xPack RISC-V Embedded GCC (Required Compiler)
+# 🧩 6. Install the xPack RISC-V Embedded GCC (Required Compiler)
 
-Download from:
+Download the toolchain from:
 
-👉 [https://xpack.github.io/riscv-none-embed-gcc/](https://xpack.github.io/riscv-none-embed-gcc/)
+👉 [https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases](https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases)
 
-Choose the Windows `.zip` release (not installer).
-
-Example folder path after extraction:
+Choose the Windows `.zip` release (not an installer) and extract it, for example to:
 
 ```
-C:\xpack-riscv-none-embed-gcc\bin
+C:\xpack-riscv-none-elf-gcc-15.2.0-1
 ```
 
-Add this folder to PATH inside MSYS2.
-Edit your `~/.bashrc`:
+This is the default `RISCV_PATH` in the Makefile. If you extract it somewhere else, update `RISCV_PATH` in [gng_picotiny/Makefile](gng_picotiny/Makefile) or pass it on the command line (`make RISCV_PATH=...`).
+
+Then add the `bin` folder to your PATH inside MSYS2. Open `~/.bashrc`:
 
 ```
 nano ~/.bashrc
 ```
 
-Add:
+Add this line:
 
 ```
-export PATH="/c/xpack-riscv-none-embed-gcc/bin:$PATH"
+export PATH="/c/xpack-riscv-none-elf-gcc-15.2.0-1/bin:$PATH"
 ```
 
-Reload:
+Reload the file:
 
 ```
 source ~/.bashrc
 ```
 
-Check:
+Verify the installation:
 
 ```
 riscv-none-elf-gcc --version
 ```
 
-You should see xPack GCC version info.
+You should see the xPack GCC version information.
 
 ---
 
 # 📂 7. Clone the Repository
 
 ```
-git clone https://github.com/yourname/fpga_gng.git
-cd fpga_gng/picotiny
+git clone https://github.com/tzf230201/fpga_gng.git
+cd fpga_gng/gng_picotiny
 ```
 
 ---
 
-# 🐍 8. Configure Makefile to Use the Correct Python
+# 🐍 8. Configure the Makefile to Use the Correct Python
 
-MSYS2 has two Python versions:
+MSYS2 provides two Python interpreters:
 
 | Interpreter        | Path                  | pyserial support |
 | ------------------ | --------------------- | ---------------- |
-| **MSYS Python**    | `/usr/bin/python`     | ❌ does NOT work  |
+| **MSYS Python**    | `/usr/bin/python`     | ❌ does not work |
 | **MinGW64 Python** | `/mingw64/bin/python` | ✔ works          |
 
-Edit the Makefile:
-
-Find:
+The Makefile must use the MinGW64 interpreter. [gng_picotiny/Makefile](gng_picotiny/Makefile) already sets it by default:
 
 ```
-PYTHON = python
+PYTHON_NAME ?= /mingw64/bin/python
 ```
 
-Replace with:
+If your Python is installed elsewhere, change this line or override it on the command line (see step 10).
 
-```
-PYTHON = /mingw64/bin/python
-```
-
-Or (recommended):
-
-```
-PYTHON ?= /mingw64/bin/python
-```
-
-install pyserial
-
-```
-pacman -S mingw-w64-x86_64-python-pyserial
-
-```
 ---
 
 # 🏗️ 9. Build the Firmware
-
-Run:
 
 ```
 make
 ```
 
-The compiled bitstream will be generated in:
+The firmware image is generated at:
 
 ```
 fw/fw-flash/build/fw-flash.v
@@ -208,36 +223,49 @@ fw/fw-flash/build/fw-flash.v
 
 # 🔥 10. Flash the Firmware
 
-Connect your RP2040/PicoTiny board via USB (COM port).
-
-Run:
+Connect your RP2040/PicoTiny board via USB (COM port), then run:
 
 ```
-make program
+make program COMx=COM14
 ```
 
-If needed, override Python manually:
+Replace `COM14` with your actual port (the default is `COM1`).
+
+If needed, override the Python interpreter as well:
 
 ```
-make PYTHON=/mingw64/bin/python program
+make PYTHON_NAME=/mingw64/bin/python COMx=COM14 program
 ```
 
-Or directly:
+Or run the programmer script directly:
 
 ```
 /mingw64/bin/python sw/pico-programmer.py fw/fw-flash/build/fw-flash.v COM14
 ```
 
-Change `COM1` to your actual port.
+---
 
-# GNG Result in FPGA (PicoRV32)
+# 📊 11. Visualize with Processing
 
-![alt text](images/Figure_1.png)
+Install [Processing 4.4.10](https://processing.org/download), then open the sketch in the `processing_gng_dataset` folder of the implementation you are using (for example [gng_neorv32/processing_gng_dataset](gng_neorv32/processing_gng_dataset/)). Set `PORT_NAME` in the sketch to your COM port before running it. The sketch sends the dataset to the board over UART and plots the GNG result.
 
+---
 
-# neorv32 explanation
+# GNG Result on FPGA (PicoRV32)
 
-you need to get neorv32 first, well currently i'm using v1.12.5
+![GNG result on the PicoRV32 implementation](web_page/images/Figure_1.png)
+
+---
+
+# 🧠 NEORV32 Notes
+
+## About NEORV32
+
+[NEORV32](https://github.com/stnolting/neorv32) is an FPGA-based RISC-V CPU by Stephan Nolting. It is highly customizable: you can choose how many UARTs, PWM outputs, SPI interfaces, and other peripherals the processor includes. These notes describe how it is used on a Gowin FPGA (Tang Nano 9K).
+
+## Getting NEORV32
+
+This project currently uses NEORV32 **v1.12.5**. Clone it into the repository root:
 
 ```
 git clone https://github.com/tzf230201/fpga_gng.git
@@ -245,104 +273,64 @@ cd fpga_gng
 git clone https://github.com/stnolting/neorv32.git
 ```
 
-or use the same version as me, download zip version and extract, and rename the folder to `neorv32`
+To use exactly the same version, download the ZIP from the release page below, extract it into the repository root, and rename the folder to `neorv32`:
 
 ```
 https://github.com/stnolting/neorv32/releases/tag/v1.12.5
 ```
 
-and my reference for implementing neorv32 in tang nano 9k is form this 
+## Building and Uploading the Firmware
 
 ```
-https://github.com/jimmyw/tang_nano_9k_neorv32
-```
-
-but it seemslike the code kind of old version, so several things is not compatible anymore, especially for bootloader.
-
-so i decided to build a new one, i plan to have different direction with mr.jimmyw, i want to make it more arduino like.
-
-btw i also want to give credit to this
-
-```
-https://github.com/grughuhler/picorv32_tang_nano_unified
-```
-
-for the original version of `uart_upload.py`, but, i modify the code based to be compatible with newer bootloader version.
-
-many thanks.
-
-to compile the firmware you can do this
-```
-cd gng_neorv32
-cd fw
+cd gng_neorv32/fw
 make exe
 python3 uart_upload.py /dev/ttyUSB0 neorv32_exe.bin
 ```
 
+On Windows, replace `/dev/ttyUSB0` with your COM port (for example `COM14`).
 
+## Boot Options
 
-let's get back to neorv32,
+NEORV32 is written entirely in VHDL, and the processor design contains no non-volatile memory. A program can therefore be loaded in one of three ways:
 
-so neorv32 is an FPGA based CPU by Mr. Stephan Nolting
-i like it becuse it's super customable, you can make it only have 1 uart or 2 uart, how many pwm output, how many spi and so on.
+| Boot method | Advantage | Disadvantage |
+| ----------- | --------- | ------------ |
+| **UART boot** | Fast: only compile and send over UART | The program is lost when power is removed |
+| **Embedded in HDL** | The program survives a power loss | Slow: every code change requires converting the `.bin` to HDL and re-running synthesis and place-and-route |
+| **External memory** (SPI flash, microSD card, etc.) | The program survives a power loss and can be updated without re-synthesis | Requires an extra memory device |
 
-for now i'm talk about implementing neorv32 in gowin fpga.
+The best option is to store the program in non-volatile memory. Fortunately, Gowin FPGAs include an internal **user flash (UFlash)** that can hold the program uploaded over UART.
 
-but the main problem is, all the code of neorv32 is in VHDL.
-so there is no non-volatile memory inside the design of CPU.
+## Booting from User Flash
 
-so, the only way to program this CPU is to embed it into HDL code. 
+To boot from user flash when no UART upload is in progress, the bootloader in [gng_neorv32/bootloader](gng_neorv32/bootloader/) was modified. It adds an **erase** function, which did not exist before, to clear the flash before a new firmware image is written. `uart_upload.py` was updated accordingly to trigger the erase.
 
-or, boot from external memory, such as, spi flash, uSD card, and so on.
+The most important parameters are:
 
-there is an option to boot via UART, but, right after the power loss,  the instructions gone. 
+1. Base address
+2. Page size
+3. Number of UFlash pages
 
+These values must match the UFlash configuration in the top-level VHDL file. When porting to another board, update both files.
 
-if we embed to hdl it's okay, the boot will still there even though power loss, but the problem is when we change the code, we need to sinthesize again and over again, this take so much time compare to compile via UART.
+In [gng_neorv32/bootloader/main.c](gng_neorv32/bootloader/main.c):
 
-so for UART boot:
-adventage: faster, only compile and send via uart time consuming
-disadvantage: the code gone when power loss.
-
-for HDL embed boot:
-advantange: the code still there when power loss
-disadventage: slower, time consuming to convert .bin to hdl + re-synthesis and re-"place and root" the hdl files.
-
-so what is the best way for now?
-
-we need an external memory for store the instruction.
-
-fortunately, gowin FPGA came with user flash memory, we can use that to store code from UART. 
-
-but another problem is, how to make it boot from user flash if uart not exist.
-
-so we modified the bootloader, you can see "erase" function, that didn't exist before,
-we need that to clean up the memory before overwrite newer firmware on it, 
-
-the most important things is 
-1. base address
-2. page size
-3. uflash num pages.
-
-these value is related to in uflash configuration in the top vhdl file.
-if we use another board, we have to change the size in boorloader main.c file
 ```
 #define UFLASH_BASE_ADDR  ((uint32_t)0x00000000u)
 #define UFLASH_PAGE_SIZE  ((uint32_t)2048u)
 #define UFLASH_NUM_PAGES  ((uint32_t)38u)
 ```
-and file and in the top vhdl file.
+
+In the top-level VHDL file ([gng_neorv32/gng_gowin_project/src/tang_nano_9k.vhd](gng_neorv32/gng_gowin_project/src/tang_nano_9k.vhd)):
 
 ```
     UFLASH_BASE : std_logic_vector(31 downto 0) := x"00000000";
     UFLASH_END : std_logic_vector(31 downto 0) :=  x"00013000" -- 38 pages * 2048 bytes
 ```
 
-because of that, the uart_upload.py have to change, we need to add erase function.
+## Memory Size Configuration
 
-
-anyway, about the firmware, we have to adjust the rom (imem) and ram (dmem) size in the makefile according to our settings in vhdl. because we are using uflash right now, in top vhdl file, imem side is 0, but rom size follow uflash size.
-
+The ROM (IMEM) and RAM (DMEM) sizes in the firmware makefile ([gng_neorv32/fw/makefile](gng_neorv32/fw/makefile)) must match the VHDL settings. Because the program runs from user flash, the IMEM size in the top-level VHDL file is 0, and the ROM size follows the UFlash size instead.
 
 ```
 # Adjust processor IMEM size
@@ -351,3 +339,10 @@ USER_FLAGS += -Wl,--defsym,__neorv32_rom_size=72k
 # Adjust processor DMEM size
 USER_FLAGS += -Wl,--defsym,__neorv32_ram_size=16k
 ```
+
+## Credits
+
+- [jimmyw/tang_nano_9k_neorv32](https://github.com/jimmyw/tang_nano_9k_neorv32) was the reference for running NEORV32 on the Tang Nano 9K. Parts of it are no longer compatible with newer NEORV32 versions (especially the bootloader), so this project builds a new setup that aims to be more Arduino-like.
+- [grughuhler/picorv32_tang_nano_unified](https://github.com/grughuhler/picorv32_tang_nano_unified) provided the original version of `uart_upload.py`, which was modified here to work with the newer bootloader.
+
+Many thanks to both authors.
