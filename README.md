@@ -6,7 +6,6 @@ Growing Neural Gas (GNG) implementations on a low-cost Gowin FPGA (Tang Nano 9K)
 
 **[View Presentation Slides](https://tzf230201.github.io/fpga_gng/slides/)**
 
-All webpage materials are in [`web_page/`](web_page/), including the project page, images, publication downloads, Slidev sources, and web report. See the [webpage guide](web_page/README.md) for the folder layout and build instructions.
 
 ![GNG result on the Two Moons dataset after 30 epochs on the FPGA](web_page/images/image.png)
 
