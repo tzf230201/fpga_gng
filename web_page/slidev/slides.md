@@ -929,7 +929,9 @@ class: gng-slide thanks
     <p><a href="http://neupy.com/2018/03/26/making_art_with_growing_neural_gas.html">Topology extraction for art</a></p>
     <p><a href="https://www.nature.com/articles/s41598-022-19599-2">Engineering and semantic mapping</a></p>
     <p class="muted">Figure credits appear in the relevant speaker notes.</p>
+    <h2>Open-source hardware</h2>
+    <p><a href="https://github.com/stnolting/neorv32">NEORV32</a>, created by <a href="https://github.com/stnolting">Stephan Nolting (stnolting)</a>, is used in this repository's CPU-based and hybrid GNG implementations.</p>
   </div>
 </div>
 
-<!-- Reference presentation: slides 4 and 96. Paper citation from repository README.md. Application sources supplied in the reference deck. -->
+<!-- Reference presentation: slides 4 and 96. Paper citation from repository README.md. Application sources supplied in the reference deck. NEORV32 attribution: local neorv32/LICENSE and upstream project https://github.com/stnolting/neorv32. The measured full-FPGA GNG engine uses a dedicated FSM; this credit refers to the repository's CPU-based and hybrid implementations. -->

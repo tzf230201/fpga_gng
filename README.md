@@ -25,7 +25,6 @@ The experiment datasets are available directly in [`web_page/publication_materia
 - [Two Moons CSV](web_page/publication_materials/dataset_two_moons.csv)
 - [Concentric Circles CSV](web_page/publication_materials/dataset_concentric_circle.csv)
 
-These files are copied from [`experiment_logs/`](web_page/publication_materials/experiment_logs/). The original Concentric Circles file is named `dataset_concentric_circles.csv`.
 
 # 📄 Citation
 
@@ -44,8 +43,9 @@ If you use this work, please cite:
 ```
 
 ---
+# Setup for PicoRV and NeoRV32
 
-# 📘 Build & Flash Firmware on Windows (MSYS2 + MinGW64 + xPack RISC-V Toolchain)
+## 📘 Build & Flash Firmware on Windows (MSYS2 + MinGW64 + xPack RISC-V Toolchain)
 
 This guide applies to the [`gng_picotiny`](gng_picotiny/) (PicoRV32) project and covers:
 
@@ -63,7 +63,7 @@ This guide applies to the [`gng_picotiny`](gng_picotiny/) (PicoRV32) project and
 
 ---
 
-# 🧰 1. Install MSYS2
+### 🧰 1. Install MSYS2
 
 Download the installer from:
 
@@ -75,7 +75,7 @@ After installation, open the **MSYS2 MinGW64** terminal (not MSYS or UCRT64).
 
 ---
 
-# 🔄 2. Update the MSYS2 Package Database
+### 🔄 2. Update the MSYS2 Package Database
 
 Run:
 
@@ -91,7 +91,7 @@ pacman -Syu
 
 ---
 
-# 🛠️ 3. Install the MinGW64 Build Tools
+### 🛠️ 3. Install the MinGW64 Build Tools
 
 ```
 pacman -S --needed base-devel
@@ -107,7 +107,7 @@ gcc --version
 
 ---
 
-# 🐍 4. Install Python (MinGW64 Version)
+### 🐍 4. Install Python (MinGW64 Version)
 
 ```
 pacman -S mingw-w64-x86_64-python
@@ -121,7 +121,7 @@ Verify the installation:
 
 ---
 
-# 🔌 5. Install pyserial (Required for Flashing via the COM Port)
+### 🔌 5. Install pyserial (Required for Flashing via the COM Port)
 
 ```
 pacman -S mingw-w64-x86_64-python-pyserial
@@ -137,7 +137,7 @@ If it prints `OK`, pyserial is installed correctly.
 
 ---
 
-# 🧩 6. Install the xPack RISC-V Embedded GCC (Required Compiler)
+### 🧩 6. Install the xPack RISC-V Embedded GCC (Required Compiler)
 
 Download the toolchain from:
 
@@ -179,7 +179,7 @@ You should see the xPack GCC version information.
 
 ---
 
-# 📂 7. Clone the Repository
+### 📂 7. Clone the Repository
 
 ```
 git clone https://github.com/tzf230201/fpga_gng.git
@@ -188,7 +188,7 @@ cd fpga_gng/gng_picotiny
 
 ---
 
-# 🐍 8. Configure the Makefile to Use the Correct Python
+### 🐍 8. Configure the Makefile to Use the Correct Python
 
 MSYS2 provides two Python interpreters:
 
@@ -207,7 +207,7 @@ If your Python is installed elsewhere, change this line or override it on the co
 
 ---
 
-# 🏗️ 9. Build the Firmware
+### 🏗️ 9. Build the Firmware
 
 ```
 make
@@ -221,7 +221,7 @@ fw/fw-flash/build/fw-flash.v
 
 ---
 
-# 🔥 10. Flash the Firmware
+### 🔥 10. Flash the Firmware
 
 Connect your RP2040/PicoTiny board via USB (COM port), then run:
 
@@ -245,25 +245,25 @@ Or run the programmer script directly:
 
 ---
 
-# 📊 11. Visualize with Processing
+### 📊 11. Visualize with Processing
 
 Install [Processing 4.4.10](https://processing.org/download), then open the sketch in the `processing_gng_dataset` folder of the implementation you are using (for example [gng_neorv32/processing_gng_dataset](gng_neorv32/processing_gng_dataset/)). Set `PORT_NAME` in the sketch to your COM port before running it. The sketch sends the dataset to the board over UART and plots the GNG result.
 
 ---
 
-# GNG Result on FPGA (PicoRV32)
+## GNG Result on FPGA (PicoRV32)
 
 ![GNG result on the PicoRV32 implementation](web_page/images/Figure_1.png)
 
 ---
 
-# 🧠 NEORV32 Notes
+## 🧠 NEORV32 Notes
 
-## About NEORV32
+### About NEORV32
 
 [NEORV32](https://github.com/stnolting/neorv32) is an FPGA-based RISC-V CPU by Stephan Nolting. It is highly customizable: you can choose how many UARTs, PWM outputs, SPI interfaces, and other peripherals the processor includes. These notes describe how it is used on a Gowin FPGA (Tang Nano 9K).
 
-## Getting NEORV32
+### Getting NEORV32
 
 This project currently uses NEORV32 **v1.12.5**. Clone it into the repository root:
 
@@ -279,7 +279,7 @@ To use exactly the same version, download the ZIP from the release page below, e
 https://github.com/stnolting/neorv32/releases/tag/v1.12.5
 ```
 
-## Building and Uploading the Firmware
+### Building and Uploading the Firmware
 
 ```
 cd gng_neorv32/fw
@@ -289,7 +289,7 @@ python3 uart_upload.py /dev/ttyUSB0 neorv32_exe.bin
 
 On Windows, replace `/dev/ttyUSB0` with your COM port (for example `COM14`).
 
-## Boot Options
+### Boot Options
 
 NEORV32 is written entirely in VHDL, and the processor design contains no non-volatile memory. A program can therefore be loaded in one of three ways:
 
@@ -301,7 +301,7 @@ NEORV32 is written entirely in VHDL, and the processor design contains no non-vo
 
 The best option is to store the program in non-volatile memory. Fortunately, Gowin FPGAs include an internal **user flash (UFlash)** that can hold the program uploaded over UART.
 
-## Booting from User Flash
+### Booting from User Flash
 
 To boot from user flash when no UART upload is in progress, the bootloader in [gng_neorv32/bootloader](gng_neorv32/bootloader/) was modified. It adds an **erase** function, which did not exist before, to clear the flash before a new firmware image is written. `uart_upload.py` was updated accordingly to trigger the erase.
 
@@ -328,7 +328,7 @@ In the top-level VHDL file ([gng_neorv32/gng_gowin_project/src/tang_nano_9k.vhd]
     UFLASH_END : std_logic_vector(31 downto 0) :=  x"00013000" -- 38 pages * 2048 bytes
 ```
 
-## Memory Size Configuration
+### Memory Size Configuration
 
 The ROM (IMEM) and RAM (DMEM) sizes in the firmware makefile ([gng_neorv32/fw/makefile](gng_neorv32/fw/makefile)) must match the VHDL settings. Because the program runs from user flash, the IMEM size in the top-level VHDL file is 0, and the ROM size follows the UFlash size instead.
 
@@ -342,7 +342,8 @@ USER_FLAGS += -Wl,--defsym,__neorv32_ram_size=16k
 
 ## Credits
 
+- [Stephan Nolting (stnolting)](https://github.com/stnolting) created [NEORV32](https://github.com/stnolting/neorv32), the RISC-V soft-core used in this repository's CPU-based and hybrid GNG implementations.
 - [jimmyw/tang_nano_9k_neorv32](https://github.com/jimmyw/tang_nano_9k_neorv32) was the reference for running NEORV32 on the Tang Nano 9K. Parts of it are no longer compatible with newer NEORV32 versions (especially the bootloader), so this project builds a new setup that aims to be more Arduino-like.
 - [grughuhler/picorv32_tang_nano_unified](https://github.com/grughuhler/picorv32_tang_nano_unified) provided the original version of `uart_upload.py`, which was modified here to work with the newer bootloader.
 
-Many thanks to both authors.
+Many thanks to all contributors.
