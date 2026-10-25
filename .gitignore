@@ -1,19 +1,24 @@
-# Ignore local NEORV32 sources (use as submodule / external dependency instead)
-neorv32/
-neorv32/**
+# Local external dependency
+/neorv32/
 
 # VS Code settings
 .vscode/
-.idea/
-.fleet/
 
 # Build / synthesis / simulation outputs
 **/build/
 **/out/
 **/dist/
 **/tmp/
-**/*.log
-**/*.tmp
+*.log
+*.tmp
+/web_page/publication_materials/_poster_v4_assets/
+
+# LaTeX build intermediates
+*.aux
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
 
 # Python
 __pycache__/
@@ -29,8 +34,3 @@ pnpm-debug.log*
 # OS files
 Thumbs.db
 .DS_Store
-
-# Research papers and reports (work in progress)
-**/IJCNN_2026_Report.md
-**/IJCNN_*.md
-**/*_Report.md
